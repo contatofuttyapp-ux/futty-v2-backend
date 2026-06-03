@@ -452,6 +452,25 @@ function snakeDraft(players, numTimes) {
   return teams;
 }
 
+// Baralha um array in-place (Fisher-Yates).
+function fisherYates(arr) {
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+// Ordena por rating desc; dentro de jogadores com o MESMO rating a ordem é
+// aleatória. Baralha primeiro (Fisher-Yates) e depois faz um sort estável por
+// rating — como o sort do JS é estável, a ordem aleatória mantém-se em empates.
+// Assim "Sortear novamente" dá times diferentes mesmo com ratings iguais.
+function orderByRatingDesc(players) {
+  const arr = fisherYates(players.slice());
+  arr.sort((a, b) => b.rating - a.rating);
+  return arr;
+}
+
 // Carrega um jogo com a sua equipa
 async function loadGame(id) {
   const { data } = await supabase
@@ -700,14 +719,9 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
   });
 
   // Separar goleiros dos jogadores de linha, ordenar por rating desc
-  const goleiros = confirmados
-    .filter((p) => p.goleiro)
-    .map(toPlayer)
-    .sort((a, b) => b.rating - a.rating);
-  const linha = confirmados
-    .filter((p) => !p.goleiro)
-    .map(toPlayer)
-    .sort((a, b) => b.rating - a.rating);
+  // (com desempate aleatório dentro do mesmo rating)
+  const goleiros = orderByRatingDesc(confirmados.filter((p) => p.goleiro).map(toPlayer));
+  const linha = orderByRatingDesc(confirmados.filter((p) => !p.goleiro).map(toPlayer));
 
   // Cabeças de chave distribuídos via snake draft (melhores espalhados pelos times)
   const teamsArr = snakeDraft(linha, numTimes);
