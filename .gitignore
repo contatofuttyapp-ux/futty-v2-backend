@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NUNCA commitar)
+.env
+.env.*
+!.env.example
+
+# Dados locais
+data/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS / Editor
+.DS_Store
+.vscode/*
+.idea/
