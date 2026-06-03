@@ -28,9 +28,13 @@ create table if not exists public.teams (
   id          uuid primary key default gen_random_uuid(),
   nome        text not null,
   slug        text unique not null,
+  cor         text not null default 'verde' check (cor in ('verde', 'azul', 'vermelho', 'preto')),
   criado_por  uuid not null references public.users (id) on delete cascade,
   created_at  timestamptz not null default now()
 );
+
+-- Migração para tabelas já existentes (adiciona a coluna cor se faltar)
+alter table public.teams add column if not exists cor text not null default 'verde';
 
 -- ---------------------------------------------------------------------
 -- TABELA: team_members
