@@ -8,10 +8,15 @@
 create extension if not exists "pgcrypto";
 
 -- Novos campos na tabela games
-alter table public.games add column if not exists num_times          smallint not null default 2;
+alter table public.games add column if not exists num_times          smallint;
 alter table public.games add column if not exists jogadores_por_time smallint;
 alter table public.games add column if not exists sorteio_realizado  boolean not null default false;
 alter table public.games add column if not exists times_resultado    jsonb;
+
+-- num_times é calculado no sorteio: torna-o opcional e remove a constraint de intervalo
+alter table public.games alter column num_times drop not null;
+alter table public.games alter column num_times drop default;
+alter table public.games drop constraint if exists games_num_times_check;
 
 -- Ajusta a constraint de status (agendado/em_curso/terminado/cancelado)
 alter table public.games drop constraint if exists games_status_check;

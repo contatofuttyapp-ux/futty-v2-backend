@@ -475,10 +475,15 @@ async function getRole(teamId, userId) {
 
 // POST /api/games — criar jogo (só admin da equipa)
 app.post('/api/games', requireAuth, async (req, res) => {
-  const { team_slug, data, local, num_times, jogadores_por_time } = req.body || {};
+  const { team_slug, data, local, jogadores_por_time } = req.body || {};
 
   if (!team_slug || !data) {
     return res.status(400).json({ error: 'Equipa e data são obrigatórias.' });
+  }
+
+  const porTime = parseInt(jogadores_por_time, 10);
+  if (!porTime || porTime < 1) {
+    return res.status(400).json({ error: 'Indica quantos jogadores por time.' });
   }
 
   const { data: team } = await supabase
@@ -496,16 +501,13 @@ app.post('/api/games', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'Só admins podem criar jogos.' });
   }
 
-  const numTimes = Math.min(Math.max(parseInt(num_times, 10) || 2, 2), 6);
-  const porTime = jogadores_por_time ? parseInt(jogadores_por_time, 10) : null;
-
+  // num_times fica por definir; é calculado no sorteio conforme os confirmados.
   const { data: game, error } = await supabase
     .from('games')
     .insert({
       team_id: team.id,
       data: new Date(data).toISOString(),
       local: local?.trim() || null,
-      num_times: numTimes,
       jogadores_por_time: porTime,
     })
     .select()
@@ -537,7 +539,7 @@ app.get('/api/teams/:slug/games', requireAuth, async (req, res) => {
 
   const { data: games, error } = await supabase
     .from('games')
-    .select('id, data, local, status, num_times, sorteio_realizado, created_at')
+    .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, created_at')
     .eq('team_id', team.id)
     .order('data', { ascending: false });
 
@@ -663,6 +665,11 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
     return res.status(403).json({ error: 'Só admins podem fazer o sorteio.' });
   }
 
+  const porTime = game.jogadores_por_time;
+  if (!porTime || porTime < 1) {
+    return res.status(400).json({ error: 'Define os jogadores por time antes de sortear.' });
+  }
+
   // Jogadores confirmados
   const { data: gp } = await supabase
     .from('game_players')
@@ -671,9 +678,14 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
     .eq('confirmado', true);
 
   const confirmados = (gp || []).filter((p) => p.users);
-  if (confirmados.length < game.num_times) {
+
+  // Nº de times calculado automaticamente: confirmados / jogadores por time.
+  // Os jogadores que sobram são distribuídos pelos times existentes (snake draft),
+  // sem criar um time incompleto.
+  const numTimes = Math.floor(confirmados.length / porTime);
+  if (numTimes < 2) {
     return res.status(400).json({
-      error: `São precisos pelo menos ${game.num_times} jogadores confirmados para sortear ${game.num_times} times.`,
+      error: `São precisos pelo menos ${porTime * 2} jogadores confirmados (${porTime} por time) para formar 2 times. Há ${confirmados.length} confirmados.`,
     });
   }
 
@@ -696,8 +708,6 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
     .filter((p) => !p.goleiro)
     .map(toPlayer)
     .sort((a, b) => b.rating - a.rating);
-
-  const numTimes = game.num_times;
 
   // Cabeças de chave distribuídos via snake draft (melhores espalhados pelos times)
   const teamsArr = snakeDraft(linha, numTimes);
@@ -727,7 +737,12 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
 
   const { data: updated, error } = await supabase
     .from('games')
-    .update({ sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
+    .update({
+      num_times: numTimes,
+      sorteio_realizado: true,
+      times_resultado: resultado,
+      status: 'em_curso',
+    })
     .eq('id', game.id)
     .select()
     .single();
@@ -736,7 +751,15 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
     return res.status(500).json({ error: error.message });
   }
 
-  res.json({ game: { id: updated.id, sorteio_realizado: true, times_resultado: resultado, status: updated.status } });
+  res.json({
+    game: {
+      id: updated.id,
+      num_times: numTimes,
+      sorteio_realizado: true,
+      times_resultado: resultado,
+      status: updated.status,
+    },
+  });
 });
 
 const port = PORT || 3001;
