@@ -51,16 +51,20 @@ create table if not exists public.team_members (
 
 -- ---------------------------------------------------------------------
 -- TABELA: games
--- status: 'agendado' | 'a_decorrer' | 'terminado' | 'cancelado'
+-- status: 'agendado' | 'em_curso' | 'terminado' | 'cancelado'
 -- ---------------------------------------------------------------------
 create table if not exists public.games (
-  id          uuid primary key default gen_random_uuid(),
-  team_id     uuid not null references public.teams (id) on delete cascade,
-  data        timestamptz not null,
-  local       text,
-  status      text not null default 'agendado'
-              check (status in ('agendado', 'a_decorrer', 'terminado', 'cancelado')),
-  created_at  timestamptz not null default now()
+  id                  uuid primary key default gen_random_uuid(),
+  team_id             uuid not null references public.teams (id) on delete cascade,
+  data                timestamptz not null,
+  local               text,
+  num_times           smallint not null default 2 check (num_times between 2 and 6),
+  jogadores_por_time  smallint,
+  status              text not null default 'agendado'
+                      check (status in ('agendado', 'em_curso', 'terminado', 'cancelado')),
+  sorteio_realizado   boolean not null default false,
+  times_resultado     jsonb,
+  created_at          timestamptz not null default now()
 );
 
 -- ---------------------------------------------------------------------
@@ -261,6 +265,80 @@ create policy "convites_delete_admin" on public.convites for delete
 
 -- O backend usa a service_role (faz bypass da RLS) mas precisa do GRANT
 grant all privileges on public.convites to service_role;
+
+-- =====================================================================
+-- FASE 5 — Sorteio de times
+-- =====================================================================
+
+-- Migração da tabela games para BDs já existentes (idempotente)
+alter table public.games add column if not exists num_times          smallint not null default 2;
+alter table public.games add column if not exists jogadores_por_time smallint;
+alter table public.games add column if not exists sorteio_realizado  boolean not null default false;
+alter table public.games add column if not exists times_resultado    jsonb;
+
+-- Ajusta a constraint de status (agendado/em_curso/terminado/cancelado)
+alter table public.games drop constraint if exists games_status_check;
+alter table public.games add constraint games_status_check
+  check (status in ('agendado', 'em_curso', 'terminado', 'cancelado'));
+
+-- ---------------------------------------------------------------------
+-- TABELA: game_players — jogadores confirmados num jogo
+-- ---------------------------------------------------------------------
+create table if not exists public.game_players (
+  id          uuid primary key default gen_random_uuid(),
+  game_id     uuid not null references public.games (id) on delete cascade,
+  user_id     uuid not null references public.users (id) on delete cascade,
+  confirmado  boolean not null default true,
+  goleiro     boolean not null default false,
+  created_at  timestamptz not null default now(),
+  unique (game_id, user_id)
+);
+
+create index if not exists idx_game_players_game on public.game_players (game_id);
+create index if not exists idx_game_players_user on public.game_players (user_id);
+
+-- RLS
+alter table public.game_players enable row level security;
+
+-- Função auxiliar: o jogo pertence a uma equipa de que sou membro/admin?
+create or replace function public.is_game_member(_game_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select public.is_team_member((select team_id from public.games g where g.id = _game_id));
+$$;
+
+create or replace function public.is_game_admin(_game_id uuid)
+returns boolean
+language sql
+security definer
+set search_path = public
+as $$
+  select public.is_team_admin((select team_id from public.games g where g.id = _game_id));
+$$;
+
+drop policy if exists "game_players_select_member" on public.game_players;
+drop policy if exists "game_players_insert_self"   on public.game_players;
+drop policy if exists "game_players_update_self"   on public.game_players;
+drop policy if exists "game_players_delete_self"   on public.game_players;
+
+-- Membros da equipa veem os jogadores do jogo
+create policy "game_players_select_member" on public.game_players for select
+  using (public.is_game_member(game_id));
+-- Cada um confirma-se a si próprio; admin pode gerir
+create policy "game_players_insert_self" on public.game_players for insert
+  with check (user_id = auth.uid() or public.is_game_admin(game_id));
+create policy "game_players_update_self" on public.game_players for update
+  using (user_id = auth.uid() or public.is_game_admin(game_id))
+  with check (user_id = auth.uid() or public.is_game_admin(game_id));
+create policy "game_players_delete_self" on public.game_players for delete
+  using (user_id = auth.uid() or public.is_game_admin(game_id));
+
+-- O backend usa a service_role (faz bypass da RLS) mas precisa do GRANT
+grant all privileges on public.games        to service_role;
+grant all privileges on public.game_players to service_role;
 
 -- =====================================================================
 -- FIM
