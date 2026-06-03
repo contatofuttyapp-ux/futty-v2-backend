@@ -598,7 +598,7 @@ app.get('/api/games/:id', requireAuth, async (req, res) => {
 
   const { data: gp } = await supabase
     .from('game_players')
-    .select('confirmado, goleiro, users ( id, nome, email )')
+    .select('confirmado, goleiro, cabeca_chave, users ( id, nome, email )')
     .eq('game_id', game.id);
 
   const userIds = (gp || []).map((p) => p.users?.id).filter(Boolean);
@@ -611,10 +611,19 @@ app.get('/api/games/:id', requireAuth, async (req, res) => {
       nome: p.users.nome || p.users.email,
       confirmado: p.confirmado,
       goleiro: p.goleiro,
+      cabeca_chave: p.cabeca_chave,
       rating: Math.round((ratings[p.users.id] ?? RATING_DEFAULT) * 10) / 10,
     }));
 
   const meu = players.find((p) => p.user_id === req.user.id) || null;
+
+  // Já votei neste jogo?
+  const { count: votosCount } = await supabase
+    .from('votes')
+    .select('id', { count: 'exact', head: true })
+    .eq('game_id', game.id)
+    .eq('de_user_id', req.user.id);
+  const jaVotei = (votosCount || 0) > 0;
 
   const team = game.teams;
   res.json({
@@ -630,8 +639,53 @@ app.get('/api/games/:id', requireAuth, async (req, res) => {
       times_resultado: game.times_resultado,
     },
     players,
-    meuEstado: meu ? { confirmado: meu.confirmado, goleiro: meu.goleiro } : null,
+    meuEstado: meu
+      ? { confirmado: meu.confirmado, goleiro: meu.goleiro, cabeca_chave: meu.cabeca_chave }
+      : null,
+    jaVotei,
   });
+});
+
+// POST /api/games/:id/jogador — admin marca um jogador como goleiro/cabeça de chave
+app.post('/api/games/:id/jogador', requireAuth, async (req, res) => {
+  const { user_id, goleiro, cabeca_chave } = req.body || {};
+  if (!user_id) {
+    return res.status(400).json({ error: 'user_id em falta.' });
+  }
+
+  const game = await loadGame(req.params.id);
+  if (!game || !game.teams) {
+    return res.status(404).json({ error: 'Jogo não encontrado.' });
+  }
+
+  const role = await getRole(game.teams.id, req.user.id);
+  if (role !== 'admin') {
+    return res.status(403).json({ error: 'Só admins podem marcar jogadores.' });
+  }
+
+  const patch = {};
+  if (typeof goleiro === 'boolean') patch.goleiro = goleiro;
+  if (typeof cabeca_chave === 'boolean') patch.cabeca_chave = cabeca_chave;
+  if (!Object.keys(patch).length) {
+    return res.status(400).json({ error: 'Nada para atualizar.' });
+  }
+
+  const { data: updated, error } = await supabase
+    .from('game_players')
+    .update(patch)
+    .eq('game_id', game.id)
+    .eq('user_id', user_id)
+    .select('user_id, goleiro, cabeca_chave')
+    .maybeSingle();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+  if (!updated) {
+    return res.status(404).json({ error: 'Esse jogador não está confirmado neste jogo.' });
+  }
+
+  res.json({ jogador: updated });
 });
 
 // POST /api/games/:id/confirmar — confirmar/cancelar presença
@@ -692,7 +746,7 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
   // Jogadores confirmados
   const { data: gp } = await supabase
     .from('game_players')
-    .select('goleiro, users ( id, nome, email )')
+    .select('goleiro, cabeca_chave, users ( id, nome, email )')
     .eq('game_id', game.id)
     .eq('confirmado', true);
 
@@ -716,19 +770,49 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
     nome: p.users.nome || p.users.email,
     rating: Math.round((ratings[p.users.id] ?? RATING_DEFAULT) * 10) / 10,
     goleiro: p.goleiro,
+    cabeca_chave: p.cabeca_chave,
   });
 
-  // Separar goleiros dos jogadores de linha, ordenar por rating desc
-  // (com desempate aleatório dentro do mesmo rating)
-  const goleiros = orderByRatingDesc(confirmados.filter((p) => p.goleiro).map(toPlayer));
-  const linha = orderByRatingDesc(confirmados.filter((p) => !p.goleiro).map(toPlayer));
+  const all = confirmados.map(toPlayer);
 
-  // Cabeças de chave distribuídos via snake draft (melhores espalhados pelos times)
-  const teamsArr = snakeDraft(linha, numTimes);
+  // Grupos por prioridade: goleiros -> cabeças de chave -> linha. Ordenados por
+  // rating desc com desempate aleatório (sem votos => ratings iguais => aleatório).
+  const goleiros = orderByRatingDesc(all.filter((p) => p.goleiro));
+  const cabecas = orderByRatingDesc(all.filter((p) => p.cabeca_chave && !p.goleiro));
+  const linhaBase = all.filter((p) => !p.goleiro && !p.cabeca_chave);
 
-  // Goleiros: um por time (round-robin pelos melhores); extras entram à vez
-  goleiros.forEach((g, i) => {
-    teamsArr[i % numTimes].push(g);
+  const teamsArr = Array.from({ length: numTimes }, () => []);
+  const avisos = [];
+
+  // 1) GOLEIROS — um por time (ordem de times aleatória). Excesso vira linha.
+  const goleirosAssign = goleiros.slice(0, numTimes);
+  const goleirosExtra = goleiros.slice(numTimes);
+  fisherYates([...teamsArr]).forEach((time, i) => {
+    if (goleirosAssign[i]) time.push(goleirosAssign[i]);
+  });
+  if (goleiros.length === 0) {
+    avisos.push('Nenhum goleiro marcado — os times ficam sem goleiro definido.');
+  } else if (goleiros.length < numTimes) {
+    avisos.push(
+      `Há ${goleiros.length} goleiro(s) para ${numTimes} times: ${numTimes - goleiros.length} time(s) ficam sem goleiro.`
+    );
+  }
+  if (goleirosExtra.length) {
+    avisos.push(`${goleirosExtra.length} goleiro(s) a mais entram como jogadores de linha.`);
+  }
+
+  // 2) CABEÇAS DE CHAVE — um por time (ordem aleatória). Excesso entra na linha.
+  const cabecasAssign = cabecas.slice(0, numTimes);
+  const cabecasExtra = cabecas.slice(numTimes);
+  fisherYates([...teamsArr]).forEach((time, i) => {
+    if (cabecasAssign[i]) time.push(cabecasAssign[i]);
+  });
+
+  // 3) LINHA (com excessos de goleiros/cabeças) — snake draft por rating desc.
+  const linha = orderByRatingDesc(linhaBase.concat(goleirosExtra, cabecasExtra));
+  const linhaDraft = snakeDraft(linha, numTimes);
+  fisherYates([...teamsArr]).forEach((time, i) => {
+    time.push(...linhaDraft[i]);
   });
 
   const nomesTimes = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
@@ -746,6 +830,7 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
   const resultado = {
     num_times: numTimes,
     total_jogadores: confirmados.length,
+    avisos,
     times,
   };
 
@@ -774,6 +859,136 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
       status: updated.status,
     },
   });
+});
+
+// POST /api/games/:id/votar — votar nos jogadores (1 a 5), uma vez por jogo
+app.post('/api/games/:id/votar', requireAuth, async (req, res) => {
+  const { votos } = req.body || {};
+  if (!Array.isArray(votos) || votos.length === 0) {
+    return res.status(400).json({ error: 'Não há votos para registar.' });
+  }
+
+  const game = await loadGame(req.params.id);
+  if (!game || !game.teams) {
+    return res.status(404).json({ error: 'Jogo não encontrado.' });
+  }
+
+  const role = await getRole(game.teams.id, req.user.id);
+  if (!role) {
+    return res.status(403).json({ error: 'Não és membro desta equipa.' });
+  }
+
+  // Só se pode votar após o jogo (em curso ou terminado)
+  if (game.status !== 'em_curso' && game.status !== 'terminado') {
+    return res.status(400).json({ error: 'A votação abre depois do sorteio do jogo.' });
+  }
+
+  // Um voto por jogo
+  const { count: jaVotou } = await supabase
+    .from('votes')
+    .select('id', { count: 'exact', head: true })
+    .eq('game_id', game.id)
+    .eq('de_user_id', req.user.id);
+  if ((jaVotou || 0) > 0) {
+    return res.status(400).json({ error: 'Já votaste neste jogo.' });
+  }
+
+  // Jogadores confirmados (só se pode votar nestes, e não em si próprio)
+  const { data: gp } = await supabase
+    .from('game_players')
+    .select('user_id')
+    .eq('game_id', game.id)
+    .eq('confirmado', true);
+  const confirmadosIds = new Set((gp || []).map((p) => p.user_id));
+
+  await supabase
+    .from('users')
+    .upsert({ id: req.user.id, email: req.user.email }, { onConflict: 'id' });
+
+  const rows = [];
+  for (const v of votos) {
+    const para = v?.para_user_id;
+    const nota = parseInt(v?.nota, 10);
+    if (!para || para === req.user.id) continue; // não vota em si próprio
+    if (!confirmadosIds.has(para)) continue; // só jogadores confirmados
+    if (!(nota >= 1 && nota <= 5)) continue; // nota válida
+    rows.push({
+      de_user_id: req.user.id,
+      para_user_id: para,
+      team_id: game.teams.id,
+      game_id: game.id,
+      nota,
+    });
+  }
+
+  if (rows.length === 0) {
+    return res.status(400).json({ error: 'Nenhum voto válido (1 a 5, em jogadores confirmados).' });
+  }
+
+  const { error } = await supabase.from('votes').insert(rows);
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.status(201).json({ registados: rows.length });
+});
+
+// GET /api/teams/:slug/ranking — jogadores por média de notas recebidas
+app.get('/api/teams/:slug/ranking', requireAuth, async (req, res) => {
+  const { data: team } = await supabase
+    .from('teams')
+    .select('id, slug, nome, cor')
+    .eq('slug', req.params.slug)
+    .maybeSingle();
+
+  if (!team) {
+    return res.status(404).json({ error: 'Equipa não encontrada.' });
+  }
+
+  const role = await getRole(team.id, req.user.id);
+  if (!role) {
+    return res.status(403).json({ error: 'Não és membro desta equipa.' });
+  }
+
+  // Membros da equipa
+  const { data: membros } = await supabase
+    .from('team_members')
+    .select('users ( id, nome, email )')
+    .eq('team_id', team.id);
+
+  // Agregação dos votos da equipa
+  const { data: votos } = await supabase
+    .from('votes')
+    .select('para_user_id, nota')
+    .eq('team_id', team.id);
+
+  const agg = {};
+  for (const v of votos || []) {
+    if (!agg[v.para_user_id]) agg[v.para_user_id] = { sum: 0, count: 0 };
+    agg[v.para_user_id].sum += v.nota;
+    agg[v.para_user_id].count += 1;
+  }
+
+  const ranking = (membros || [])
+    .filter((m) => m.users)
+    .map((m) => {
+      const a = agg[m.users.id];
+      return {
+        user_id: m.users.id,
+        nome: m.users.nome || m.users.email,
+        votos: a ? a.count : 0,
+        rating: a && a.count ? Math.round((a.sum / a.count) * 100) / 100 : null,
+      };
+    })
+    .sort((x, y) => {
+      // quem tem votos primeiro, por rating desc; depois os sem votos
+      if (x.rating === null && y.rating === null) return x.nome.localeCompare(y.nome);
+      if (x.rating === null) return 1;
+      if (y.rating === null) return -1;
+      return y.rating - x.rating;
+    });
+
+  res.json({ team: { ...team, role }, ranking });
 });
 
 const port = PORT || 3001;

@@ -346,5 +346,23 @@ grant all privileges on public.games        to service_role;
 grant all privileges on public.game_players to service_role;
 
 -- =====================================================================
+-- FASE 6 — Votos, ranking e sorteio inteligente
+-- =====================================================================
+
+-- votes: liga o voto a um jogo; passa a "um voto por jogo" (de->para->game)
+alter table public.votes add column if not exists game_id uuid references public.games (id) on delete cascade;
+alter table public.votes drop constraint if exists votes_de_user_id_para_user_id_team_id_key;
+alter table public.votes drop constraint if exists votes_unique_por_jogo;
+alter table public.votes add constraint votes_unique_por_jogo
+  unique (de_user_id, para_user_id, game_id);
+create index if not exists idx_votes_game on public.votes (game_id);
+
+-- game_players: marcação de cabeça de chave (goleiro já existe)
+alter table public.game_players add column if not exists cabeca_chave boolean not null default false;
+
+-- O backend usa a service_role (faz bypass da RLS) mas precisa do GRANT
+grant all privileges on public.votes to service_role;
+
+-- =====================================================================
 -- FIM
 -- =====================================================================
