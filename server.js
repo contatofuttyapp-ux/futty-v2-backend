@@ -2,6 +2,7 @@
 require('dotenv').config();
 
 const crypto = require('crypto');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -24,6 +25,9 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Ficheiros estáticos (fotos de campeão, etc.) em /uploads
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
 // Health check
 app.get('/health', async (req, res) => {
@@ -981,12 +985,12 @@ async function currentVotingGame(teamId) {
 
 // Constrói o ranking completo (score ponderado). Reutilizado pelo perfil.
 async function buildRanking(teamId, periodo, meUserId) {
-  // Membros
+  // Membros (+ stats)
   const { data: membros } = await supabase
     .from('team_members')
-    .select('users ( id, nome, email, avatar_url )')
+    .select('gols, artilharia, vitorias, destaque, users ( id, nome, email, avatar_url )')
     .eq('team_id', teamId);
-  const players = (membros || []).filter((m) => m.users).map((m) => m.users);
+  const rows = (membros || []).filter((m) => m.users);
 
   // Votos no período (média de notas)
   const cutoff = periodoCutoffISO(periodo);
@@ -1015,6 +1019,17 @@ async function buildRanking(teamId, periodo, meUserId) {
     for (const gp of gps || []) presCount[gp.user_id] = (presCount[gp.user_id] || 0) + 1;
   }
 
+  // Quem foi goleiro em pelo menos um jogo da equipa (gols/artilharia valem 3x no score)
+  const goleiroSet = new Set();
+  if (gameIds.length) {
+    const { data: gks } = await supabase
+      .from('game_players')
+      .select('user_id')
+      .in('game_id', gameIds)
+      .eq('goleiro', true);
+    for (const r of gks || []) goleiroSet.add(r.user_id);
+  }
+
   // Jogo atual de votação: minha nota + lista de jogadores votáveis (confirmados)
   const vgame = await currentVotingGame(teamId);
   const minhaNotaPor = {};
@@ -1037,30 +1052,38 @@ async function buildRanking(teamId, periodo, meUserId) {
     }
   }
 
-  // Valores base (vitorias/gols/artilharia/destaque ainda sem fonte de dados -> 0)
-  const base = players.map((u) => {
+  // Valores base por jogador. Goleiros: gols/artilharia valem 3x no SCORE,
+  // mas os números mostrados (gols/artilharia) são sempre os reais.
+  const base = rows.map((m) => {
+    const u = m.users;
     const a = voteAgg[u.id];
     const media = a && a.count ? a.sum / a.count : 0;
+    const isGoleiro = goleiroSet.has(u.id);
+    const gols = m.gols || 0;
+    const artilharia = m.artilharia || 0;
     return {
       user_id: u.id,
       nome: u.nome || u.email,
       avatar_url: u.avatar_url || null,
       media_votos: round2(media),
       votos: a ? a.count : 0,
-      vitorias: 0,
-      gols: 0,
-      artilharia: 0,
-      destaque: 0,
+      vitorias: m.vitorias || 0,
+      gols, // real (mostrado)
+      artilharia, // real (mostrado)
+      destaque: m.destaque || 0,
       presenca: presCount[u.id] || 0,
       minha_nota: minhaNotaPor[u.id] ?? null,
+      is_goleiro: isGoleiro,
+      gols_efetivos: isGoleiro ? gols * 3 : gols, // usado no score
+      artilharia_efetiva: isGoleiro ? artilharia * 3 : artilharia, // usado no score
     };
   });
 
-  // Máximos do grupo para normalizar
+  // Máximos do grupo para normalizar (gols/artilharia normalizados pelos efetivos)
   const maxOf = (key) => base.reduce((m, b) => Math.max(m, b[key]), 0);
   const maxVit = maxOf('vitorias');
-  const maxArt = maxOf('artilharia');
-  const maxGols = maxOf('gols');
+  const maxArt = maxOf('artilharia_efetiva');
+  const maxGols = maxOf('gols_efetivos');
   const maxDest = maxOf('destaque');
   const maxPres = maxOf('presenca');
   const norm = (v, m) => (m > 0 ? v / m : 0);
@@ -1069,8 +1092,8 @@ async function buildRanking(teamId, periodo, meUserId) {
     .map((b) => {
       const media_pontos = RANKING_PESOS.media * (b.media_votos / 5);
       const vitorias_pontos = RANKING_PESOS.vitorias * norm(b.vitorias, maxVit);
-      const artilharia_pontos = RANKING_PESOS.artilharia * norm(b.artilharia, maxArt);
-      const gols_pontos = RANKING_PESOS.gols * norm(b.gols, maxGols);
+      const artilharia_pontos = RANKING_PESOS.artilharia * norm(b.artilharia_efetiva, maxArt);
+      const gols_pontos = RANKING_PESOS.gols * norm(b.gols_efetivos, maxGols);
       const destaque_pontos = RANKING_PESOS.destaque * norm(b.destaque, maxDest);
       const presenca_pontos = RANKING_PESOS.presenca * norm(b.presenca, maxPres);
       const score =
@@ -1118,7 +1141,7 @@ app.get('/api/teams/:slug/jogador/:userId', requireAuth, async (req, res) => {
   if (!ctx) return;
   const { team, role } = ctx;
 
-  const { ranking, maxes } = await buildRanking(team.id, 'geral', req.user.id);
+  const { ranking } = await buildRanking(team.id, 'geral', req.user.id);
   const jogador = ranking.find((r) => r.user_id === req.params.userId);
   if (!jogador) {
     return res.status(404).json({ error: 'Jogador não encontrado nesta equipa.' });
@@ -1129,18 +1152,25 @@ app.get('/api/teams/:slug/jogador/:userId', requireAuth, async (req, res) => {
   const posIdx = comMedia.findIndex((r) => r.user_id === jogador.user_id);
   const posicao = posIdx >= 0 ? posIdx + 1 : null;
 
-  // Radar 0-100 (Presença, Gols, Artilharia, Vitórias, Notas)
+  // Radar 0-100 — normalizado pelos máximos REAIS do grupo (números mostrados)
+  const maxReal = (key) => ranking.reduce((m, r) => Math.max(m, r[key]), 0);
   const pct = (v, m) => (m > 0 ? Math.round((v / m) * 100) : 0);
   const radar = {
-    presenca: pct(jogador.presenca, maxes.maxPres),
-    gols: pct(jogador.gols, maxes.maxGols),
-    artilharia: pct(jogador.artilharia, maxes.maxArt),
-    vitorias: pct(jogador.vitorias, maxes.maxVit),
+    presenca: pct(jogador.presenca, maxReal('presenca')),
+    gols: pct(jogador.gols, maxReal('gols')),
+    artilharia: pct(jogador.artilharia, maxReal('artilharia')),
+    vitorias: pct(jogador.vitorias, maxReal('vitorias')),
     notas: Math.round((jogador.media_votos / 5) * 100),
   };
 
-  // Jogos onde foi campeão — ainda sem registo de vencedor -> vazio
-  const jogos_campeao = [];
+  // Fotos de jogos onde foi campeão
+  const { data: fotos } = await supabase
+    .from('champion_photos')
+    .select('url, created_at')
+    .eq('team_id', team.id)
+    .eq('user_id', jogador.user_id)
+    .order('created_at', { ascending: false });
+  const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url }));
 
   res.json({
     team: { ...team, role },
