@@ -17,8 +17,11 @@ create table if not exists public.champion_photos (
   team_id     uuid not null references public.teams (id) on delete cascade,
   user_id     uuid not null references public.users (id) on delete cascade,
   url         text not null,
+  tipo        text not null default 'vitoria' check (tipo in ('vitoria', 'artilharia', 'destaque')),
   created_at  timestamptz not null default now()
 );
+-- Migração para tabelas já existentes (adiciona a coluna tipo se faltar)
+alter table public.champion_photos add column if not exists tipo text not null default 'vitoria';
 create index if not exists idx_champion_photos_user on public.champion_photos (user_id, team_id);
 
 alter table public.champion_photos enable row level security;

@@ -124,12 +124,14 @@ async function main() {
     }
 
     const alvos = mocks.slice(0, 3);
+    const TIPOS = ['vitoria', 'artilharia', 'destaque'];
     const rows = [];
     alvos.forEach((m, i) => {
+      // 2 fotos por jogador, com tipos variados entre os 3 jogadores
       const a = copiadas[(i * 2) % copiadas.length];
       const b = copiadas[(i * 2 + 1) % copiadas.length];
-      rows.push({ team_id: team.id, user_id: m.user_id, url: a });
-      rows.push({ team_id: team.id, user_id: m.user_id, url: b });
+      rows.push({ team_id: team.id, user_id: m.user_id, url: a, tipo: TIPOS[i % 3] });
+      rows.push({ team_id: team.id, user_id: m.user_id, url: b, tipo: TIPOS[(i + 1) % 3] });
     });
     const { error: insErr } = await supabase.from('champion_photos').insert(rows);
     if (insErr) {

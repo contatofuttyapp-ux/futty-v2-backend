@@ -1163,14 +1163,15 @@ app.get('/api/teams/:slug/jogador/:userId', requireAuth, async (req, res) => {
     notas: Math.round((jogador.media_votos / 5) * 100),
   };
 
-  // Fotos de jogos onde foi campeão
+  // Fotos da galeria (campeão / artilheiro / destaque).
+  // select('*') é tolerante caso a coluna "tipo" ainda não tenha sido migrada.
   const { data: fotos } = await supabase
     .from('champion_photos')
-    .select('url, created_at')
+    .select('*')
     .eq('team_id', team.id)
     .eq('user_id', jogador.user_id)
     .order('created_at', { ascending: false });
-  const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url }));
+  const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url, tipo: f.tipo || 'vitoria' }));
 
   res.json({
     team: { ...team, role },
