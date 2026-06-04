@@ -790,9 +790,9 @@ app.post('/api/games/:id/sortear', requireAuth, async (req, res) => {
   fisherYates([...teamsArr]).forEach((time, i) => {
     if (goleirosAssign[i]) time.push(goleirosAssign[i]);
   });
-  if (goleiros.length === 0) {
-    avisos.push('Nenhum goleiro marcado — os times ficam sem goleiro definido.');
-  } else if (goleiros.length < numTimes) {
+  // Só avisa quando há goleiros marcados mas não chegam para todos os times.
+  // (Sem goleiros marcados não gera aviso — marcar goleiro é opcional.)
+  if (goleiros.length > 0 && goleiros.length < numTimes) {
     avisos.push(
       `Há ${goleiros.length} goleiro(s) para ${numTimes} times: ${numTimes - goleiros.length} time(s) ficam sem goleiro.`
     );
