@@ -284,7 +284,7 @@ router.post(
 
     const { data: gp } = await supabase
       .from('game_players')
-      .select('goleiro, cabeca_chave, users ( id, nome, email )')
+      .select('goleiro, cabeca_chave, users ( id, nome, email, avatar_url )')
       .eq('game_id', game.id)
       .eq('confirmado', true);
     const confirmados = (gp || []).filter((p) => p.users);
@@ -304,6 +304,7 @@ router.post(
     const toPlayer = (p) => ({
       user_id: p.users.id,
       nome: p.users.nome || p.users.email,
+      avatar_url: p.users.avatar_url || null,
       rating: round1(ratings[p.users.id] ?? RATING_DEFAULT),
       goleiro: p.goleiro,
       cabeca_chave: p.cabeca_chave,
