@@ -3,7 +3,8 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
-const { RATING_DEFAULT, snakeDraft, fisherYates, orderByRatingDesc } = require('../utils/helpers');
+const { RATING_DEFAULT } = require('../utils/helpers');
+const { executarSorteio } = require('../utils/sorteio');
 
 const router = express.Router();
 
@@ -310,44 +311,19 @@ router.post(
 
     const all = confirmados.map(toPlayer);
 
-    // Prioridade: goleiros -> cabeças de chave -> linha (rating desc + desempate aleatório).
-    const goleiros = orderByRatingDesc(all.filter((p) => p.goleiro));
-    const cabecas = orderByRatingDesc(all.filter((p) => p.cabeca_chave && !p.goleiro));
-    const linhaBase = all.filter((p) => !p.goleiro && !p.cabeca_chave);
+    // Sorteio: lógica completa em utils/sorteio.js (goleiros/cabeças 1 por time,
+    // excesso vira linha, linha por snake draft, sobra vai para reservas).
+    const sorteio = executarSorteio(all, porTime);
 
-    const teamsArr = Array.from({ length: numTimes }, () => []);
     const avisos = [];
-
-    // 1) Goleiros — um por time (ordem aleatória). Excesso vira linha.
-    const goleirosAssign = goleiros.slice(0, numTimes);
-    const goleirosExtra = goleiros.slice(numTimes);
-    fisherYates([...teamsArr]).forEach((time, i) => {
-      if (goleirosAssign[i]) time.push(goleirosAssign[i]);
-    });
-    if (goleiros.length > 0 && goleiros.length < numTimes) {
+    const totalGoleiros = all.filter((p) => p.goleiro).length;
+    if (totalGoleiros > 0 && totalGoleiros < sorteio.numTimes) {
       avisos.push(
-        `Há ${goleiros.length} goleiro(s) para ${numTimes} times: ${numTimes - goleiros.length} time(s) ficam sem goleiro.`
+        `Há ${totalGoleiros} goleiro(s) para ${sorteio.numTimes} times: ${sorteio.numTimes - totalGoleiros} time(s) ficam sem goleiro.`
       );
     }
-    if (goleirosExtra.length) {
-      avisos.push(`${goleirosExtra.length} goleiro(s) a mais entram como jogadores de linha.`);
-    }
 
-    // 2) Cabeças de chave — um por time (ordem aleatória). Excesso entra na linha.
-    const cabecasAssign = cabecas.slice(0, numTimes);
-    const cabecasExtra = cabecas.slice(numTimes);
-    fisherYates([...teamsArr]).forEach((time, i) => {
-      if (cabecasAssign[i]) time.push(cabecasAssign[i]);
-    });
-
-    // 3) Linha (com excessos) — snake draft por rating desc.
-    const linha = orderByRatingDesc(linhaBase.concat(goleirosExtra, cabecasExtra));
-    const linhaDraft = snakeDraft(linha, numTimes);
-    fisherYates([...teamsArr]).forEach((time, i) => {
-      time.push(...linhaDraft[i]);
-    });
-
-    const times = teamsArr.map((jogadores, i) => {
+    const times = sorteio.times.map((jogadores, i) => {
       const media = jogadores.length
         ? jogadores.reduce((s, j) => s + j.rating, 0) / jogadores.length
         : 0;
@@ -358,7 +334,13 @@ router.post(
       };
     });
 
-    const resultado = { num_times: numTimes, total_jogadores: confirmados.length, avisos, times };
+    const resultado = {
+      num_times: sorteio.numTimes,
+      total_jogadores: confirmados.length,
+      avisos,
+      times,
+      reservas: sorteio.reservas,
+    };
 
     const { data: updated, error } = await supabase
       .from('games')

@@ -24,41 +24,8 @@ function slugify(nome) {
   return `${base || 'equipa'}-${suffix}`;
 }
 
-/** Baralha um array in-place (Fisher-Yates). */
-function fisherYates(arr) {
-  for (let i = arr.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-
-/**
- * Ordena por rating desc; dentro do mesmo rating a ordem é aleatória.
- * Baralha primeiro (Fisher-Yates) e depois faz um sort estável por rating, por
- * isso "Sortear novamente" dá times diferentes mesmo com ratings iguais.
- */
-function orderByRatingDesc(players) {
-  const arr = fisherYates(players.slice());
-  arr.sort((a, b) => b.rating - a.rating);
-  return arr;
-}
-
-/** Snake draft: distribui os jogadores por N times no padrão A,B,C,C,B,A,A,... */
-function snakeDraft(players, numTimes) {
-  const teams = Array.from({ length: numTimes }, () => []);
-  let idx = 0;
-  let dir = 1;
-  for (const p of players) {
-    teams[idx].push(p);
-    if (dir === 1) {
-      if (idx === numTimes - 1) dir = -1;
-      else idx += 1;
-    } else if (idx === 0) dir = 1;
-    else idx -= 1;
-  }
-  return teams;
-}
+// NOTA: a lógica de sorteio (fisherYates, snakeDraft, ordenação por rating)
+// foi movida para utils/sorteio.js.
 
 /** Data de corte ISO para um período de ranking (null = geral). */
 function periodoCutoffISO(periodo) {
@@ -72,8 +39,5 @@ module.exports = {
   RATING_DEFAULT,
   round2,
   slugify,
-  fisherYates,
-  orderByRatingDesc,
-  snakeDraft,
   periodoCutoffISO,
 };

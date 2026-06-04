@@ -13,6 +13,7 @@ const authRoutes = require('./routes/auth');
 const teamsRoutes = require('./routes/teams');
 const gamesRoutes = require('./routes/games');
 const rankingRoutes = require('./routes/ranking');
+const avataresRoutes = require('./routes/avatares');
 
 const app = express();
 app.use(cors());
@@ -51,6 +52,7 @@ app.use(authRoutes);
 app.use(teamsRoutes);
 app.use(gamesRoutes);
 app.use(rankingRoutes);
+app.use(avataresRoutes);
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {
