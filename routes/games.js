@@ -80,6 +80,73 @@ router.get(
   })
 );
 
+/**
+ * GET /api/games/my-invites — todos os jogos das equipas do utilizador.
+ * Registado ANTES de /api/games/:id para não colidir com o param :id.
+ */
+router.get(
+  '/api/games/my-invites',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    // Equipas do utilizador
+    const { data: memberships } = await supabase
+      .from('team_members')
+      .select('team_id, teams ( id, nome, slug )')
+      .eq('user_id', req.user.id);
+    const teamById = {};
+    for (const m of memberships || []) {
+      if (m.teams) teamById[m.team_id] = m.teams;
+    }
+    const teamIds = Object.keys(teamById);
+    if (!teamIds.length) return res.json({ games: [] });
+
+    // Jogos dessas equipas (data ASC)
+    const { data: games, error } = await supabase
+      .from('games')
+      .select('id, team_id, data, local, status, sorteio_realizado')
+      .in('team_id', teamIds)
+      .order('data', { ascending: true });
+    if (error) throw new HttpError(500, error.message);
+
+    // Confirmados + o meu estado por jogo
+    const ids = (games || []).map((g) => g.id);
+    const counts = {};
+    const myStatus = {};
+    if (ids.length) {
+      const { data: gp } = await supabase
+        .from('game_players')
+        .select('game_id, user_id, confirmado')
+        .in('game_id', ids);
+      for (const row of gp || []) {
+        if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
+        if (row.user_id === req.user.id) myStatus[row.game_id] = row.confirmado ? 'going' : 'not_going';
+      }
+    }
+
+    const now = Date.now();
+    const list = (games || []).map((g) => {
+      const past = g.data && new Date(g.data).getTime() < now;
+      const finished = g.status === 'terminado' || g.status === 'cancelado' || past;
+      const status = finished ? 'finished' : g.sorteio_realizado ? 'drawn' : 'scheduled';
+      const team = teamById[g.team_id] || {};
+      return {
+        id: g.id,
+        name: g.local || 'Jogo',
+        date: g.data,
+        location: g.local || null,
+        confirmed_count: counts[g.id] || 0,
+        status,
+        user_status: myStatus[g.id] ?? null,
+        team_id: g.team_id,
+        team_name: team.nome || null,
+        team_slug: team.slug || null,
+      };
+    });
+
+    res.json({ games: list });
+  })
+);
+
 /** GET /api/games/:id — detalhes do jogo (jogadores, ratings, o meu estado). */
 router.get(
   '/api/games/:id',
