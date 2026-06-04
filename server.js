@@ -988,7 +988,52 @@ app.get('/api/teams/:slug/ranking', requireAuth, async (req, res) => {
       return y.rating - x.rating;
     });
 
-  res.json({ team: { ...team, role }, ranking });
+  // Votação: jogo mais recente com sorteio realizado e em curso/terminado
+  const { data: vgame } = await supabase
+    .from('games')
+    .select('id, local, data, status')
+    .eq('team_id', team.id)
+    .eq('sorteio_realizado', true)
+    .in('status', ['em_curso', 'terminado'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let votacao = null;
+  if (vgame) {
+    const { data: gp } = await supabase
+      .from('game_players')
+      .select('user_id, users ( id, nome, email )')
+      .eq('game_id', vgame.id)
+      .eq('confirmado', true);
+
+    // Os meus votos neste jogo (para mostrar a nota dada / saber se já votei)
+    const { data: meusVotos } = await supabase
+      .from('votes')
+      .select('para_user_id, nota')
+      .eq('game_id', vgame.id)
+      .eq('de_user_id', req.user.id);
+
+    const minhaNotaPor = {};
+    for (const v of meusVotos || []) minhaNotaPor[v.para_user_id] = v.nota;
+
+    const jogadores = (gp || [])
+      .filter((p) => p.users && p.users.id !== req.user.id)
+      .map((p) => ({
+        user_id: p.users.id,
+        nome: p.users.nome || p.users.email,
+        minhaNota: minhaNotaPor[p.users.id] ?? null,
+      }));
+
+    votacao = {
+      game_id: vgame.id,
+      game_label: vgame.local || 'Jogo',
+      jaVotei: (meusVotos || []).length > 0,
+      jogadores,
+    };
+  }
+
+  res.json({ team: { ...team, role }, ranking, votacao });
 });
 
 const port = PORT || 3001;
