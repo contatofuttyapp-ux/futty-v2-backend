@@ -933,107 +933,307 @@ app.post('/api/games/:id/votar', requireAuth, async (req, res) => {
   res.status(201).json({ registados: rows.length });
 });
 
-// GET /api/teams/:slug/ranking — jogadores por média de notas recebidas
-app.get('/api/teams/:slug/ranking', requireAuth, async (req, res) => {
+// =====================================================================
+// RANKING (pesos da v1)
+// =====================================================================
+const RANKING_PESOS = { media: 40, vitorias: 20, artilharia: 12, gols: 10, destaque: 8, presenca: 10 };
+const round2 = (n) => Math.round(n * 100) / 100;
+
+function periodoCutoffISO(periodo) {
+  const now = Date.now();
+  if (periodo === 'semana') return new Date(now - 7 * 86400000).toISOString();
+  if (periodo === 'mes') return new Date(now - 30 * 86400000).toISOString();
+  return null; // geral
+}
+
+// Carrega a equipa e valida que o utilizador é membro (responde e devolve null se não).
+async function requireTeamMember(req, res) {
   const { data: team } = await supabase
     .from('teams')
     .select('id, slug, nome, cor')
     .eq('slug', req.params.slug)
     .maybeSingle();
-
   if (!team) {
-    return res.status(404).json({ error: 'Equipa não encontrada.' });
+    res.status(404).json({ error: 'Equipa não encontrada.' });
+    return null;
   }
-
   const role = await getRole(team.id, req.user.id);
   if (!role) {
-    return res.status(403).json({ error: 'Não és membro desta equipa.' });
+    res.status(403).json({ error: 'Não és membro desta equipa.' });
+    return null;
   }
+  return { team, role };
+}
 
-  // Membros da equipa
-  const { data: membros } = await supabase
-    .from('team_members')
-    .select('users ( id, nome, email )')
-    .eq('team_id', team.id);
-
-  // Agregação dos votos da equipa
-  const { data: votos } = await supabase
-    .from('votes')
-    .select('para_user_id, nota')
-    .eq('team_id', team.id);
-
-  const agg = {};
-  for (const v of votos || []) {
-    if (!agg[v.para_user_id]) agg[v.para_user_id] = { sum: 0, count: 0 };
-    agg[v.para_user_id].sum += v.nota;
-    agg[v.para_user_id].count += 1;
-  }
-
-  const ranking = (membros || [])
-    .filter((m) => m.users)
-    .map((m) => {
-      const a = agg[m.users.id];
-      return {
-        user_id: m.users.id,
-        nome: m.users.nome || m.users.email,
-        votos: a ? a.count : 0,
-        rating: a && a.count ? Math.round((a.sum / a.count) * 100) / 100 : null,
-      };
-    })
-    .sort((x, y) => {
-      // quem tem votos primeiro, por rating desc; depois os sem votos
-      if (x.rating === null && y.rating === null) return x.nome.localeCompare(y.nome);
-      if (x.rating === null) return 1;
-      if (y.rating === null) return -1;
-      return y.rating - x.rating;
-    });
-
-  // Votação: jogo mais recente com sorteio realizado e em curso/terminado
-  const { data: vgame } = await supabase
+// Jogo atual de votação: mais recente sorteado, em curso/terminado.
+async function currentVotingGame(teamId) {
+  const { data } = await supabase
     .from('games')
     .select('id, local, data, status')
-    .eq('team_id', team.id)
+    .eq('team_id', teamId)
     .eq('sorteio_realizado', true)
     .in('status', ['em_curso', 'terminado'])
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  return data || null;
+}
 
-  let votacao = null;
-  if (vgame) {
-    const { data: gp } = await supabase
-      .from('game_players')
-      .select('user_id, users ( id, nome, email )')
-      .eq('game_id', vgame.id)
-      .eq('confirmado', true);
+// Constrói o ranking completo (score ponderado). Reutilizado pelo perfil.
+async function buildRanking(teamId, periodo, meUserId) {
+  // Membros
+  const { data: membros } = await supabase
+    .from('team_members')
+    .select('users ( id, nome, email, avatar_url )')
+    .eq('team_id', teamId);
+  const players = (membros || []).filter((m) => m.users).map((m) => m.users);
 
-    // Os meus votos neste jogo (para mostrar a nota dada / saber se já votei)
-    const { data: meusVotos } = await supabase
-      .from('votes')
-      .select('para_user_id, nota')
-      .eq('game_id', vgame.id)
-      .eq('de_user_id', req.user.id);
-
-    const minhaNotaPor = {};
-    for (const v of meusVotos || []) minhaNotaPor[v.para_user_id] = v.nota;
-
-    const jogadores = (gp || [])
-      .filter((p) => p.users && p.users.id !== req.user.id)
-      .map((p) => ({
-        user_id: p.users.id,
-        nome: p.users.nome || p.users.email,
-        minhaNota: minhaNotaPor[p.users.id] ?? null,
-      }));
-
-    votacao = {
-      game_id: vgame.id,
-      game_label: vgame.local || 'Jogo',
-      jaVotei: (meusVotos || []).length > 0,
-      jogadores,
-    };
+  // Votos no período (média de notas)
+  const cutoff = periodoCutoffISO(periodo);
+  let vq = supabase.from('votes').select('para_user_id, nota, created_at').eq('team_id', teamId);
+  if (cutoff) vq = vq.gte('created_at', cutoff);
+  const { data: votos } = await vq;
+  const voteAgg = {};
+  for (const v of votos || []) {
+    if (!voteAgg[v.para_user_id]) voteAgg[v.para_user_id] = { sum: 0, count: 0 };
+    voteAgg[v.para_user_id].sum += v.nota;
+    voteAgg[v.para_user_id].count += 1;
   }
 
-  res.json({ team: { ...team, role }, ranking, votacao });
+  // Presença: confirmações no último mês (game_players.created_at)
+  const presCut = new Date(Date.now() - 30 * 86400000).toISOString();
+  const { data: gameRows } = await supabase.from('games').select('id').eq('team_id', teamId);
+  const gameIds = (gameRows || []).map((g) => g.id);
+  const presCount = {};
+  if (gameIds.length) {
+    const { data: gps } = await supabase
+      .from('game_players')
+      .select('user_id, created_at')
+      .in('game_id', gameIds)
+      .eq('confirmado', true)
+      .gte('created_at', presCut);
+    for (const gp of gps || []) presCount[gp.user_id] = (presCount[gp.user_id] || 0) + 1;
+  }
+
+  // Jogo atual de votação: minha nota + lista de jogadores votáveis (confirmados)
+  const vgame = await currentVotingGame(teamId);
+  const minhaNotaPor = {};
+  let votaveis = [];
+  if (vgame) {
+    const { data: conf } = await supabase
+      .from('game_players')
+      .select('user_id')
+      .eq('game_id', vgame.id)
+      .eq('confirmado', true);
+    votaveis = (conf || []).map((c) => c.user_id).filter((idu) => idu !== meUserId);
+
+    if (meUserId) {
+      const { data: meus } = await supabase
+        .from('votes')
+        .select('para_user_id, nota')
+        .eq('game_id', vgame.id)
+        .eq('de_user_id', meUserId);
+      for (const v of meus || []) minhaNotaPor[v.para_user_id] = v.nota;
+    }
+  }
+
+  // Valores base (vitorias/gols/artilharia/destaque ainda sem fonte de dados -> 0)
+  const base = players.map((u) => {
+    const a = voteAgg[u.id];
+    const media = a && a.count ? a.sum / a.count : 0;
+    return {
+      user_id: u.id,
+      nome: u.nome || u.email,
+      avatar_url: u.avatar_url || null,
+      media_votos: round2(media),
+      votos: a ? a.count : 0,
+      vitorias: 0,
+      gols: 0,
+      artilharia: 0,
+      destaque: 0,
+      presenca: presCount[u.id] || 0,
+      minha_nota: minhaNotaPor[u.id] ?? null,
+    };
+  });
+
+  // Máximos do grupo para normalizar
+  const maxOf = (key) => base.reduce((m, b) => Math.max(m, b[key]), 0);
+  const maxVit = maxOf('vitorias');
+  const maxArt = maxOf('artilharia');
+  const maxGols = maxOf('gols');
+  const maxDest = maxOf('destaque');
+  const maxPres = maxOf('presenca');
+  const norm = (v, m) => (m > 0 ? v / m : 0);
+
+  const ranking = base
+    .map((b) => {
+      const media_pontos = RANKING_PESOS.media * (b.media_votos / 5);
+      const vitorias_pontos = RANKING_PESOS.vitorias * norm(b.vitorias, maxVit);
+      const artilharia_pontos = RANKING_PESOS.artilharia * norm(b.artilharia, maxArt);
+      const gols_pontos = RANKING_PESOS.gols * norm(b.gols, maxGols);
+      const destaque_pontos = RANKING_PESOS.destaque * norm(b.destaque, maxDest);
+      const presenca_pontos = RANKING_PESOS.presenca * norm(b.presenca, maxPres);
+      const score =
+        media_pontos + vitorias_pontos + artilharia_pontos + gols_pontos + destaque_pontos + presenca_pontos;
+      return {
+        ...b,
+        media_pontos: round2(media_pontos),
+        vitorias_pontos: round2(vitorias_pontos),
+        artilharia_pontos: round2(artilharia_pontos),
+        gols_pontos: round2(gols_pontos),
+        destaque_pontos: round2(destaque_pontos),
+        presenca_pontos: round2(presenca_pontos),
+        score: round2(score),
+      };
+    })
+    .sort((x, y) => {
+      if (y.score !== x.score) return y.score - x.score;
+      if (y.media_votos !== x.media_votos) return y.media_votos - x.media_votos;
+      return x.nome.localeCompare(y.nome);
+    });
+
+  return { ranking, vgame, votaveis, maxes: { maxVit, maxArt, maxGols, maxDest, maxPres } };
+}
+
+// GET /api/teams/:slug/ranking?periodo=semana|mes|geral
+app.get('/api/teams/:slug/ranking', requireAuth, async (req, res) => {
+  const ctx = await requireTeamMember(req, res);
+  if (!ctx) return;
+  const { team, role } = ctx;
+
+  const periodo = ['semana', 'mes', 'geral'].includes(req.query.periodo) ? req.query.periodo : 'geral';
+  const { ranking, vgame, votaveis } = await buildRanking(team.id, periodo, req.user.id);
+
+  res.json({
+    team: { ...team, role },
+    periodo,
+    votacao: vgame ? { game_id: vgame.id, game_label: vgame.local || 'Jogo', votaveis } : null,
+    ranking,
+  });
+});
+
+// GET /api/teams/:slug/jogador/:userId — perfil completo do jogador
+app.get('/api/teams/:slug/jogador/:userId', requireAuth, async (req, res) => {
+  const ctx = await requireTeamMember(req, res);
+  if (!ctx) return;
+  const { team, role } = ctx;
+
+  const { ranking, maxes } = await buildRanking(team.id, 'geral', req.user.id);
+  const jogador = ranking.find((r) => r.user_id === req.params.userId);
+  if (!jogador) {
+    return res.status(404).json({ error: 'Jogador não encontrado nesta equipa.' });
+  }
+
+  // Posição no ranking entre quem tem média (votos > 0)
+  const comMedia = ranking.filter((r) => r.votos > 0);
+  const posIdx = comMedia.findIndex((r) => r.user_id === jogador.user_id);
+  const posicao = posIdx >= 0 ? posIdx + 1 : null;
+
+  // Radar 0-100 (Presença, Gols, Artilharia, Vitórias, Notas)
+  const pct = (v, m) => (m > 0 ? Math.round((v / m) * 100) : 0);
+  const radar = {
+    presenca: pct(jogador.presenca, maxes.maxPres),
+    gols: pct(jogador.gols, maxes.maxGols),
+    artilharia: pct(jogador.artilharia, maxes.maxArt),
+    vitorias: pct(jogador.vitorias, maxes.maxVit),
+    notas: Math.round((jogador.media_votos / 5) * 100),
+  };
+
+  // Jogos onde foi campeão — ainda sem registo de vencedor -> vazio
+  const jogos_campeao = [];
+
+  res.json({
+    team: { ...team, role },
+    jogador: { ...jogador, posicao, total_com_media: comMedia.length },
+    radar,
+    jogos_campeao,
+  });
+});
+
+// GET /api/teams/:slug/votacao-status — progresso de votação do jogo atual
+app.get('/api/teams/:slug/votacao-status', requireAuth, async (req, res) => {
+  const ctx = await requireTeamMember(req, res);
+  if (!ctx) return;
+  const { team } = ctx;
+
+  const vgame = await currentVotingGame(team.id);
+  if (!vgame) {
+    return res.json({ game_id: null, total_colegas: 0, ja_votou_em: 0, percentagem: 100, faltam: 0 });
+  }
+
+  const { data: gp } = await supabase
+    .from('game_players')
+    .select('user_id')
+    .eq('game_id', vgame.id)
+    .eq('confirmado', true);
+  const colegas = (gp || []).map((p) => p.user_id).filter((idu) => idu !== req.user.id);
+
+  const { data: meus } = await supabase
+    .from('votes')
+    .select('para_user_id')
+    .eq('game_id', vgame.id)
+    .eq('de_user_id', req.user.id);
+  const votados = new Set((meus || []).map((v) => v.para_user_id));
+
+  const total = colegas.length;
+  const jaVotouEm = colegas.filter((idu) => votados.has(idu)).length;
+  const percentagem = total > 0 ? Math.round((jaVotouEm / total) * 100) : 100;
+
+  res.json({
+    game_id: vgame.id,
+    total_colegas: total,
+    ja_votou_em: jaVotouEm,
+    percentagem,
+    faltam: total - jaVotouEm,
+  });
+});
+
+// POST /api/teams/:slug/votar — vota (ou altera) a nota de um colega no jogo atual
+app.post('/api/teams/:slug/votar', requireAuth, async (req, res) => {
+  const ctx = await requireTeamMember(req, res);
+  if (!ctx) return;
+  const { team } = ctx;
+
+  const { para_user_id } = req.body || {};
+  const nota = parseInt(req.body?.nota, 10);
+  if (!para_user_id || para_user_id === req.user.id) {
+    return res.status(400).json({ error: 'Voto inválido.' });
+  }
+  if (!(nota >= 1 && nota <= 5)) {
+    return res.status(400).json({ error: 'A nota tem de ser entre 1 e 5.' });
+  }
+
+  const vgame = await currentVotingGame(team.id);
+  if (!vgame) {
+    return res.status(400).json({ error: 'Não há jogo aberto para votação.' });
+  }
+
+  const { data: gpRow } = await supabase
+    .from('game_players')
+    .select('id')
+    .eq('game_id', vgame.id)
+    .eq('user_id', para_user_id)
+    .eq('confirmado', true)
+    .maybeSingle();
+  if (!gpRow) {
+    return res.status(400).json({ error: 'Esse jogador não está confirmado no jogo.' });
+  }
+
+  await supabase
+    .from('users')
+    .upsert({ id: req.user.id, email: req.user.email }, { onConflict: 'id' });
+
+  const { error } = await supabase
+    .from('votes')
+    .upsert(
+      { de_user_id: req.user.id, para_user_id, team_id: team.id, game_id: vgame.id, nota },
+      { onConflict: 'de_user_id,para_user_id,game_id' }
+    );
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  res.json({ ok: true, minha_nota: nota });
 });
 
 const port = PORT || 3001;
