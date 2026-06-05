@@ -419,4 +419,109 @@ router.post(
   })
 );
 
+/**
+ * PATCH /api/games/:id — edita um jogo não sorteado (só admin).
+ * Body opcional: { date, time, location, players_per_team }.
+ * date + time combinam-se na coluna única `data` (timestamptz).
+ */
+router.patch(
+  '/api/games/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar o jogo.');
+    if (game.sorteio_realizado) throw new HttpError(400, 'Não podes editar um jogo já sorteado.');
+
+    const b = req.body || {};
+    const patch = {};
+
+    // Recombina data/hora (a coluna `data` guarda ambas).
+    if ('date' in b || 'time' in b) {
+      const base = new Date(game.data);
+      const pad = (n) => String(n).padStart(2, '0');
+      const datePart = b.date
+        ? String(b.date).slice(0, 10)
+        : `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`;
+      const timePart = b.time ? String(b.time).slice(0, 5) : `${pad(base.getHours())}:${pad(base.getMinutes())}`;
+      const combinado = new Date(`${datePart}T${timePart}:00`);
+      if (Number.isNaN(combinado.getTime())) throw new HttpError(400, 'Data/hora inválida.');
+      patch.data = combinado.toISOString();
+    }
+    if ('location' in b) patch.local = b.location ? String(b.location).trim() : null;
+    if ('players_per_team' in b) {
+      const n = parseInt(b.players_per_team, 10);
+      if (!Number.isFinite(n) || n < 1) throw new HttpError(400, 'players_per_team inválido.');
+      patch.jogadores_por_time = n;
+    }
+
+    if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
+
+    const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
+    if (error) throw new HttpError(500, error.message);
+    res.json({ game: updated });
+  })
+);
+
+/**
+ * DELETE /api/games/:id — apaga um jogo futuro sem confirmações (só admin).
+ * Se houver confirmações → 409 (deve cancelar-se, não apagar).
+ */
+router.delete(
+  '/api/games/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem apagar jogos.');
+
+    if (!game.data || new Date(game.data).getTime() <= Date.now()) {
+      throw new HttpError(400, 'Só podes apagar jogos futuros.');
+    }
+
+    const { count } = await supabase
+      .from('game_players')
+      .select('id', { count: 'exact', head: true })
+      .eq('game_id', game.id)
+      .eq('confirmado', true);
+    if ((count || 0) > 0) {
+      throw new HttpError(409, 'Este jogo já tem jogadores confirmados. Cancela-o em vez de o apagar.');
+    }
+
+    const { error } = await supabase.from('games').delete().eq('id', game.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ deleted: true });
+  })
+);
+
+/**
+ * PATCH /api/games/:id/cancelar — cancela um jogo não terminado (só admin).
+ * Usa status 'cancelado' (valor PT permitido pelo CHECK) + cancelado_at.
+ */
+router.patch(
+  '/api/games/:id/cancelar',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem cancelar jogos.');
+    if (game.status === 'terminado') throw new HttpError(400, 'Não podes cancelar um jogo terminado.');
+
+    const { data: updated, error } = await supabase
+      .from('games')
+      .update({ status: 'cancelado', cancelado_at: new Date().toISOString() })
+      .eq('id', game.id)
+      .select()
+      .single();
+    if (error) throw new HttpError(500, error.message);
+    res.json({ game: updated });
+  })
+);
+
 module.exports = router;

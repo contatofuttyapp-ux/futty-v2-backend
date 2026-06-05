@@ -405,7 +405,22 @@ router.patch(
       .select()
       .single();
     if (error) throw new HttpError(500, error.message);
-    res.json({ game: updated });
+
+    // Resolve os nomes dos jogadores premiados (join com users).
+    const premioIds = [updated.artilheiro_user_id, updated.destaque_user_id, updated.rodada_user_id].filter(Boolean);
+    const nomes = {};
+    if (premioIds.length) {
+      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', premioIds);
+      for (const u of us || []) nomes[u.id] = u.nome || u.email;
+    }
+    res.json({
+      game: {
+        ...updated,
+        artilheiro_nome: updated.artilheiro_user_id ? nomes[updated.artilheiro_user_id] || null : null,
+        destaque_nome: updated.destaque_user_id ? nomes[updated.destaque_user_id] || null : null,
+        rodada_nome: updated.rodada_user_id ? nomes[updated.rodada_user_id] || null : null,
+      },
+    });
   })
 );
 
@@ -724,6 +739,110 @@ router.post(
       throw new HttpError(500, error.message);
     }
     res.json({ reported: true });
+  })
+);
+
+/**
+ * GET /api/feed/denuncias — denúncias por resolver das equipas onde o
+ * utilizador é admin. Inclui o conteúdo denunciado e o nome do reporter.
+ */
+router.get(
+  '/api/feed/denuncias',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    // Equipas onde sou admin.
+    const { data: adminRows } = await supabase
+      .from('team_members')
+      .select('team_id')
+      .eq('user_id', req.user.id)
+      .eq('role', 'admin');
+    const adminTeams = new Set((adminRows || []).map((r) => r.team_id));
+    if (!adminTeams.size) return res.json({ denuncias: [] });
+
+    const { data: rows, error } = await supabase
+      .from('denuncias')
+      .select('id, target_type, target_id, motivo, descricao, reporter_id, created_at')
+      .eq('resolvida', false)
+      .order('created_at', { ascending: true });
+    if (error) throw new HttpError(500, error.message);
+
+    // Filtra pelas denúncias cujo alvo pertence a uma equipa que administro.
+    const visiveis = [];
+    for (const d of rows || []) {
+      const teamId = await targetTeamId(d.target_type, d.target_id);
+      if (teamId && adminTeams.has(teamId)) visiveis.push(d);
+    }
+
+    // Nomes dos reporters.
+    const reporterIds = [...new Set(visiveis.map((d) => d.reporter_id).filter(Boolean))];
+    const repMap = {};
+    if (reporterIds.length) {
+      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', reporterIds);
+      for (const u of us || []) repMap[u.id] = u.nome || u.email;
+    }
+
+    // Conteúdo denunciado (texto do comentário/post).
+    const comIds = visiveis.filter((d) => d.target_type === 'comentario').map((d) => d.target_id);
+    const postIds = visiveis.filter((d) => d.target_type === 'post').map((d) => d.target_id);
+    const conteudo = {};
+    if (comIds.length) {
+      const { data: cs } = await supabase.from('comentarios').select('id, body').in('id', comIds);
+      for (const c of cs || []) conteudo[`comentario:${c.id}`] = c.body;
+    }
+    if (postIds.length) {
+      const { data: ps } = await supabase.from('feed_posts').select('id, body').in('id', postIds);
+      for (const p of ps || []) conteudo[`post:${p.id}`] = p.body;
+    }
+
+    const denuncias = visiveis.map((d) => ({
+      id: d.id,
+      target_type: d.target_type,
+      target_id: d.target_id,
+      motivo: d.motivo,
+      descricao: d.descricao,
+      reporter_nome: d.reporter_id ? repMap[d.reporter_id] || null : null,
+      created_at: d.created_at,
+      conteudo: conteudo[`${d.target_type}:${d.target_id}`] ?? null,
+    }));
+    res.json({ denuncias });
+  })
+);
+
+/**
+ * PATCH /api/feed/denuncias/:id/resolver — resolve uma denúncia (só admin da
+ * equipa do alvo). Body: { apagar_conteudo }. Se true: soft-delete do
+ * comentário ou apaga o post.
+ */
+router.patch(
+  '/api/feed/denuncias/:id/resolver',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const apagar = !!(req.body && req.body.apagar_conteudo);
+
+    const { data: d } = await supabase
+      .from('denuncias')
+      .select('id, target_type, target_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (!d) throw new HttpError(404, 'Denúncia não encontrada.');
+
+    const teamId = await targetTeamId(d.target_type, d.target_id);
+    if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
+    const role = await getRole(teamId, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem resolver denúncias.');
+
+    if (apagar) {
+      if (d.target_type === 'comentario') {
+        const now = new Date().toISOString();
+        await supabase.from('comentarios').update({ deleted_at: now, updated_at: now }).eq('id', d.target_id);
+      } else if (d.target_type === 'post') {
+        await supabase.from('feed_posts').delete().eq('id', d.target_id);
+      }
+    }
+
+    const { error } = await supabase.from('denuncias').update({ resolvida: true }).eq('id', d.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ resolvida: true });
   })
 );
 

@@ -172,6 +172,139 @@ router.get(
   })
 );
 
+/** PATCH /api/teams/:slug — edita a equipa (só admin). */
+router.patch(
+  '/api/teams/:slug',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar a equipa.');
+
+    const b = req.body || {};
+    const patch = {};
+    if ('nome' in b) {
+      const v = String(b.nome ?? '').trim();
+      if (!v) throw new HttpError(400, 'O nome não pode ser vazio.');
+      if (v.length > 60) throw new HttpError(400, 'Nome: máximo 60 caracteres.');
+      patch.nome = v;
+    }
+    if ('cor' in b) {
+      if (!CORES_VALIDAS.includes(b.cor)) throw new HttpError(400, 'Cor inválida.');
+      patch.cor = b.cor;
+    }
+    if ('publica' in b) patch.publica = !!b.publica;
+    if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
+    if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
+
+    if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
+
+    const { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
+    if (error) throw new HttpError(500, error.message);
+    res.json({ team: updated });
+  })
+);
+
+/**
+ * GET /api/teams/:slug/membros — membros com role/stats (qualquer membro).
+ * Ordena: admins primeiro, depois por nome.
+ */
+router.get(
+  '/api/teams/:slug/membros',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+
+    const { data, error } = await supabase
+      .from('team_members')
+      .select('id, role, pode_postar, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .eq('team_id', team.id);
+    if (error) throw new HttpError(500, error.message);
+
+    const membros = (data || []).map((m) => ({
+      id: m.id,
+      user_id: m.users?.id,
+      role: m.role,
+      pode_postar: !!m.pode_postar,
+      nome: m.users?.nome || null,
+      nome_jogador: m.users?.nome_jogador || null,
+      avatar_url: m.users?.avatar_url || null,
+      email: m.users?.email || null,
+      gols: m.gols ?? 0,
+      artilharia: m.artilharia ?? 0,
+      vitorias: m.vitorias ?? 0,
+      destaque: m.destaque ?? 0,
+    }));
+    membros.sort((a, b) => {
+      if ((a.role === 'admin') !== (b.role === 'admin')) return a.role === 'admin' ? -1 : 1;
+      return String(a.nome_jogador || a.nome || '').localeCompare(String(b.nome_jogador || b.nome || ''), 'pt', { sensitivity: 'base' });
+    });
+    res.json({ membros });
+  })
+);
+
+/** DELETE /api/teams/:slug/membros/:userId — remove um membro (só admin). */
+router.delete(
+  '/api/teams/:slug/membros/:userId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover membros.');
+    if (req.params.userId === req.user.id) throw new HttpError(400, 'Não te podes remover a ti próprio.');
+
+    const { error } = await supabase
+      .from('team_members')
+      .delete()
+      .eq('team_id', team.id)
+      .eq('user_id', req.params.userId);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ removed: true });
+  })
+);
+
+/** PATCH /api/teams/:slug/membros/:userId — muda role/pode_postar (só admin). */
+router.patch(
+  '/api/teams/:slug/membros/:userId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar membros.');
+
+    const b = req.body || {};
+    const patch = {};
+    if ('role' in b) {
+      if (!['admin', 'member'].includes(b.role)) throw new HttpError(400, 'role inválido.');
+      if (req.params.userId === req.user.id) throw new HttpError(400, 'Não podes mudar o teu próprio role.');
+      patch.role = b.role;
+    }
+    if ('pode_postar' in b) patch.pode_postar = !!b.pode_postar;
+    if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
+
+    const { data: updated, error } = await supabase
+      .from('team_members')
+      .update(patch)
+      .eq('team_id', team.id)
+      .eq('user_id', req.params.userId)
+      .select('id, user_id, role, pode_postar')
+      .maybeSingle();
+    if (error) throw new HttpError(500, error.message);
+    if (!updated) throw new HttpError(404, 'Membro não encontrado.');
+    res.json({ membro: updated });
+  })
+);
+
 /** POST /api/teams/:slug/convite — gera um token de convite (qualquer membro). */
 router.post(
   '/api/teams/:slug/convite',
