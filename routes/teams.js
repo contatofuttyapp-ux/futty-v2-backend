@@ -16,9 +16,11 @@ router.post(
   '/api/teams',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { nome, cor } = req.body || {};
+    const { nome, cor, publica, localizacao, descricao } = req.body || {};
     if (!nome || !nome.trim()) throw new HttpError(400, 'O nome da equipa é obrigatório.');
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
+    const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
+    const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
 
     await ensureUserRow(req.user);
 
@@ -29,7 +31,15 @@ router.post(
       const slug = slugify(nome);
       const { data, error } = await supabase
         .from('teams')
-        .insert({ nome: nome.trim(), slug, cor: corFinal, criado_por: req.user.id })
+        .insert({
+          nome: nome.trim(),
+          slug,
+          cor: corFinal,
+          criado_por: req.user.id,
+          publica: !!publica,
+          localizacao: localizacaoFinal,
+          descricao: descricaoFinal,
+        })
         .select()
         .single();
       if (!error) team = data;
@@ -67,6 +77,67 @@ router.get(
       .filter((row) => row.teams)
       .map((row) => ({ ...row.teams, role: row.role }));
     res.json({ teams });
+  })
+);
+
+/**
+ * GET /api/teams/explorar — equipas públicas (pesquisa por nome/cidade).
+ * Registado ANTES de /api/teams/:slug para não colidir com o param :slug.
+ */
+router.get(
+  '/api/teams/explorar',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const q = String(req.query.q ?? '').trim();
+    const loc = String(req.query.localizacao ?? '').trim();
+
+    let query = supabase
+      .from('teams')
+      .select('id, nome, slug, cor, localizacao, descricao')
+      .eq('publica', true);
+    // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
+    if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
+    if (loc) query = query.ilike('localizacao', `%${loc}%`);
+
+    const { data: teams, error } = await query;
+    if (error) throw new HttpError(500, error.message);
+
+    const ids = (teams || []).map((t) => t.id);
+    const counts = {};
+    const meus = new Set();
+    if (ids.length) {
+      const { data: mem } = await supabase.from('team_members').select('team_id, user_id').in('team_id', ids);
+      for (const m of mem || []) {
+        counts[m.team_id] = (counts[m.team_id] || 0) + 1;
+        if (m.user_id === req.user.id) meus.add(m.team_id);
+      }
+    }
+    const pendentes = new Set();
+    if (ids.length) {
+      const { data: reqs } = await supabase
+        .from('team_join_requests')
+        .select('team_id')
+        .eq('user_id', req.user.id)
+        .eq('status', 'pending')
+        .in('team_id', ids);
+      for (const r of reqs || []) pendentes.add(r.team_id);
+    }
+
+    const lista = (teams || [])
+      .map((t) => ({
+        id: t.id,
+        nome: t.nome,
+        slug: t.slug,
+        cor: t.cor,
+        localizacao: t.localizacao,
+        descricao: t.descricao,
+        membro_count: counts[t.id] || 0,
+        ja_membro: meus.has(t.id),
+        pedido_pendente: pendentes.has(t.id),
+      }))
+      .sort((a, b) => b.membro_count - a.membro_count);
+
+    res.json({ teams: lista });
   })
 );
 
@@ -223,6 +294,128 @@ router.post(
     await supabase.from('convites').update({ usado_por: req.user.id }).eq('id', convite.id);
 
     res.status(201).json({ jaMembro: false, team: teamResumo });
+  })
+);
+
+/** POST /api/teams/:slug/pedir-entrada — pedir entrada numa equipa pública. */
+router.post(
+  '/api/teams/:slug/pedir-entrada',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, publica');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team.publica) throw new HttpError(403, 'Esta equipa não é pública.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role) throw new HttpError(400, 'Já és membro desta equipa.');
+
+    await ensureUserRow(req.user);
+    const mensagem = req.body?.mensagem ? String(req.body.mensagem).trim().slice(0, 300) : null;
+
+    const { data, error } = await supabase
+      .from('team_join_requests')
+      .insert({ team_id: team.id, user_id: req.user.id, mensagem, status: 'pending' })
+      .select('id, status')
+      .single();
+
+    if (error) {
+      // UNIQUE (team_id, user_id): já existe um pedido.
+      if (error.code === '23505') {
+        const { data: existente } = await supabase
+          .from('team_join_requests')
+          .select('id, status')
+          .eq('team_id', team.id)
+          .eq('user_id', req.user.id)
+          .maybeSingle();
+        // Se tinha sido rejeitado, reabre (volta a pending).
+        if (existente?.status === 'rejected') {
+          const { data: reaberto } = await supabase
+            .from('team_join_requests')
+            .update({ status: 'pending', mensagem, updated_at: new Date().toISOString() })
+            .eq('id', existente.id)
+            .select('id, status')
+            .single();
+          return res.json({ pedido: reaberto || existente });
+        }
+        return res.json({ pedido: existente || { id: null, status: 'pending' } });
+      }
+      throw new HttpError(500, error.message);
+    }
+
+    res.status(201).json({ pedido: data });
+  })
+);
+
+/** GET /api/teams/:slug/pedidos — pedidos pendentes (só admin). */
+router.get(
+  '/api/teams/:slug/pedidos',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os pedidos.');
+
+    const { data, error } = await supabase
+      .from('team_join_requests')
+      .select('id, user_id, mensagem, created_at, users ( id, nome, avatar_url, nome_jogador )')
+      .eq('team_id', team.id)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    if (error) throw new HttpError(500, error.message);
+
+    const pedidos = (data || []).map((p) => ({
+      id: p.id,
+      user_id: p.user_id,
+      nome: p.users?.nome || p.users?.nome_jogador || null,
+      nome_jogador: p.users?.nome_jogador || null,
+      avatar_url: p.users?.avatar_url || null,
+      mensagem: p.mensagem,
+      created_at: p.created_at,
+    }));
+    res.json({ pedidos });
+  })
+);
+
+/** PATCH /api/teams/:slug/pedidos/:pedidoId — aprovar/rejeitar (só admin). */
+router.patch(
+  '/api/teams/:slug/pedidos/:pedidoId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const status = req.body?.status;
+    if (!['approved', 'rejected'].includes(status)) throw new HttpError(400, 'status inválido.');
+
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem decidir pedidos.');
+
+    const { data: pedido } = await supabase
+      .from('team_join_requests')
+      .select('id, team_id, user_id, status')
+      .eq('id', req.params.pedidoId)
+      .maybeSingle();
+    if (!pedido || pedido.team_id !== team.id) throw new HttpError(404, 'Pedido não encontrado.');
+
+    // Aprovado → adiciona como membro (idempotente).
+    if (status === 'approved') {
+      const { error: me } = await supabase
+        .from('team_members')
+        .upsert({ team_id: team.id, user_id: pedido.user_id, role: 'member' }, { onConflict: 'user_id,team_id' });
+      if (me) throw new HttpError(500, me.message);
+    }
+
+    const { data: updated, error } = await supabase
+      .from('team_join_requests')
+      .update({ status, updated_at: new Date().toISOString() })
+      .eq('id', pedido.id)
+      .select('id, status, updated_at')
+      .single();
+    if (error) throw new HttpError(500, error.message);
+
+    res.json({ pedido: updated });
   })
 );
 
