@@ -58,7 +58,7 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, created_at')
+      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);

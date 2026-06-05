@@ -146,7 +146,10 @@ router.get(
   '/api/teams/:slug',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug);
+    const team = await getTeamBySlug(
+      req.params.slug,
+      'id, nome, slug, cor, criado_por, created_at, publica, localizacao, descricao'
+    );
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
     const role = await getRole(team.id, req.user.id);
