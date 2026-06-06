@@ -5,11 +5,27 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
+const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const NOMES_TIMES = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
+
+/** Data curta PT (ex.: "12/06 · 20:30") para o corpo das notificações. */
+function dataCurtaPT(iso) {
+  try {
+    return new Date(iso).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+/** IDs dos membros de uma equipa (para notificações). */
+async function membrosDaEquipa(teamId) {
+  const { data } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
+  return (data || []).map((m) => m.user_id);
+}
 
 /** POST /api/games — cria um jogo (só admin da equipa). */
 router.post(
@@ -22,7 +38,7 @@ router.post(
     const porTime = parseInt(jogadoresPorTime, 10);
     if (!porTime || porTime < 1) throw new HttpError(400, 'Indica quantos jogadores por time.');
 
-    const team = await getTeamBySlug(teamSlug, 'id, slug');
+    const team = await getTeamBySlug(teamSlug, 'id, slug, nome');
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
     const role = await getRole(team.id, req.user.id);
@@ -42,6 +58,15 @@ router.post(
     if (error) throw new HttpError(500, error.message);
 
     res.status(201).json({ game });
+
+    // Notifica todos os membros da equipa (fire-and-forget).
+    membrosDaEquipa(team.id).then((memberIds) =>
+      enviarNotificacao(memberIds, {
+        title: '⚽ Novo jogo criado',
+        body: `${team.nome || 'A tua equipa'} · ${dataCurtaPT(game.data)}`,
+        url: '/home',
+      })
+    );
   })
 );
 
@@ -368,6 +393,14 @@ router.post(
         times_resultado: resultado,
         status: updated.status,
       },
+    });
+
+    // Notifica os confirmados do jogo (fire-and-forget).
+    const confirmadosIds = confirmados.map((p) => p.users.id);
+    enviarNotificacao(confirmadosIds, {
+      title: '🎲 Sorteio realizado!',
+      body: `O sorteio de ${game.local || 'Jogo'} está pronto`,
+      url: `/equipa/${game.teams.slug}/jogo/${game.id}`,
     });
   })
 );

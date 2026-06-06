@@ -6,6 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
 const { round2, notaParaExibir } = require('../utils/helpers');
+const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
 
@@ -235,6 +236,20 @@ router.post(
     const { error } = await supabase.from('teams').update({ revotar_pedido_em: new Date().toISOString() }).eq('id', team.id);
     if (error) throw new HttpError(500, error.message);
     res.json({ pedido: true });
+
+    // Notifica os membros que ainda não votaram (fire-and-forget).
+    Promise.all([
+      supabase.from('team_members').select('user_id').eq('team_id', team.id),
+      supabase.from('votes').select('de_user_id').eq('team_id', team.id),
+    ]).then(([membros, votos]) => {
+      const votaram = new Set((votos.data || []).map((v) => v.de_user_id));
+      const naoVotaramIds = (membros.data || []).map((m) => m.user_id).filter((id) => !votaram.has(id));
+      return enviarNotificacao(naoVotaramIds, {
+        title: '⭐ Actualize a sua nota',
+        body: 'O admin pediu que actualizem as notas',
+        url: `/equipa/${team.slug}/ranking`,
+      });
+    });
   })
 );
 

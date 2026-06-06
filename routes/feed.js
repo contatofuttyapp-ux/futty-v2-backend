@@ -7,6 +7,7 @@ const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, ensureUserRow, getUserById, loadGame } = require('../utils/db');
+const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
 
@@ -421,6 +422,19 @@ router.patch(
         rodada_nome: updated.rodada_user_id ? nomes[updated.rodada_user_id] || null : null,
       },
     });
+
+    // Notifica todos os membros da equipa (fire-and-forget).
+    supabase
+      .from('team_members')
+      .select('user_id')
+      .eq('team_id', game.teams.id)
+      .then(({ data }) =>
+        enviarNotificacao((data || []).map((m) => m.user_id), {
+          title: '🏆 Resultado registado!',
+          body: `Vê quem foi o destaque em ${game.local || 'Jogo'}`,
+          url: '/feed',
+        })
+      );
   })
 );
 
