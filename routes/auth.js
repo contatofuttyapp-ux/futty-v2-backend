@@ -10,8 +10,12 @@ const router = express.Router();
 
 // Cores de uniforme válidas (igual ao CHECK da migração 013).
 const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzento'];
+// Preferências da figurinha (igual aos CHECKs da migração 018).
+const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
+const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
 // Colunas de perfil devolvidas ao frontend.
-const PERFIL_COLS = 'id, nome, email, avatar_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos';
+const PERFIL_COLS =
+  'id, nome, email, avatar_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha';
 
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
@@ -52,6 +56,8 @@ router.get(
         cor_preferida: perfil?.cor_preferida || null,
         telefone: perfil?.telefone || null,
         avatar_ia_creditos: perfil?.avatar_ia_creditos ?? 3,
+        cor_frame: perfil?.cor_frame || 'dourado',
+        fundo_figurinha: perfil?.fundo_figurinha || 'estadio',
       },
       stats: { nota, jogos: jogos || 0, gols },
     });
@@ -93,6 +99,16 @@ router.patch(
       const v = b.telefone == null ? null : String(b.telefone).trim();
       if (v && v.length > 20) throw new HttpError(400, 'Telefone: máximo 20 caracteres.');
       patch.telefone = v || null;
+    }
+    if ('cor_frame' in b) {
+      const v = String(b.cor_frame);
+      if (!CORES_FRAME.includes(v)) throw new HttpError(400, 'Cor de frame inválida.');
+      patch.cor_frame = v;
+    }
+    if ('fundo_figurinha' in b) {
+      const v = String(b.fundo_figurinha);
+      if (!FUNDOS_FIGURINHA.includes(v)) throw new HttpError(400, 'Fundo de figurinha inválido.');
+      patch.fundo_figurinha = v;
     }
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');

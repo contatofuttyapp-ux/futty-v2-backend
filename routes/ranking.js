@@ -25,7 +25,7 @@ async function buildRanking(teamId, meUserId) {
   // Membros (+ stats + categoria)
   const { data: membros } = await supabase
     .from('team_members')
-    .select('user_id, gols, artilharia, vitorias, destaque, categoria, users ( id, nome, email, avatar_url )')
+    .select('user_id, gols, artilharia, vitorias, destaque, categoria, users ( id, nome, email, avatar_url, cor_frame )')
     .eq('team_id', teamId);
   const rows = (membros || []).filter((m) => m.users);
 
@@ -78,6 +78,7 @@ async function buildRanking(teamId, meUserId) {
       sou_eu: meUserId != null && u.id === meUserId, // a própria linha do utilizador
       nome: u.nome || u.email,
       avatar_url: u.avatar_url || null,
+      cor_frame: u.cor_frame || 'dourado',
       categoria: ehGR ? 'GR' : 'linha',
       nota: notaParaExibir(notaInterna), // exibida (6-10) ou null
       nota_interna: notaInterna, // 1-5 (uso interno: radar)
