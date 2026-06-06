@@ -47,6 +47,9 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 // Avatares migrados da V1 (avatar_url relativo, ex.: /public/avatares/verde/gui.png)
 app.use('/public/avatares', express.static(path.join(__dirname, 'public', 'avatares')));
 
+// Conteúdo público geral (fotos de jogos/campeão, etc.): /public/fotos-jogos/...
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
 // Health check — confirma o servidor e a ligação ao Supabase.
 app.get('/health', async (req, res) => {
   const health = {
