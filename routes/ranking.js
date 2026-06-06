@@ -150,11 +150,95 @@ router.get(
       .order('created_at', { ascending: false });
     const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url, tipo: f.tipo || 'vitoria' }));
 
+    const userId = req.params.userId;
+
+    // Logo/cor de fundo da equipa (não vêm do requireTeamMember).
+    const { data: teamExtra } = await supabase
+      .from('teams')
+      .select('logo_url, cor_fundo')
+      .eq('id', team.id)
+      .maybeSingle();
+
+    // Jogos da equipa (com campos de resultado) + participações do jogador.
+    const { data: teamGames } = await supabase
+      .from('games')
+      .select('id, data, status, times_resultado, campeao_time_index, artilheiro_user_id, destaque_user_id, rodada_user_id')
+      .eq('team_id', team.id);
+    const games = teamGames || [];
+    const gameIds = games.map((g) => g.id);
+
+    const partSet = new Set();
+    let jogosConfirmados = 0;
+    if (gameIds.length) {
+      const { data: parts } = await supabase
+        .from('game_players')
+        .select('game_id, confirmado')
+        .eq('user_id', userId)
+        .in('game_id', gameIds);
+      for (const p of parts || []) {
+        partSet.add(p.game_id);
+        if (p.confirmado) jogosConfirmados += 1;
+      }
+    }
+
+    const noTimeCampeao = (g) => {
+      if (g.campeao_time_index == null) return false;
+      const t = g.times_resultado?.times?.[g.campeao_time_index];
+      return !!t && Array.isArray(t.jogadores) && t.jogadores.some((j) => j.user_id === userId);
+    };
+    // Sem campeão definido → 'empate' (resultado neutro).
+    const resultadoDe = (g) => (g.campeao_time_index == null ? 'empate' : noTimeCampeao(g) ? 'vitoria' : 'derrota');
+
+    // Conquistas (carreira — todos os jogos da equipa).
+    const conquistas = {
+      campeao: games.filter((g) => noTimeCampeao(g)).length,
+      artilheiro: games.filter((g) => g.artilheiro_user_id === userId).length,
+      destaque: games.filter((g) => g.destaque_user_id === userId).length,
+      rodada: games.filter((g) => g.rodada_user_id === userId).length,
+      jogos_total: jogosConfirmados,
+      gols_total: jogador.gols || 0,
+      vitorias_total: jogador.vitorias || 0,
+    };
+
+    // Histórico: últimos 10 jogos em que participou (não cancelados), data DESC.
+    const historico = games
+      .filter((g) => partSet.has(g.id) && g.status !== 'cancelado')
+      .sort((a, b) => new Date(b.data) - new Date(a.data))
+      .slice(0, 10)
+      .map((g) => ({
+        game_id: g.id,
+        data: g.data,
+        status: g.status,
+        resultado: resultadoDe(g),
+        foi_artilheiro: g.artilheiro_user_id === userId,
+        foi_destaque: g.destaque_user_id === userId,
+        foi_rodada: g.rodada_user_id === userId,
+      }));
+
+    // Evolução: média progressiva dos votos recebidos (escala exibida via notaParaExibir).
+    const { data: votosRecebidos } = await supabase
+      .from('votes')
+      .select('nota, updated_at, created_at')
+      .eq('team_id', team.id)
+      .eq('para_user_id', userId);
+    const ordenados = (votosRecebidos || [])
+      .map((v) => ({ ts: v.updated_at || v.created_at, nota: Number(v.nota) }))
+      .filter((v) => v.ts && Number.isFinite(v.nota))
+      .sort((a, b) => new Date(a.ts) - new Date(b.ts));
+    let soma = 0;
+    const evolucao = ordenados.map((v, i) => {
+      soma += v.nota;
+      return { data: v.ts, nota: notaParaExibir(soma / (i + 1)) };
+    });
+
     res.json({
-      team: { ...team, role },
+      team: { ...team, ...(teamExtra || {}), role },
       jogador: { ...jogador, posicao, total_com_nota: comNota.length },
       radar,
       jogos_campeao,
+      conquistas,
+      historico,
+      evolucao,
     });
   })
 );
