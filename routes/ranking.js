@@ -26,9 +26,10 @@ async function buildRanking(teamId, meUserId) {
   // Membros (+ stats + categoria)
   const { data: membros } = await supabase
     .from('team_members')
-    .select('user_id, gols, artilharia, vitorias, destaque, categoria, users ( id, nome, email, avatar_url, cor_frame )')
+    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, users ( id, nome, email, avatar_url, cor_frame )')
     .eq('team_id', teamId);
-  const rows = (membros || []).filter((m) => m.users);
+  // Só membros visíveis no ranking (admin pode ocultar). Default visível.
+  const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false);
 
   // Votos da equipa (todos) — média + o meu voto por jogador.
   const { data: votos } = await supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId);

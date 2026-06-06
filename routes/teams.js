@@ -1,6 +1,9 @@
 // Futty v2.0 — Rotas de equipas e convites.
 const express = require('express');
 const crypto = require('crypto');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
@@ -9,7 +12,26 @@ const { slugify } = require('../utils/helpers');
 const router = express.Router();
 
 const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
+const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
 const CONVITE_DIAS = 7;
+
+// Upload do logo da equipa (em memória; gravado depois no disco em public/logos).
+const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
+const LOGOS_DIR = path.join(__dirname, '..', 'public', 'logos');
+const uploadLogo = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => cb(null, !!LOGO_EXT[file.mimetype]),
+});
+// Wrapper que converte erros do multer (ex.: tamanho) em HttpError(400).
+function logoMiddleware(req, res, next) {
+  uploadLogo.single('logo')(req, res, (err) => {
+    if (err) {
+      return next(new HttpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Logo: máximo 2MB.' : 'Ficheiro inválido.'));
+    }
+    next();
+  });
+}
 
 /** POST /api/teams — cria uma equipa e adiciona o criador como admin. */
 router.post(
@@ -68,7 +90,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { data, error } = await supabase
       .from('team_members')
-      .select('role, teams ( id, nome, slug, cor, criado_por, created_at )')
+      .select('role, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade )')
       .eq('user_id', req.user.id)
       .order('created_at', { ascending: true });
     if (error) throw new HttpError(500, error.message);
@@ -93,8 +115,8 @@ router.get(
 
     let query = supabase
       .from('teams')
-      .select('id, nome, slug, cor, localizacao, descricao')
-      .eq('publica', true);
+      .select('id, nome, slug, cor, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade')
+      .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
     // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
     if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
     if (loc) query = query.ilike('localizacao', `%${loc}%`);
@@ -129,6 +151,9 @@ router.get(
         nome: t.nome,
         slug: t.slug,
         cor: t.cor,
+        logo_url: t.logo_url || null,
+        cor_fundo: t.cor_fundo || null,
+        modo_visibilidade: t.modo_visibilidade,
         localizacao: t.localizacao,
         descricao: t.descricao,
         membro_count: counts[t.id] || 0,
@@ -148,7 +173,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(
       req.params.slug,
-      'id, nome, slug, cor, criado_por, created_at, publica, localizacao, descricao'
+      'id, nome, slug, cor, criado_por, created_at, publica, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade'
     );
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
@@ -201,12 +226,48 @@ router.patch(
     if ('publica' in b) patch.publica = !!b.publica;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
+    if ('cor_fundo' in b) {
+      const v = b.cor_fundo == null ? null : String(b.cor_fundo).trim();
+      if (v && v.length > 20) throw new HttpError(400, 'cor_fundo inválida.');
+      patch.cor_fundo = v || null;
+    }
+    if ('modo_visibilidade' in b) {
+      if (!MODOS_VISIBILIDADE.includes(b.modo_visibilidade)) throw new HttpError(400, 'modo_visibilidade inválido.');
+      patch.modo_visibilidade = b.modo_visibilidade;
+      // Mantém a flag legada `publica` coerente (true para os dois modos públicos).
+      patch.publica = b.modo_visibilidade !== 'privado';
+    }
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
     const { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
     if (error) throw new HttpError(500, error.message);
     res.json({ team: updated });
+  })
+);
+
+/** POST /api/teams/:slug/logo — carrega o logo da equipa (só admin; PNG/JPG/WEBP, máx 2MB). */
+router.post(
+  '/api/teams/:slug/logo',
+  requireAuth,
+  logoMiddleware,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem mudar o logo.');
+
+    if (!req.file) throw new HttpError(400, 'Envia uma imagem PNG, JPG ou WEBP (máx 2MB).');
+    const ext = LOGO_EXT[req.file.mimetype];
+
+    fs.mkdirSync(LOGOS_DIR, { recursive: true });
+    fs.writeFileSync(path.join(LOGOS_DIR, `${team.id}.${ext}`), req.file.buffer);
+    const logoUrl = `/public/logos/${team.id}.${ext}`;
+
+    const { error } = await supabase.from('teams').update({ logo_url: logoUrl }).eq('id', team.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ logo_url: logoUrl });
   })
 );
 
@@ -226,7 +287,7 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -236,6 +297,8 @@ router.get(
       role: m.role,
       pode_postar: !!m.pode_postar,
       categoria: m.categoria || 'linha',
+      visivel_ranking: m.visivel_ranking !== false,
+      nota_interna: m.nota_interna || null,
       nome: m.users?.nome || null,
       nome_jogador: m.users?.nome_jogador || null,
       avatar_url: m.users?.avatar_url || null,
@@ -298,6 +361,12 @@ router.patch(
       if (!['linha', 'GR'].includes(b.categoria)) throw new HttpError(400, 'categoria inválida.');
       patch.categoria = b.categoria;
     }
+    if ('visivel_ranking' in b) patch.visivel_ranking = !!b.visivel_ranking;
+    if ('nota_interna' in b) {
+      const v = b.nota_interna == null ? null : String(b.nota_interna).trim();
+      if (v && v.length > 200) throw new HttpError(400, 'Nota interna: máximo 200 caracteres.');
+      patch.nota_interna = v || null;
+    }
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
     const { data: updated, error } = await supabase
@@ -305,7 +374,7 @@ router.patch(
       .update(patch)
       .eq('team_id', team.id)
       .eq('user_id', req.params.userId)
-      .select('id, user_id, role, pode_postar, categoria')
+      .select('id, user_id, role, pode_postar, categoria, visivel_ranking, nota_interna')
       .maybeSingle();
     if (error) throw new HttpError(500, error.message);
     if (!updated) throw new HttpError(404, 'Membro não encontrado.');
@@ -443,14 +512,24 @@ router.post(
   '/api/teams/:slug/pedir-entrada',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug, 'id, slug, publica');
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, modo_visibilidade');
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
-    if (!team.publica) throw new HttpError(403, 'Esta equipa não é pública.');
+    if (team.modo_visibilidade === 'privado') throw new HttpError(403, 'Esta equipa não é pública.');
 
     const role = await getRole(team.id, req.user.id);
     if (role) throw new HttpError(400, 'Já és membro desta equipa.');
 
     await ensureUserRow(req.user);
+
+    // Equipa aberta: entra já como membro, sem pedido pendente.
+    if (team.modo_visibilidade === 'publico_aberto') {
+      const { error: me } = await supabase
+        .from('team_members')
+        .upsert({ team_id: team.id, user_id: req.user.id, role: 'member' }, { onConflict: 'user_id,team_id' });
+      if (me) throw new HttpError(500, me.message);
+      return res.status(201).json({ entrou: true });
+    }
+
     const mensagem = req.body?.mensagem ? String(req.body.mensagem).trim().slice(0, 300) : null;
 
     const { data, error } = await supabase
