@@ -12,9 +12,9 @@ const router = express.Router();
 // Mínimo de votos para a nota aparecer.
 const MIN_VOTOS = 3;
 
-// nota válida: número entre 1 e 5 em incrementos de 0.5.
+// nota válida: número entre 0.5 e 5 em incrementos de 0.5.
 function notaValida(n) {
-  return Number.isFinite(n) && n >= 1 && n <= 5 && Number.isInteger(n * 2);
+  return Number.isFinite(n) && n >= 0.5 && n <= 5 && Number.isInteger(n * 2);
 }
 
 /**
@@ -75,6 +75,7 @@ async function buildRanking(teamId, meUserId) {
 
     return {
       user_id: u.id,
+      sou_eu: meUserId != null && u.id === meUserId, // a própria linha do utilizador
       nome: u.nome || u.email,
       avatar_url: u.avatar_url || null,
       categoria: ehGR ? 'GR' : 'linha',
@@ -193,8 +194,9 @@ router.post(
 
     const paraUserId = req.body?.para_user_id;
     const nota = Number(req.body?.nota);
-    if (!paraUserId || paraUserId === req.user.id) throw new HttpError(400, 'Voto inválido.');
-    if (!notaValida(nota)) throw new HttpError(400, 'A nota tem de ser entre 1 e 5 (incrementos de 0.5).');
+    if (!paraUserId) throw new HttpError(400, 'Voto inválido.');
+    if (paraUserId === req.user.id) throw new HttpError(400, 'Não podes votar em ti próprio.');
+    if (!notaValida(nota)) throw new HttpError(400, 'A nota tem de ser entre 0.5 e 5 (incrementos de 0.5).');
 
     // O votado tem de ser membro da equipa (visível no ranking).
     const { data: alvo } = await supabase
