@@ -555,4 +555,164 @@ router.patch(
   })
 );
 
+/** GET /api/teams/:slug/convites — convites activos (não usados, não expirados). */
+router.get(
+  '/api/teams/:slug/convites',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os convites.');
+
+    const nowIso = new Date().toISOString();
+    const { data: convites, error } = await supabase
+      .from('convites')
+      .select('id, token, created_at, expires_at, criado_por')
+      .eq('team_id', team.id)
+      .is('usado_por', null)
+      .gt('expires_at', nowIso)
+      .order('created_at', { ascending: false });
+    if (error) throw new HttpError(500, error.message);
+
+    // Nomes dos criadores (criado_por).
+    const ids = [...new Set((convites || []).map((c) => c.criado_por).filter(Boolean))];
+    const nomeMap = {};
+    if (ids.length) {
+      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', ids);
+      for (const u of us || []) nomeMap[u.id] = u.nome || u.email;
+    }
+
+    const lista = (convites || []).map((c) => ({
+      id: c.id,
+      token: c.token,
+      criado_por_nome: c.criado_por ? nomeMap[c.criado_por] || null : null,
+      created_at: c.created_at,
+      expires_at: c.expires_at,
+    }));
+    res.json({ convites: lista });
+  })
+);
+
+/** DELETE /api/teams/:slug/convites/:conviteId — revoga um convite (só admin). */
+router.delete(
+  '/api/teams/:slug/convites/:conviteId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem revogar convites.');
+
+    const { data: conv } = await supabase
+      .from('convites')
+      .select('id, team_id')
+      .eq('id', req.params.conviteId)
+      .maybeSingle();
+    if (!conv || conv.team_id !== team.id) throw new HttpError(404, 'Convite não encontrado.');
+
+    const { error } = await supabase.from('convites').delete().eq('id', conv.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ deleted: true });
+  })
+);
+
+/** GET /api/teams/:slug/stats — estatísticas agregadas da equipa (só admin). */
+router.get(
+  '/api/teams/:slug/stats',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver as estatísticas.');
+
+    // Jogos da equipa.
+    const { data: games } = await supabase
+      .from('games')
+      .select('id, data, local, status')
+      .eq('team_id', team.id);
+    const ativos = (games || []).filter((g) => g.status !== 'cancelado');
+
+    // Membros (com stats + dados do utilizador).
+    const { data: members } = await supabase
+      .from('team_members')
+      .select('user_id, gols, users ( nome, nome_jogador, avatar_url )')
+      .eq('team_id', team.id);
+    const total_membros = (members || []).length;
+
+    // Confirmações por jogo e por utilizador.
+    const gameIds = (games || []).map((g) => g.id);
+    const confByGame = {};
+    const confByUser = {};
+    if (gameIds.length) {
+      const { data: gp } = await supabase
+        .from('game_players')
+        .select('game_id, user_id, confirmado')
+        .in('game_id', gameIds);
+      for (const p of gp || []) {
+        if (!p.confirmado) continue;
+        confByGame[p.game_id] = (confByGame[p.game_id] || 0) + 1;
+        confByUser[p.user_id] = (confByUser[p.user_id] || 0) + 1;
+      }
+    }
+
+    const totalConf = ativos.reduce((s, g) => s + (confByGame[g.id] || 0), 0);
+    const media_confirmacoes = ativos.length ? Math.round((totalConf / ativos.length) * 10) / 10 : 0;
+
+    // Artilheiro: membro com mais gols.
+    let artilheiro = null;
+    for (const m of members || []) {
+      if ((m.gols || 0) > 0 && (!artilheiro || m.gols > artilheiro.gols)) {
+        artilheiro = { nome: m.users?.nome_jogador || m.users?.nome || null, avatar_url: m.users?.avatar_url || null, gols: m.gols };
+      }
+    }
+
+    // Mais presente: membro com mais jogos confirmados.
+    let maisUserId = null;
+    let maxPres = 0;
+    for (const [uid, n] of Object.entries(confByUser)) {
+      if (n > maxPres) {
+        maxPres = n;
+        maisUserId = uid;
+      }
+    }
+    let mais_presente = null;
+    if (maisUserId) {
+      const m = (members || []).find((x) => x.user_id === maisUserId);
+      mais_presente = { nome: m?.users?.nome_jogador || m?.users?.nome || null, avatar_url: m?.users?.avatar_url || null, jogos: maxPres };
+    }
+
+    // Próximo jogo futuro.
+    const now = Date.now();
+    const futuros = (games || [])
+      .filter((g) => g.data && new Date(g.data).getTime() > now && g.status !== 'cancelado')
+      .sort((a, b) => new Date(a.data) - new Date(b.data));
+    let proximo_jogo = null;
+    if (futuros[0]) {
+      const g = futuros[0];
+      const d = new Date(g.data);
+      const pad = (n) => String(n).padStart(2, '0');
+      proximo_jogo = {
+        id: g.id,
+        date: g.data,
+        time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        location: g.local,
+        confirmados: confByGame[g.id] || 0,
+      };
+    }
+
+    res.json({
+      stats: {
+        total_jogos: ativos.length,
+        total_membros,
+        media_confirmacoes,
+        artilheiro,
+        mais_presente,
+        proximo_jogo,
+      },
+    });
+  })
+);
+
 module.exports = router;

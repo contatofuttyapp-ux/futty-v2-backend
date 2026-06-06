@@ -198,6 +198,15 @@ router.get(
         jogadores_por_time: game.jogadores_por_time,
         sorteio_realizado: game.sorteio_realizado,
         times_resultado: game.times_resultado,
+        // Campos de resultado (para pré-preencher a edição no painel de admin).
+        campeao_time_index: game.campeao_time_index,
+        campeao_foto_url: game.campeao_foto_url,
+        artilheiro_user_id: game.artilheiro_user_id,
+        artilheiro_gols: game.artilheiro_gols,
+        destaque_user_id: game.destaque_user_id,
+        destaque_titulo: game.destaque_titulo,
+        rodada_user_id: game.rodada_user_id,
+        rodada_foto_url: game.rodada_foto_url,
       },
       players,
       meuEstado: meu
