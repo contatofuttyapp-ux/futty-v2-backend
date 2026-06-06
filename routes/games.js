@@ -372,61 +372,8 @@ router.post(
   })
 );
 
-/** POST /api/games/:id/votar — regista votos (1-5) nos confirmados, uma vez por jogo. */
-router.post(
-  '/api/games/:id/votar',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { votos } = req.body || {};
-    if (!Array.isArray(votos) || votos.length === 0) {
-      throw new HttpError(400, 'Não há votos para registar.');
-    }
-
-    const game = await loadGame(req.params.id);
-    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
-
-    const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
-
-    if (game.status !== 'em_curso' && game.status !== 'terminado') {
-      throw new HttpError(400, 'A votação abre depois do sorteio do jogo.');
-    }
-
-    const { count: jaVotou } = await supabase
-      .from('votes')
-      .select('id', { count: 'exact', head: true })
-      .eq('game_id', game.id)
-      .eq('de_user_id', req.user.id);
-    if ((jaVotou || 0) > 0) throw new HttpError(400, 'Já votaste neste jogo.');
-
-    const { data: gp } = await supabase
-      .from('game_players')
-      .select('user_id')
-      .eq('game_id', game.id)
-      .eq('confirmado', true);
-    const confirmadosIds = new Set((gp || []).map((p) => p.user_id));
-
-    await ensureUserRow(req.user);
-
-    const rows = [];
-    for (const v of votos) {
-      const para = v?.para_user_id;
-      const nota = parseInt(v?.nota, 10);
-      if (!para || para === req.user.id) continue; // não vota em si próprio
-      if (!confirmadosIds.has(para)) continue; // só jogadores confirmados
-      if (!(nota >= 1 && nota <= 5)) continue; // nota válida
-      rows.push({ de_user_id: req.user.id, para_user_id: para, team_id: game.teams.id, game_id: game.id, nota });
-    }
-    if (rows.length === 0) {
-      throw new HttpError(400, 'Nenhum voto válido (1 a 5, em jogadores confirmados).');
-    }
-
-    const { error } = await supabase.from('votes').insert(rows);
-    if (error) throw new HttpError(500, error.message);
-
-    res.status(201).json({ registados: rows.length });
-  })
-);
+// NOTA: a votação por jogo (POST /api/games/:id/votar) foi removida — o novo
+// modelo é 1 voto por (votante, votado, equipa), gerido em routes/ranking.js.
 
 /**
  * PATCH /api/games/:id — edita um jogo não sorteado (só admin).

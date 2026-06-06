@@ -226,7 +226,7 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -235,6 +235,7 @@ router.get(
       user_id: m.users?.id,
       role: m.role,
       pode_postar: !!m.pode_postar,
+      categoria: m.categoria || 'linha',
       nome: m.users?.nome || null,
       nome_jogador: m.users?.nome_jogador || null,
       avatar_url: m.users?.avatar_url || null,
@@ -293,6 +294,10 @@ router.patch(
       patch.role = b.role;
     }
     if ('pode_postar' in b) patch.pode_postar = !!b.pode_postar;
+    if ('categoria' in b) {
+      if (!['linha', 'GR'].includes(b.categoria)) throw new HttpError(400, 'categoria inválida.');
+      patch.categoria = b.categoria;
+    }
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
     const { data: updated, error } = await supabase
@@ -300,7 +305,7 @@ router.patch(
       .update(patch)
       .eq('team_id', team.id)
       .eq('user_id', req.params.userId)
-      .select('id, user_id, role, pode_postar')
+      .select('id, user_id, role, pode_postar, categoria')
       .maybeSingle();
     if (error) throw new HttpError(500, error.message);
     if (!updated) throw new HttpError(404, 'Membro não encontrado.');
