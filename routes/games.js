@@ -405,6 +405,57 @@ router.post(
   })
 );
 
+/** PATCH /api/games/:id/times — ajuste manual dos times pós-sorteio (só admin). */
+router.patch(
+  '/api/games/:id/times',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem ajustar os times.');
+
+    const tr = req.body?.times_resultado;
+    if (!tr || !Array.isArray(tr.times)) throw new HttpError(400, 'times_resultado inválido.');
+
+    const reservas = Array.isArray(tr.reservas) ? tr.reservas : [];
+
+    // Cada time tem pelo menos 1 jogador.
+    for (const t of tr.times) {
+      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) {
+        throw new HttpError(400, 'Cada time tem de ter pelo menos 1 jogador.');
+      }
+    }
+
+    // Recolhe todos os jogadores (times + reservas) e valida duplicados.
+    const todos = [...tr.times.flatMap((t) => t.jogadores || []), ...reservas];
+    const ids = todos.map((j) => j.user_id).filter(Boolean);
+    if (new Set(ids).size !== ids.length) throw new HttpError(400, 'Há jogadores repetidos entre os times.');
+
+    // Todos têm de ser confirmados deste jogo.
+    const { data: gp } = await supabase
+      .from('game_players')
+      .select('user_id')
+      .eq('game_id', game.id)
+      .eq('confirmado', true);
+    const confirmados = new Set((gp || []).map((p) => p.user_id));
+    for (const id of ids) {
+      if (!confirmados.has(id)) throw new HttpError(400, 'Todos os jogadores têm de estar confirmados no jogo.');
+    }
+
+    const { data: updated, error } = await supabase
+      .from('games')
+      .update({ times_resultado: tr, num_times: tr.times.length })
+      .eq('id', game.id)
+      .select('times_resultado')
+      .single();
+    if (error) throw new HttpError(500, error.message);
+
+    res.json({ times_resultado: updated.times_resultado });
+  })
+);
+
 // NOTA: a votação por jogo (POST /api/games/:id/votar) foi removida — o novo
 // modelo é 1 voto por (votante, votado, equipa), gerido em routes/ranking.js.
 
