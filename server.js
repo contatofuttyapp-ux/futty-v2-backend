@@ -17,7 +17,28 @@ const avataresRoutes = require('./routes/avatares');
 const feedRoutes = require('./routes/feed');
 
 const app = express();
-app.use(cors());
+
+// Origens permitidas: localhost (dev), qualquer URL do Codespaces (.app.github.dev)
+// e origens de produção definidas em CORS_ORIGINS (separadas por vírgula).
+const envOrigins = (process.env.CORS_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  /\.app\.github\.dev$/, // Codespaces
+  ...envOrigins,
+];
+const corsOptions = {
+  origin(origin, callback) {
+    // Pedidos sem Origin (curl, server-to-server) → permitir.
+    if (!origin) return callback(null, true);
+    const permitido = allowedOrigins.some((o) => (o instanceof RegExp ? o.test(origin) : o === origin));
+    return callback(null, permitido);
+  },
+};
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Ficheiros estáticos (fotos de campeão, etc.) em /uploads
