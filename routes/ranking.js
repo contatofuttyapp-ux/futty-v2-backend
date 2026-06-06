@@ -5,18 +5,12 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
-const { round2 } = require('../utils/helpers');
+const { round2, notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
 
 // Mínimo de votos para a nota aparecer.
 const MIN_VOTOS = 3;
-
-// Converte a média interna (1-5) para a nota exibida (6-10). null se sem nota.
-function notaParaExibir(mediaInterna) {
-  if (mediaInterna == null) return null;
-  return Math.round((6 + ((mediaInterna - 1) / 4) * 4) * 10) / 10;
-}
 
 // nota válida: número entre 1 e 5 em incrementos de 0.5.
 function notaValida(n) {

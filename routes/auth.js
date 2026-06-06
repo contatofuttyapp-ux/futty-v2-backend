@@ -4,7 +4,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
-const { round2 } = require('../utils/helpers');
+const { notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
 
@@ -36,10 +36,11 @@ router.get(
     const { data: tmRows } = await supabase.from('team_members').select('gols').eq('user_id', userId);
     const gols = (tmRows || []).reduce((sum, r) => sum + (r.gols || 0), 0);
 
+    // Nota exibida (1-10 com boost) — mín. 3 votos, como no ranking.
     const { data: voteRows } = await supabase.from('votes').select('nota').eq('para_user_id', userId);
-    const nota = voteRows && voteRows.length
-      ? round2(voteRows.reduce((sum, v) => sum + v.nota, 0) / voteRows.length)
-      : null;
+    const totalVotos = voteRows ? voteRows.length : 0;
+    const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;
+    const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
 
     res.json({
       user: {
