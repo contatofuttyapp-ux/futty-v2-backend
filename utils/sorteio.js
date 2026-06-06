@@ -105,7 +105,6 @@ function executarSorteio(confirmados, jogadoresPorTime) {
 
   // Preenche os times por rondas em snake (A B C / C B A / ...) até cada time
   // ter EXACTAMENTE porTime jogadores. Times cheios são saltados.
-  const reservas = [];
   let p = 0;
   let round = 0;
   while (p < pool.length) {
@@ -125,11 +124,23 @@ function executarSorteio(confirmados, jogadoresPorTime) {
     if (!colocou) break; // todos os times cheios
   }
 
-  // O que sobrar (apenas linha comum, em condições normais) vai para reservas.
-  while (p < pool.length) {
-    reservas.push(pool[p]);
-    p += 1;
-  }
+  // Banco de reservas: o que sobrar (apenas linha comum — os excessos de
+  // goleiros/cabeças foram colocados à frente do pool, por isso NUNCA sobram).
+  // Ordenado por rating DESC (o melhor entra primeiro) e numerado por posição.
+  const reservas = pool
+    .slice(p)
+    .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+    .map((j, i) => {
+      const r = {
+        posicao: i + 1,
+        user_id: j.user_id,
+        nome: j.nome,
+        avatar_url: j.avatar_url || null,
+        rating: j.rating,
+      };
+      if (i === 0) r.ordem_entrada = 'primeiro'; // o mais provável de entrar
+      return r;
+    });
 
   return { numTimes, times, reservas };
 }
