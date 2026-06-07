@@ -166,6 +166,67 @@ router.get(
   })
 );
 
+/**
+ * GET /api/teams/publicas — equipas públicas com nº de membros e último jogo,
+ * ordenadas por recência do último jogo (7d > 30d > resto) e depois nº membros.
+ * Equivalente ao SQL do briefing (feito em JS — o cliente Supabase não faz GROUP BY).
+ * Registado ANTES de /api/teams/:slug para não colidir com o param :slug.
+ */
+router.get(
+  '/api/teams/publicas',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { data: teams, error } = await supabase
+      .from('teams')
+      .select('id, nome, slug, descricao, localizacao, logo_url, cor_fundo, modo_visibilidade')
+      .in('modo_visibilidade', ['publico_aberto', 'publico_aprovacao']);
+    if (error) throw new HttpError(500, error.message);
+
+    const lista = teams || [];
+    const ids = lista.map((t) => t.id);
+
+    const membros = {};
+    const ultimoJogoTs = {};
+    if (ids.length) {
+      const { data: tm } = await supabase.from('team_members').select('team_id, user_id').in('team_id', ids);
+      for (const m of tm || []) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
+
+      const { data: gs } = await supabase.from('games').select('team_id, data').in('team_id', ids).is('cancelado_at', null);
+      for (const g of gs || []) {
+        const ts = g.data ? new Date(g.data).getTime() : 0;
+        if (ts > (ultimoJogoTs[g.team_id] || 0)) ultimoJogoTs[g.team_id] = ts;
+      }
+    }
+
+    const now = Date.now();
+    const cut7 = now - 7 * 86400000;
+    const cut30 = now - 30 * 86400000;
+    const bucket = (ts) => (ts > cut7 ? 1 : ts > cut30 ? 2 : 3);
+
+    const out = lista
+      .map((t) => ({
+        id: t.id,
+        nome: t.nome,
+        slug: t.slug,
+        descricao: t.descricao,
+        localizacao: t.localizacao,
+        logo_url: t.logo_url || null,
+        cor_fundo: t.cor_fundo || null,
+        modo_visibilidade: t.modo_visibilidade,
+        numero_membros: membros[t.id] || 0,
+        ultimo_jogo: ultimoJogoTs[t.id] ? new Date(ultimoJogoTs[t.id]).toISOString() : null,
+      }))
+      .sort((a, b) => {
+        const ba = bucket(ultimoJogoTs[a.id] || 0);
+        const bb = bucket(ultimoJogoTs[b.id] || 0);
+        if (ba !== bb) return ba - bb;
+        return b.numero_membros - a.numero_membros;
+      });
+
+    res.json({ teams: out });
+  })
+);
+
 /** GET /api/teams/:slug — detalhes da equipa + lista de membros (só membros). */
 router.get(
   '/api/teams/:slug',
