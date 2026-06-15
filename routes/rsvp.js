@@ -61,6 +61,20 @@ router.post(
       .select()
       .single();
     if (error) throw new HttpError(500, error.message);
+
+    // Sincroniza os confirmados via RSVP para game_players (alimenta o sorteio
+    // sem o admin ter de adicionar os jogadores manualmente).
+    const { data: confirmados } = await supabase
+      .from('rsvp_respostas')
+      .select('user_id')
+      .eq('game_id', game.id)
+      .eq('status', 'confirmado');
+    const rows = (confirmados || []).map((r) => ({ game_id: game.id, user_id: r.user_id, confirmado: true }));
+    if (rows.length) {
+      const { error: gpErr } = await supabase.from('game_players').upsert(rows, { onConflict: 'game_id,user_id' });
+      if (gpErr) throw new HttpError(500, gpErr.message);
+    }
+
     res.json({ game: updated });
   })
 );
