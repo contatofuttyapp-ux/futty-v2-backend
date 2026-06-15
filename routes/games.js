@@ -316,11 +316,29 @@ router.post(
       throw new HttpError(400, 'Define os jogadores por time antes de sortear.');
     }
 
-    const { data: gp } = await supabase
+    // Subconjunto opcional (ex.: confirmados via RSVP). Se vier, sorteia só estes.
+    const { jogadoresIds } = req.body || {};
+    const usarSubset = Array.isArray(jogadoresIds) && jogadoresIds.length > 0;
+    if (usarSubset) {
+      // Valida que todos os IDs pertencem à equipa do jogo.
+      const { data: membros } = await supabase
+        .from('team_members')
+        .select('user_id')
+        .eq('team_id', game.teams.id)
+        .in('user_id', jogadoresIds);
+      const validos = new Set((membros || []).map((m) => m.user_id));
+      if (jogadoresIds.some((uid) => !validos.has(uid))) {
+        throw new HttpError(400, 'Alguns jogadores indicados não pertencem à equipa.');
+      }
+    }
+
+    let gpQuery = supabase
       .from('game_players')
       .select('goleiro, cabeca_chave, users ( id, nome, email, avatar_url )')
       .eq('game_id', game.id)
       .eq('confirmado', true);
+    if (usarSubset) gpQuery = gpQuery.in('user_id', jogadoresIds);
+    const { data: gp } = await gpQuery;
     const confirmados = (gp || []).filter((p) => p.users);
 
     // Nº de times = confirmados / jogadores por time. Os que sobram são
