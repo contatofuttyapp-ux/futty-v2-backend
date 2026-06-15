@@ -311,13 +311,15 @@ router.post(
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem fazer o sorteio.');
 
-    const porTime = game.jogadores_por_time;
+    // Jogadores por time: o body pode sobrepor o valor guardado no jogo.
+    const { jogadoresIds, jogadoresPorTime } = req.body || {};
+    let porTime = game.jogadores_por_time;
+    const pptBody = Number(jogadoresPorTime);
+    if (Number.isInteger(pptBody) && pptBody >= 1) porTime = pptBody;
     if (!porTime || porTime < 1) {
       throw new HttpError(400, 'Define os jogadores por time antes de sortear.');
     }
 
-    // Subconjunto opcional (ex.: confirmados via RSVP). Se vier, sorteia só estes.
-    const { jogadoresIds } = req.body || {};
     const usarSubset = Array.isArray(jogadoresIds) && jogadoresIds.length > 0;
     if (usarSubset) {
       // Valida que todos os IDs pertencem à equipa do jogo.
@@ -397,7 +399,7 @@ router.post(
 
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ num_times: numTimes, sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
+      .update({ jogadores_por_time: porTime, num_times: numTimes, sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
       .eq('id', game.id)
       .select()
       .single();
