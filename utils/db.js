@@ -44,6 +44,21 @@ async function ensureUserRow(user) {
   await supabase.from('users').upsert({ id: user.id, email: user.email }, { onConflict: 'id' });
 }
 
+/** Garante o bucket público "avatars" no Storage (idempotente). Corre no arranque. */
+async function ensureAvatarsBucket() {
+  const { data: existente } = await supabase.storage.getBucket('avatars');
+  if (existente) return;
+  const { error } = await supabase.storage.createBucket('avatars', {
+    public: true,
+    fileSizeLimit: '5MB',
+    allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
+  });
+  // Se já existir (corrida entre processos), ignora; resto é avisado.
+  if (error && !/exist/i.test(error.message)) {
+    console.error('[Futty] Falha ao criar bucket "avatars":', error.message);
+  }
+}
+
 /**
  * Carrega a equipa pelo slug e valida que o utilizador é membro.
  * Lança HttpError(404) se não existir, HttpError(403) se não for membro.
@@ -120,6 +135,7 @@ module.exports = {
   getUserById,
   getRole,
   ensureUserRow,
+  ensureAvatarsBucket,
   requireTeamMember,
   loadGame,
   currentVotingGame,

@@ -6,7 +6,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 
-const { supabase } = require('./utils/db');
+const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { HttpError } = require('./utils/http');
 
 const authRoutes = require('./routes/auth');
@@ -105,6 +105,8 @@ const port = process.env.PORT || 3001;
 app.listen(port, () => {
   console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
   console.log(`[Futty] Health check: http://localhost:${port}/health`);
+  // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
+  ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
 });
 
 module.exports = { app, supabase };

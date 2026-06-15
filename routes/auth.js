@@ -1,12 +1,37 @@
 // Futty v2.0 — Rotas de autenticação / utilizador.
 // (O login/registo é feito no frontend via Supabase Auth; aqui expomos o perfil.)
 const express = require('express');
+const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
+
+// Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
+const MAX_AVATAR = 5 * 1024 * 1024;
+const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const uploadAvatarMw = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AVATAR },
+  fileFilter: (req, file, cb) => {
+    if (AVATAR_MIME[file.mimetype]) cb(null, true);
+    else cb(new HttpError(400, 'Só são aceites imagens JPEG, PNG ou WebP.'));
+  },
+}).single('avatar');
+
+// Wrapper que corre o multer e converte os erros dele em HttpError(400).
+function receberAvatar(req, res, next) {
+  uploadAvatarMw(req, res, (err) => {
+    if (!err) return next();
+    if (err instanceof multer.MulterError) {
+      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'A imagem excede o limite de 5MB.' : 'Falha no upload da imagem.';
+      return next(new HttpError(400, msg));
+    }
+    return next(err); // HttpError do fileFilter ou outro
+  });
+}
 
 // Cores de uniforme válidas (igual ao CHECK da migração 013).
 const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzento'];
@@ -123,6 +148,43 @@ router.patch(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ user: updated });
+  })
+);
+
+/**
+ * POST /api/me/avatar — upload da foto de perfil (multipart, campo "avatar").
+ * Vai para o Supabase Storage (bucket "avatars", path public/{userId}.{ext},
+ * sobrescreve) e guarda o URL público em users.avatar_url.
+ */
+router.post(
+  '/api/me/avatar',
+  requireAuth,
+  receberAvatar,
+  asyncHandler(async (req, res) => {
+    const file = req.file;
+    if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "avatar").');
+    const ext = AVATAR_MIME[file.mimetype];
+    if (!ext) throw new HttpError(400, 'Formato de imagem não suportado.');
+
+    const userId = req.user.id;
+    await ensureUserRow(req.user);
+
+    const caminho = `public/${userId}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
+      contentType: file.mimetype,
+      upsert: true,
+      cacheControl: '3600',
+    });
+    if (upErr) throw new HttpError(500, upErr.message);
+
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
+    // ?v= força o browser a recarregar (o path é fixo porque sobrescreve).
+    const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: updErr } = await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
+    if (updErr) throw new HttpError(500, updErr.message);
+
+    res.json({ avatar_url: avatarUrl });
   })
 );
 
