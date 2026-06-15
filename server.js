@@ -16,6 +16,7 @@ const rankingRoutes = require('./routes/ranking');
 const avataresRoutes = require('./routes/avatares');
 const feedRoutes = require('./routes/feed');
 const pushRoutes = require('./routes/push');
+const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
 
@@ -40,6 +41,11 @@ const corsOptions = {
   },
 };
 app.use(cors(corsOptions));
+
+// Webhook do Stripe ANTES do express.json: precisa do corpo cru para validar
+// a assinatura (express.raw devolve um Buffer).
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), webhookHandler);
+
 app.use(express.json());
 
 // Ficheiros estáticos (fotos de campeão, etc.) em /uploads
@@ -87,6 +93,7 @@ app.use(rankingRoutes);
 app.use(avataresRoutes);
 app.use(feedRoutes);
 app.use('/api/push', pushRoutes);
+app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {
