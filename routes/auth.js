@@ -2,12 +2,25 @@
 // (O login/registo é feito no frontend via Supabase Auth; aqui expomos o perfil.)
 const express = require('express');
 const multer = require('multer');
+const fal = require('@fal-ai/serverless-client');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { notaParaExibir } = require('../utils/helpers');
 
+// fal.ai — credenciais via FAL_KEY (.env).
+fal.config({ credentials: process.env.FAL_KEY });
+
 const router = express.Router();
+
+// Corre uma promise com timeout (geração de IA pode demorar).
+function comTimeout(promise, ms, msg) {
+  let t;
+  const limite = new Promise((_, rej) => {
+    t = setTimeout(() => rej(new HttpError(504, msg)), ms);
+  });
+  return Promise.race([promise, limite]).finally(() => clearTimeout(t));
+}
 
 // Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
@@ -179,6 +192,67 @@ router.post(
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     // ?v= força o browser a recarregar (o path é fixo porque sobrescreve).
+    const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    const { error: updErr } = await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
+    if (updErr) throw new HttpError(500, updErr.message);
+
+    res.json({ avatar_url: avatarUrl });
+  })
+);
+
+/**
+ * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
+ * via fal.ai, e guarda em avatars/public/{userId}-ai.png (separado da foto real).
+ * Por agora todos usam FLUX schnell (free).
+ */
+router.post(
+  '/api/me/avatar/ai',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
+
+    const userId = req.user.id;
+    const perfil = await getUserById(userId, 'avatar_url');
+    if (!perfil?.avatar_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
+
+    // Modelo conforme o plano. Por agora, todos em FLUX schnell.
+    const MODELO = 'fal-ai/flux/schnell';
+    // TODO Pro/Elite (quando os planos existirem): 'fal-ai/openai/gpt-image-1'.
+
+    const resultado = await comTimeout(
+      fal.subscribe(MODELO, {
+        input: {
+          image_url: perfil.avatar_url,
+          prompt:
+            'Panini football sticker card portrait, semi-realistic illustration style, vibrant colors, clean gradient background, athletic football pose, sharp details, card art style',
+          image_size: 'portrait_4_3',
+          num_inference_steps: 4,
+          num_images: 1,
+        },
+      }),
+      60000,
+      'A geração demorou demasiado. Tenta novamente.'
+    );
+
+    const urlGerada = resultado?.images?.[0]?.url;
+    if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
+
+    // Descarrega a imagem gerada e envia para o Storage.
+    const resp = await fetch(urlGerada);
+    if (!resp.ok) throw new HttpError(502, 'Falha ao obter a imagem gerada.');
+    const buffer = Buffer.from(await resp.arrayBuffer());
+
+    await ensureUserRow(req.user);
+    const caminho = `public/${userId}-ai.png`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
+      contentType: 'image/png',
+      upsert: true,
+      cacheControl: '3600',
+    });
+    if (upErr) throw new HttpError(500, upErr.message);
+
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
     const { error: updErr } = await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
