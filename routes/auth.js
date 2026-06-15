@@ -51,9 +51,11 @@ const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzen
 // Preferências da figurinha (igual aos CHECKs da migração 018).
 const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
 const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
+// Limites de gerações de avatar IA por plano.
+const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
 const PERFIL_COLS =
-  'id, nome, email, avatar_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha';
+  'id, nome, email, avatar_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset';
 
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
@@ -96,6 +98,9 @@ router.get(
         avatar_ia_creditos: perfil?.avatar_ia_creditos ?? 3,
         cor_frame: perfil?.cor_frame || 'dourado',
         fundo_figurinha: perfil?.fundo_figurinha || 'estadio',
+        plan: perfil?.plan || 'free',
+        avatar_ia_mes: perfil?.avatar_ia_mes ?? 0,
+        avatar_ia_reset: perfil?.avatar_ia_reset || null,
       },
       stats: { nota, jogos: jogos || 0, gols },
     });
@@ -213,8 +218,29 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'avatar_url');
+    const perfil = await getUserById(userId, 'avatar_url, plan, avatar_ia_mes, avatar_ia_reset');
     if (!perfil?.avatar_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
+
+    // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
+    const plano = perfil.plan || 'free';
+    const limite = LIMITES_IA[plano] ?? LIMITES_IA.free;
+    const hoje = new Date();
+    const hojeISO = hoje.toISOString().slice(0, 10);
+    const inicioMesISO = `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, '0')}-01`;
+    // Se o último reset foi antes do início do mês atual → zera a contagem.
+    let usados = perfil.avatar_ia_mes || 0;
+    let resetData = perfil.avatar_ia_reset ? String(perfil.avatar_ia_reset) : null;
+    if (!resetData || resetData < inicioMesISO) {
+      usados = 0;
+      resetData = hojeISO;
+    }
+    if (usados >= limite) {
+      const msg =
+        plano === 'free'
+          ? 'Limite de gerações atingido. Faz upgrade para Pro para continuar.'
+          : 'Limite de gerações deste mês atingido.';
+      throw new HttpError(403, msg);
+    }
 
     // Modelo conforme o plano. Por agora, todos em FLUX schnell.
     const MODELO = 'fal-ai/flux/schnell';
@@ -255,7 +281,11 @@ router.post(
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
-    const { error: updErr } = await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
+    // Persiste o novo avatar + incrementa a quota (e grava o reset se mudou).
+    const { error: updErr } = await supabase
+      .from('users')
+      .update({ avatar_url: avatarUrl, avatar_ia_mes: usados + 1, avatar_ia_reset: resetData })
+      .eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
 
     res.json({ avatar_url: avatarUrl });
