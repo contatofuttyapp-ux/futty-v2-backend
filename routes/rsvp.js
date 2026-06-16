@@ -5,8 +5,57 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, loadGame } = require('../utils/db');
+const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
+
+/** Data curta PT (ex.: "12/06 · 20:30") para o corpo das notificações. */
+function dataCurtaPT(iso) {
+  try {
+    return new Date(iso).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Promove o primeiro da lista de espera de um jogo (se houver vaga libertada):
+ * confirma-o, remove-o da fila, reorganiza as posições e notifica-o por push.
+ */
+async function promoverDaEspera(game) {
+  const { data: primeiro } = await supabase
+    .from('rsvp_espera')
+    .select('id, user_id, posicao')
+    .eq('game_id', game.id)
+    .order('posicao', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (!primeiro) return;
+
+  await supabase
+    .from('rsvp_respostas')
+    .upsert(
+      { game_id: game.id, user_id: primeiro.user_id, status: 'confirmado', respondido_em: new Date().toISOString() },
+      { onConflict: 'game_id,user_id' }
+    );
+  await supabase.from('rsvp_espera').delete().eq('id', primeiro.id);
+
+  // Reorganiza as posições dos restantes (todos os que estavam atrás avançam 1).
+  const { data: restantes } = await supabase
+    .from('rsvp_espera')
+    .select('id, posicao')
+    .eq('game_id', game.id)
+    .gt('posicao', primeiro.posicao);
+  for (const r of restantes || []) {
+    await supabase.from('rsvp_espera').update({ posicao: r.posicao - 1 }).eq('id', r.id);
+  }
+
+  enviarNotificacao([primeiro.user_id], {
+    title: '✅ Vaga disponível!',
+    body: `Foste confirmado para o jogo de ${dataCurtaPT(game.data)}. Confirma a tua presença no app.`,
+    url: `/equipa/${game.teams.slug}`,
+  });
+}
 
 // Carrega o jogo e garante que o utilizador é admin da equipa.
 async function jogoComoAdmin(req) {
@@ -107,7 +156,16 @@ router.post(
       throw new HttpError(400, 'O prazo do RSVP já passou.');
     }
 
-    // Capacidade: bloqueia novas confirmações se o jogo já estiver cheio.
+    // Estado anterior (para saber se uma vaga foi libertada ao recusar).
+    const { data: anterior } = await supabase
+      .from('rsvp_respostas')
+      .select('status')
+      .eq('game_id', game.id)
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+    const eraConfirmado = anterior?.status === 'confirmado';
+
+    // Capacidade: se o jogo já estiver cheio, entra na lista de espera.
     if (status === 'confirmado' && game.max_jogadores != null) {
       const { count } = await supabase
         .from('rsvp_respostas')
@@ -116,7 +174,31 @@ router.post(
         .eq('status', 'confirmado')
         .neq('user_id', req.user.id);
       if ((count || 0) >= game.max_jogadores) {
-        throw new HttpError(409, 'Jogo cheio. Foste adicionado à lista de espera.');
+        // Já está na fila? Devolve a posição atual sem reordenar.
+        const { data: jaNaFila } = await supabase
+          .from('rsvp_espera')
+          .select('posicao')
+          .eq('game_id', game.id)
+          .eq('user_id', req.user.id)
+          .maybeSingle();
+        if (jaNaFila) return res.json({ ok: true, espera: true, posicao: jaNaFila.posicao });
+
+        // Garante que não fica também marcado como confirmado/recusado.
+        await supabase.from('rsvp_respostas').delete().eq('game_id', game.id).eq('user_id', req.user.id);
+
+        const { data: ultima } = await supabase
+          .from('rsvp_espera')
+          .select('posicao')
+          .eq('game_id', game.id)
+          .order('posicao', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        const posicao = (ultima?.posicao || 0) + 1;
+        const { error: espErr } = await supabase
+          .from('rsvp_espera')
+          .upsert({ game_id: game.id, user_id: req.user.id, posicao }, { onConflict: 'game_id,user_id' });
+        if (espErr) throw new HttpError(500, espErr.message);
+        return res.json({ ok: true, espera: true, posicao });
       }
     }
 
@@ -127,7 +209,44 @@ router.post(
         { onConflict: 'game_id,user_id' }
       );
     if (error) throw new HttpError(500, error.message);
+
+    // Se um confirmado recusou, libertou uma vaga → promove o 1º da espera.
+    if (status === 'recusado' && eraConfirmado) {
+      await promoverDaEspera(game);
+    }
+
     res.json({ ok: true, status });
+  })
+);
+
+/** POST /api/jogos/:gameId/rsvp/sair-espera — jogador sai da lista de espera. */
+router.post(
+  '/api/jogos/:gameId/rsvp/sair-espera',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await jogoComoMembro(req);
+
+    const { data: minha } = await supabase
+      .from('rsvp_espera')
+      .select('id, posicao')
+      .eq('game_id', game.id)
+      .eq('user_id', req.user.id)
+      .maybeSingle();
+    if (!minha) return res.json({ ok: true });
+
+    await supabase.from('rsvp_espera').delete().eq('id', minha.id);
+
+    // Reorganiza as posições de quem estava atrás.
+    const { data: restantes } = await supabase
+      .from('rsvp_espera')
+      .select('id, posicao')
+      .eq('game_id', game.id)
+      .gt('posicao', minha.posicao);
+    for (const r of restantes || []) {
+      await supabase.from('rsvp_espera').update({ posicao: r.posicao - 1 }).eq('id', r.id);
+    }
+
+    res.json({ ok: true });
   })
 );
 
@@ -159,6 +278,20 @@ router.get(
     const max = game.max_jogadores ?? null;
     const lugaresDisponiveis = max != null ? Math.max(0, max - confirmados.length) : null;
 
+    // Lista de espera (ordenada por posição).
+    const userById = {};
+    for (const u of users) userById[u.id] = u;
+    const { data: filaRows } = await supabase
+      .from('rsvp_espera')
+      .select('user_id, posicao')
+      .eq('game_id', game.id)
+      .order('posicao', { ascending: true });
+    const espera = (filaRows || []).map((r) => {
+      const u = userById[r.user_id] || {};
+      return { user_id: r.user_id, nome: u.nome_jogador || u.nome || null, avatar_url: u.avatar_url || null, posicao: r.posicao };
+    });
+    const minhaEspera = (filaRows || []).find((r) => r.user_id === req.user.id);
+
     res.json({
       rsvp_aberto: game.rsvp_aberto || false,
       rsvp_prazo: game.rsvp_prazo || null,
@@ -169,6 +302,8 @@ router.get(
       confirmados,
       recusados: users.filter((u) => statusPorUser[u.id] === 'recusado'),
       pendentes: users.filter((u) => !statusPorUser[u.id]),
+      espera,
+      minha_posicao_espera: minhaEspera ? minhaEspera.posicao : null,
     });
   })
 );
