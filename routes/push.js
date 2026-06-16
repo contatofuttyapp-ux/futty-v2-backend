@@ -6,7 +6,7 @@ const express = require('express');
 const webpush = require('web-push');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
-const { supabase, ensureUserRow } = require('../utils/db');
+const { supabase, ensureUserRow, getTeamBySlug, getRole } = require('../utils/db');
 
 const router = express.Router();
 
@@ -63,6 +63,68 @@ router.delete(
 router.get('/vapid-public-key', (req, res) => {
   res.json({ publicKey: VAPID_PUBLIC_KEY || null });
 });
+
+/**
+ * POST /api/push/equipas/:slug/broadcast — admin envia um aviso push a todos os
+ * membros da equipa que tenham subscrição. Devolve { enviadas, falhas }.
+ */
+router.post(
+  '/equipas/:slug/broadcast',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem enviar avisos.');
+    if (!pushConfigurado) throw new HttpError(503, 'Notificações push não estão configuradas no servidor.');
+
+    const titulo = String(req.body?.titulo || '').trim();
+    const mensagem = String(req.body?.mensagem || '').trim();
+    if (!titulo) throw new HttpError(400, 'Indica o título.');
+    if (!mensagem) throw new HttpError(400, 'Indica a mensagem.');
+
+    // Subscrições de todos os membros da equipa.
+    const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
+    const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
+    if (!ids.length) return res.json({ enviadas: 0, falhas: 0 });
+
+    const { data: subs } = await supabase
+      .from('push_subscriptions')
+      .select('id, endpoint, p256dh, auth')
+      .in('user_id', ids);
+    if (!subs?.length) return res.json({ enviadas: 0, falhas: 0 });
+
+    const body = JSON.stringify({
+      title: titulo.slice(0, 60),
+      body: mensagem.slice(0, 200),
+      icon: '/icons/icon-192.png',
+      url: `/equipa/${team.slug}`,
+    });
+
+    let enviadas = 0;
+    let falhas = 0;
+    const resultados = await Promise.allSettled(
+      subs.map(async (s) => {
+        const subscription = { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } };
+        try {
+          await webpush.sendNotification(subscription, body);
+        } catch (err) {
+          // 404/410 = subscrição expirada → limpar.
+          if (err?.statusCode === 404 || err?.statusCode === 410) {
+            await supabase.from('push_subscriptions').delete().eq('id', s.id);
+          }
+          throw err;
+        }
+      })
+    );
+    resultados.forEach((r) => {
+      if (r.status === 'fulfilled') enviadas += 1;
+      else falhas += 1;
+    });
+
+    res.json({ enviadas, falhas });
+  })
+);
 
 /**
  * Envia uma notificação push a uma lista de utilizadores (fire-and-forget).
