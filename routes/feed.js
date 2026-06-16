@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
-const { supabase, getRole, ensureUserRow, getUserById, loadGame } = require('../utils/db');
+const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
@@ -147,7 +147,7 @@ router.get(
     // Posts editoriais
     const { data: posts, error: pErr } = await supabase
       .from('feed_posts')
-      .select('id, team_id, author_id, body, created_at')
+      .select('id, team_id, author_id, body, tipo, conteudo, created_at')
       .in('team_id', teamIds)
       .order('created_at', { ascending: false });
     if (pErr) throw new HttpError(500, pErr.message);
@@ -232,6 +232,8 @@ router.get(
         author_nome: nomeOf(p.author_id),
         author_avatar_url: avatarOf(p.author_id),
         body: p.body,
+        tipo: p.tipo || 'post',
+        conteudo: p.conteudo || null,
         media: mediaByPost[p.id] || [],
         contagem_reacoes: reacPosts[p.id]?.contagem || {},
         minha_reacao: reacPosts[p.id]?.minha || null,
@@ -313,6 +315,50 @@ router.post(
         author_avatar_url: author?.avatar_url || null,
         body: post.body,
         media: savedMedia,
+        created_at: post.created_at,
+        contagem_reacoes: {},
+        minha_reacao: null,
+      },
+    });
+  })
+);
+
+/** POST /api/feed/equipas/:slug/anuncio — anúncio oficial no feed (só admin). */
+router.post(
+  '/api/feed/equipas/:slug/anuncio',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem publicar anúncios.');
+
+    const titulo = String(req.body?.titulo || '').trim();
+    const mensagem = String(req.body?.mensagem || '').trim();
+    if (!titulo || !mensagem) throw new HttpError(400, 'Título e mensagem são obrigatórios.');
+    if (titulo.length > 80) throw new HttpError(400, 'Título: máximo 80 caracteres.');
+
+    const msg = mensagem.slice(0, 500);
+    const { data: post, error } = await supabase
+      .from('feed_posts')
+      .insert({ team_id: team.id, author_id: req.user.id, tipo: 'anuncio', body: msg, conteudo: { titulo, mensagem: msg } })
+      .select()
+      .single();
+    if (error) throw new HttpError(500, error.message);
+
+    const author = await getUserById(req.user.id);
+    res.status(201).json({
+      post: {
+        kind: 'post',
+        id: post.id,
+        team_id: post.team_id,
+        author_id: post.author_id,
+        author_nome: author?.nome || author?.email || null,
+        author_avatar_url: author?.avatar_url || null,
+        body: post.body,
+        tipo: 'anuncio',
+        conteudo: post.conteudo,
+        media: [],
         created_at: post.created_at,
         contagem_reacoes: {},
         minha_reacao: null,
