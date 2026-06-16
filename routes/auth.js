@@ -55,7 +55,16 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
 const PERFIL_COLS =
-  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin';
+  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate';
+
+// Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
+// menos 18 anos. (Não dá para usar coluna gerada STORED — ver migração 034.)
+function calcIsAdult(birthdate) {
+  if (!birthdate) return false;
+  const hoje = new Date();
+  const limite = new Date(Date.UTC(hoje.getUTCFullYear() - 18, hoje.getUTCMonth(), hoje.getUTCDate()));
+  return new Date(birthdate) <= limite;
+}
 
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
@@ -103,6 +112,8 @@ router.get(
         avatar_ia_mes: perfil?.avatar_ia_mes ?? 0,
         avatar_ia_reset: perfil?.avatar_ia_reset || null,
         is_super_admin: perfil?.is_super_admin || false,
+        birthdate: perfil?.birthdate || null,
+        is_adult: calcIsAdult(perfil?.birthdate),
       },
       stats: { nota, jogos: jogos || 0, gols },
     });

@@ -39,9 +39,15 @@ async function getRole(teamId, userId) {
   return data?.role || null;
 }
 
-/** Garante que existe a linha em public.users (o trigger pode não ter corrido). */
+/** Garante que existe a linha em public.users (o trigger pode não ter corrido).
+ * Persiste também a birthdate enviada no signUp (user_metadata) quando válida —
+ * é a forma de capturar a data do registo, já que o registo é feito via Supabase
+ * Auth no frontend (não há POST /api/auth/register). */
 async function ensureUserRow(user) {
-  await supabase.from('users').upsert({ id: user.id, email: user.email }, { onConflict: 'id' });
+  const row = { id: user.id, email: user.email };
+  const bd = user.user_metadata?.birthdate;
+  if (typeof bd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(bd)) row.birthdate = bd;
+  await supabase.from('users').upsert(row, { onConflict: 'id' });
 }
 
 /** Garante o bucket público "avatars" no Storage (idempotente). Corre no arranque. */
