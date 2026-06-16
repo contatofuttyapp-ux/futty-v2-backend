@@ -7,7 +7,7 @@ const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
-const { slugify } = require('../utils/helpers');
+const { slugify, notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
 
@@ -349,9 +349,23 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email, plan )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
+
+    // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
+    // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
+    const MIN_VOTOS = 3;
+    const { data: votos } = await supabase
+      .from('votes')
+      .select('para_user_id, nota')
+      .eq('team_id', team.id);
+    const votosAgg = {}; // user_id -> { sum, count }
+    for (const v of votos || []) {
+      const a = (votosAgg[v.para_user_id] = votosAgg[v.para_user_id] || { sum: 0, count: 0 });
+      a.sum += Number(v.nota);
+      a.count += 1;
+    }
 
     // Últimos 5 jogos da equipa (mais recente → mais antigo) para o histórico
     // de presenças. Um jogador esteve presente se tem game_players.confirmado.
@@ -382,6 +396,8 @@ router.get(
         presente: !!presentesPorJogo[g.id]?.has(uid),
       }));
       const presentes = presencas.filter((p) => p.presente).length;
+      const va = votosAgg[uid];
+      const notaMedia = va && va.count >= MIN_VOTOS ? notaParaExibir(va.sum / va.count) : null;
       return {
         id: m.id,
         user_id: uid,
@@ -403,6 +419,8 @@ router.get(
         destaque: m.destaque ?? 0,
         presencas_recentes: presencas,
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
+        nota_media: notaMedia,
+        plano: m.users?.plan || 'free',
       };
     });
     membros.sort((a, b) => {
