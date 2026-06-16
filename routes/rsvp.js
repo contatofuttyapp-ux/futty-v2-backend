@@ -44,6 +44,21 @@ router.post(
       .select()
       .single();
     if (error) throw new HttpError(500, error.message);
+
+    // Auto-preenche 'recusado' para quem já declarou ausência ao próximo jogo.
+    // ignoreDuplicates → não sobrescreve quem entretanto já tenha respondido.
+    const { data: ausentes } = await supabase
+      .from('team_members')
+      .select('user_id')
+      .eq('team_id', game.teams.id)
+      .eq('ausente_proximo', true);
+    const ausenteRows = (ausentes || [])
+      .filter((m) => m.user_id)
+      .map((m) => ({ game_id: game.id, user_id: m.user_id, status: 'recusado', respondido_em: new Date().toISOString() }));
+    if (ausenteRows.length) {
+      await supabase.from('rsvp_respostas').upsert(ausenteRows, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
+    }
+
     res.json({ game: updated });
   })
 );

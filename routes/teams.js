@@ -349,7 +349,7 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -360,6 +360,7 @@ router.get(
       pode_postar: !!m.pode_postar,
       categoria: m.categoria || 'linha',
       posicao: m.posicao || null,
+      ausente_proximo: !!m.ausente_proximo,
       visivel_ranking: m.visivel_ranking !== false,
       nota_interna: m.nota_interna || null,
       nome: m.users?.nome || null,
@@ -407,6 +408,27 @@ router.patch(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ ok: true, posicao: pos });
+  })
+);
+
+/**
+ * PATCH /api/teams/:slug/membros/ausencia — o próprio jogador declara (ou
+ * reverte) que não vai ao próximo jogo. Body: { ausente: true|false }.
+ * Registado ANTES de /membros/:userId para o "ausencia" não cair no :userId.
+ */
+router.patch(
+  '/api/teams/:slug/membros/ausencia',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team } = await requireTeamMember(req.params.slug, req.user.id);
+    const ausente = !!(req.body || {}).ausente;
+    const { error } = await supabase
+      .from('team_members')
+      .update({ ausente_proximo: ausente })
+      .eq('team_id', team.id)
+      .eq('user_id', req.user.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true, ausente });
   })
 );
 

@@ -322,6 +322,9 @@ router.patch(
     const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
     if (error) throw new HttpError(500, error.message);
 
+    // O jogo passou → reset das ausências antecipadas (para o próximo jogo).
+    await supabase.from('team_members').update({ ausente_proximo: false }).eq('team_id', game.teams.id).eq('ausente_proximo', true);
+
     // Gols só existem no nível 3 — limpa sempre e reinsere se for o caso.
     await supabase.from('gols_jogadores').delete().eq('game_id', game.id);
     if (nivel === 3 && Array.isArray(b.gols)) {
