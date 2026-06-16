@@ -756,4 +756,89 @@ router.patch(
   })
 );
 
+/**
+ * POST /api/teams/:slug/jogos/recorrentes — cria N jogos semanais de uma vez,
+ * num dia da semana / hora fixos (só admin). Sem cron: geração imediata.
+ * Body: { dia_semana: 0-6, hora: "HH:MM", local?, semanas: 4|8|12 }.
+ * Salta datas que colidem com jogos já existentes (± 1 hora).
+ */
+router.post(
+  '/api/teams/:slug/jogos/recorrentes',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, nome');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
+
+    const { dia_semana: diaSemana, hora, local, semanas } = req.body || {};
+    const dia = Number(diaSemana);
+    if (!Number.isInteger(dia) || dia < 0 || dia > 6) throw new HttpError(400, 'Dia da semana inválido (0-6).');
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(hora || ''));
+    if (!m) throw new HttpError(400, 'Hora inválida (formato HH:MM).');
+    const horas = Number(m[1]);
+    const minutos = Number(m[2]);
+    if (horas > 23 || minutos > 59) throw new HttpError(400, 'Hora inválida.');
+    const n = Number(semanas);
+    if (![4, 8, 12].includes(n)) throw new HttpError(400, 'Semanas tem de ser 4, 8 ou 12.');
+
+    // Próximas N datas para o dia da semana escolhido (a partir de hoje).
+    const datas = [];
+    const cursor = new Date();
+    cursor.setHours(horas, minutos, 0, 0);
+    // Avança até ao próximo dia da semana (inclui hoje se ainda for no futuro).
+    const avancarDias = (dia - cursor.getDay() + 7) % 7;
+    cursor.setDate(cursor.getDate() + avancarDias);
+    if (cursor.getTime() <= Date.now()) cursor.setDate(cursor.getDate() + 7);
+    for (let i = 0; i < n; i += 1) {
+      datas.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 7);
+    }
+
+    // Jogos já existentes da equipa (para detetar colisões ± 1 hora).
+    const primeira = datas[0];
+    const ultima = datas[datas.length - 1];
+    const { data: existentes } = await supabase
+      .from('games')
+      .select('data')
+      .eq('team_id', team.id)
+      .gte('data', new Date(primeira.getTime() - 3600000).toISOString())
+      .lte('data', new Date(ultima.getTime() + 3600000).toISOString());
+    const existentesTs = (existentes || []).map((g) => new Date(g.data).getTime());
+    const colide = (d) => existentesTs.some((ts) => Math.abs(ts - d.getTime()) <= 3600000);
+
+    const porTime = 5; // valor por defeito; o admin ajusta depois por jogo.
+    const aInserir = [];
+    const criadas = [];
+    let ignorados = 0;
+    for (const d of datas) {
+      if (colide(d)) {
+        ignorados += 1;
+        continue;
+      }
+      aInserir.push({ team_id: team.id, data: d.toISOString(), local: local?.trim() || null, jogadores_por_time: porTime });
+      criadas.push(d.toISOString());
+    }
+
+    if (aInserir.length) {
+      const { error } = await supabase.from('games').insert(aInserir);
+      if (error) throw new HttpError(500, error.message);
+    }
+
+    res.status(201).json({ criados: aInserir.length, datas: criadas, ignorados });
+
+    // Notifica os membros se algo foi criado (fire-and-forget).
+    if (aInserir.length) {
+      membrosDaEquipa(team.id).then((memberIds) =>
+        enviarNotificacao(memberIds, {
+          title: '⚽ Novos jogos agendados',
+          body: `${team.nome || 'A tua equipa'} · ${aInserir.length} jogos nas próximas semanas`,
+          url: '/home',
+        })
+      );
+    }
+  })
+);
+
 module.exports = router;
