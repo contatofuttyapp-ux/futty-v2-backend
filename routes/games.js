@@ -83,7 +83,7 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, created_at')
+      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
@@ -101,7 +101,11 @@ router.get(
       }
     }
 
-    const lista = (games || []).map((g) => ({ ...g, confirmados: counts[g.id] || 0 }));
+    const lista = (games || []).map((g) => ({
+      ...g,
+      cancelado: !!g.cancelado || g.status === 'cancelado',
+      confirmados: counts[g.id] || 0,
+    }));
     res.json({ team: { ...team, role }, games: lista });
   })
 );
@@ -244,6 +248,9 @@ router.get(
         jogadores_por_time: game.jogadores_por_time,
         sorteio_realizado: game.sorteio_realizado,
         times_resultado: game.times_resultado,
+        // Cancelamento.
+        cancelado: !!game.cancelado || game.status === 'cancelado',
+        motivo_cancelamento: game.motivo_cancelamento || null,
         // Resultado do jogo (4 níveis).
         resultado_nivel: game.resultado_nivel || 0,
         time_vencedor: game.time_vencedor || null,
@@ -681,10 +688,12 @@ router.delete(
 );
 
 /**
- * PATCH /api/games/:id/cancelar — cancela um jogo não terminado (só admin).
- * Usa status 'cancelado' (valor PT permitido pelo CHECK) + cancelado_at.
+ * POST /api/games/:id/cancelar — cancela um jogo não terminado (só admin).
+ * Marca status 'cancelado' + cancelado_at (compat. com filtros existentes) e
+ * a flag cancelado + motivo_cancelamento. Notifica todos os membros por push.
+ * Body: { motivo?: string }.
  */
-router.patch(
+router.post(
   '/api/games/:id/cancelar',
   requireAuth,
   asyncHandler(async (req, res) => {
@@ -695,14 +704,26 @@ router.patch(
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem cancelar jogos.');
     if (game.status === 'terminado') throw new HttpError(400, 'Não podes cancelar um jogo terminado.');
 
+    const motivo = String(req.body?.motivo || '').trim().slice(0, 300) || null;
+
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ status: 'cancelado', cancelado_at: new Date().toISOString() })
+      .update({ status: 'cancelado', cancelado_at: new Date().toISOString(), cancelado: true, motivo_cancelamento: motivo })
       .eq('id', game.id)
       .select()
       .single();
     if (error) throw new HttpError(500, error.message);
-    res.json({ game: updated });
+
+    res.json({ ok: true, game: updated });
+
+    // Notifica todos os membros da equipa (fire-and-forget, após responder).
+    const membros = await membrosDaEquipa(game.teams.id);
+    const corpo = `O jogo de ${dataCurtaPT(game.data)} foi cancelado.` + (motivo ? ` Motivo: ${motivo}` : '');
+    enviarNotificacao(membros, {
+      title: 'Jogo cancelado ❌',
+      body: corpo,
+      url: `/equipa/${game.teams.slug}`,
+    });
   })
 );
 
