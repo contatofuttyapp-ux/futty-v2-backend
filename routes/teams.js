@@ -243,7 +243,7 @@ router.get(
 
     const { data: rawMembers, error } = await supabase
       .from('team_members')
-      .select('role, created_at, users ( id, nome, email, avatar_url )')
+      .select('role, created_at, posicao, users ( id, nome, email, avatar_url )')
       .eq('team_id', team.id)
       .order('created_at', { ascending: true });
     if (error) throw new HttpError(500, error.message);
@@ -254,6 +254,7 @@ router.get(
       email: m.users?.email,
       avatar_url: m.users?.avatar_url,
       role: m.role,
+      posicao: m.posicao || null,
       created_at: m.created_at,
     }));
 
