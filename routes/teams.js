@@ -349,7 +349,7 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -390,6 +390,7 @@ router.get(
         categoria: m.categoria || 'linha',
         posicao: m.posicao || null,
         ausente_proximo: !!m.ausente_proximo,
+        ativo: m.ativo !== false,
         visivel_ranking: m.visivel_ranking !== false,
         nota_interna: m.nota_interna || null,
         nome: m.users?.nome || null,
@@ -461,6 +462,32 @@ router.patch(
       .eq('user_id', req.user.id);
     if (error) throw new HttpError(500, error.message);
     res.json({ ok: true, ausente });
+  })
+);
+
+/**
+ * PATCH /api/teams/:slug/membros/:userId/ativo — admin marca um jogador como
+ * activo/inactivo. Inactivos ficam no histórico mas saem do sorteio e ranking.
+ * Body: { ativo: true|false }.
+ */
+router.patch(
+  '/api/teams/:slug/membros/:userId/ativo',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem marcar jogadores como inactivos.');
+
+    const ativo = !!(req.body || {}).ativo;
+    const { error } = await supabase
+      .from('team_members')
+      .update({ ativo })
+      .eq('team_id', team.id)
+      .eq('user_id', req.params.userId);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true, ativo });
   })
 );
 

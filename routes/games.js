@@ -192,11 +192,19 @@ router.get(
       .select('confirmado, goleiro, cabeca_chave, users ( id, nome, email )')
       .eq('game_id', game.id);
 
+    // Inactivos da equipa: preservados no histórico mas fora do sorteio.
+    const { data: inativosRows } = await supabase
+      .from('team_members')
+      .select('user_id')
+      .eq('team_id', game.teams.id)
+      .eq('ativo', false);
+    const inativos = new Set((inativosRows || []).map((m) => m.user_id));
+
     const userIds = (gp || []).map((p) => p.users?.id).filter(Boolean);
     const ratings = await computeRatings(game.teams.id, userIds);
 
     const players = (gp || [])
-      .filter((p) => p.users)
+      .filter((p) => p.users && !inativos.has(p.users.id))
       .map((p) => ({
         user_id: p.users.id,
         nome: p.users.nome || p.users.email,
@@ -447,7 +455,15 @@ router.post(
       .eq('confirmado', true);
     if (usarSubset) gpQuery = gpQuery.in('user_id', jogadoresIds);
     const { data: gp } = await gpQuery;
-    const confirmados = (gp || []).filter((p) => p.users);
+
+    // Exclui jogadores inactivos do sorteio (ficam no histórico, não jogam).
+    const { data: inativosRows } = await supabase
+      .from('team_members')
+      .select('user_id')
+      .eq('team_id', game.teams.id)
+      .eq('ativo', false);
+    const inativos = new Set((inativosRows || []).map((m) => m.user_id));
+    const confirmados = (gp || []).filter((p) => p.users && !inativos.has(p.users.id));
 
     // Nº de times = confirmados / jogadores por time. Os que sobram são
     // distribuídos pelos times existentes (snake draft), sem time incompleto.
