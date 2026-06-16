@@ -205,6 +205,16 @@ router.get(
 
     const meu = players.find((p) => p.user_id === req.user.id) || null;
 
+    // Gols por jogador (só relevante no nível 3 do resultado).
+    let gols = [];
+    if (game.resultado_nivel === 3) {
+      const { data: golsRows } = await supabase
+        .from('gols_jogadores')
+        .select('user_id, time, gols, users ( id, nome )')
+        .eq('game_id', game.id);
+      gols = (golsRows || []).map((g) => ({ user_id: g.user_id, time: g.time, gols: g.gols || 0, nome: g.users?.nome || null }));
+    }
+
     const { count: votosCount } = await supabase
       .from('votes')
       .select('id', { count: 'exact', head: true })
@@ -223,6 +233,11 @@ router.get(
         jogadores_por_time: game.jogadores_por_time,
         sorteio_realizado: game.sorteio_realizado,
         times_resultado: game.times_resultado,
+        // Resultado do jogo (4 níveis).
+        resultado_nivel: game.resultado_nivel || 0,
+        time_vencedor: game.time_vencedor || null,
+        placar_a: game.placar_a ?? null,
+        placar_b: game.placar_b ?? null,
         // Campos de resultado (para pré-preencher a edição no painel de admin).
         campeao_time_index: game.campeao_time_index,
         campeao_foto_url: game.campeao_foto_url,
@@ -234,11 +249,63 @@ router.get(
         rodada_foto_url: game.rodada_foto_url,
       },
       players,
+      gols,
       meuEstado: meu
         ? { confirmado: meu.confirmado, goleiro: meu.goleiro, cabeca_chave: meu.cabeca_chave }
         : null,
       jaVotei: (votosCount || 0) > 0,
     });
+  })
+);
+
+/** PATCH /api/games/:id/resultado — define o resultado do jogo (só admin). */
+router.patch(
+  '/api/games/:id/resultado',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir o resultado.');
+
+    const b = req.body || {};
+    const nivel = Number(b.nivel);
+    if (![0, 1, 2, 3].includes(nivel)) throw new HttpError(400, 'Nível de resultado inválido.');
+
+    const patch = { resultado_nivel: nivel, time_vencedor: null, placar_a: null, placar_b: null };
+
+    if (nivel >= 1) {
+      if (!['A', 'B', 'empate'].includes(b.time_vencedor)) throw new HttpError(400, 'Indica quem venceu.');
+      patch.time_vencedor = b.time_vencedor;
+    }
+    if (nivel >= 2) {
+      const pa = Number(b.placar_a);
+      const pb = Number(b.placar_b);
+      if (!Number.isInteger(pa) || pa < 0 || !Number.isInteger(pb) || pb < 0) throw new HttpError(400, 'Placar inválido.');
+      patch.placar_a = pa;
+      patch.placar_b = pb;
+    }
+
+    const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
+    if (error) throw new HttpError(500, error.message);
+
+    // Gols só existem no nível 3 — limpa sempre e reinsere se for o caso.
+    await supabase.from('gols_jogadores').delete().eq('game_id', game.id);
+    if (nivel === 3 && Array.isArray(b.gols)) {
+      const times = game.times_resultado?.times || [];
+      const timeDe = {};
+      (times[0]?.jogadores || []).forEach((j) => { timeDe[j.user_id] = 'A'; });
+      (times[1]?.jogadores || []).forEach((j) => { timeDe[j.user_id] = 'B'; });
+      const rows = b.gols
+        .filter((g) => g && g.user_id)
+        .map((g) => ({ game_id: game.id, user_id: g.user_id, gols: Math.max(0, Number(g.gols) || 0), time: timeDe[g.user_id] || null }));
+      if (rows.length) {
+        const { error: gErr } = await supabase.from('gols_jogadores').insert(rows);
+        if (gErr) throw new HttpError(500, gErr.message);
+      }
+    }
+
+    res.json({ game: updated });
   })
 );
 
