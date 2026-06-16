@@ -5,6 +5,8 @@ require('dotenv').config();
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { HttpError } = require('./utils/http');
@@ -21,6 +23,15 @@ const campeonatoRoutes = require('./routes/campeonato');
 const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
+
+// Headers de segurança HTTP. crossOriginResourcePolicy em 'cross-origin' porque
+// este backend serve imagens (avatares, fotos) consumidas pelo frontend noutra
+// origem — o default 'same-origin' do helmet bloquearia esse carregamento.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // Origens permitidas: localhost (dev), qualquer URL do Codespaces (.app.github.dev)
 // e origens de produção definidas em CORS_ORIGINS (separadas por vírgula).
@@ -45,10 +56,35 @@ const corsOptions = {
 app.use(cors(corsOptions));
 
 // Webhook do Stripe ANTES do express.json: precisa do corpo cru para validar
-// a assinatura (express.raw devolve um Buffer).
+// a assinatura (express.raw devolve um Buffer). Fica também antes do rate limiter
+// para não bloquear as repetições legítimas do Stripe.
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), webhookHandler);
 
-app.use(express.json());
+// Rate limiting geral: protege todas as rotas /api de abuso.
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiados pedidos. Tenta mais tarde.' },
+});
+app.use('/api', apiLimiter);
+
+// Rate limiting restrito para endpoints caros/abusáveis. NB: não há rotas de
+// login/registo no backend (a auth é feita no frontend via Supabase Auth), por
+// isso o limite estrito aplica-se à geração de avatar IA (custa $ no fal.ai) e
+// ao upload de avatar.
+const strictLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Demasiadas tentativas. Tenta em 15 minutos.' },
+});
+app.use('/api/me/avatar', strictLimiter); // cobre também /api/me/avatar/ai
+
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 // Ficheiros estáticos (fotos de campeão, etc.) em /uploads
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
