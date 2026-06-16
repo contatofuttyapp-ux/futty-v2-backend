@@ -117,11 +117,13 @@ router.get(
     // Equipas do utilizador
     const { data: memberships } = await supabase
       .from('team_members')
-      .select('team_id, teams ( id, nome, slug )')
+      .select('team_id, ausente_proximo, teams ( id, nome, slug )')
       .eq('user_id', req.user.id);
     const teamById = {};
+    const ausenteByTeam = {};
     for (const m of memberships || []) {
       if (m.teams) teamById[m.team_id] = m.teams;
+      ausenteByTeam[m.team_id] = !!m.ausente_proximo;
     }
     const teamIds = Object.keys(teamById);
     if (!teamIds.length) return res.json({ games: [] });
@@ -166,6 +168,7 @@ router.get(
         team_id: g.team_id,
         team_name: team.nome || null,
         team_slug: team.slug || null,
+        ausente_proximo: ausenteByTeam[g.team_id] || false,
       };
     });
 
