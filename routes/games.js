@@ -258,6 +258,39 @@ router.get(
   })
 );
 
+/**
+ * GET /api/p/:gameId — vista pública do sorteio (sem auth, para partilha/telão).
+ * Devolve só o essencial: nome da equipa, times do sorteio e o resultado.
+ */
+router.get(
+  '/api/p/:gameId',
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.gameId);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    let gols = [];
+    if (game.resultado_nivel === 3) {
+      const { data } = await supabase
+        .from('gols_jogadores')
+        .select('user_id, gols, users ( nome )')
+        .eq('game_id', game.id);
+      gols = (data || []).map((g) => ({ user_id: g.user_id, gols: g.gols || 0, nome: g.users?.nome || null }));
+    }
+
+    res.json({
+      equipa: { nome: game.teams.nome, slug: game.teams.slug },
+      times_resultado: game.times_resultado || null,
+      resultado: {
+        nivel: game.resultado_nivel || 0,
+        time_vencedor: game.time_vencedor || null,
+        placar_a: game.placar_a ?? null,
+        placar_b: game.placar_b ?? null,
+        gols,
+      },
+    });
+  })
+);
+
 /** PATCH /api/games/:id/resultado — define o resultado do jogo (só admin). */
 router.patch(
   '/api/games/:id/resultado',
