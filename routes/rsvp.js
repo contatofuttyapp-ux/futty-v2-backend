@@ -107,6 +107,19 @@ router.post(
       throw new HttpError(400, 'O prazo do RSVP já passou.');
     }
 
+    // Capacidade: bloqueia novas confirmações se o jogo já estiver cheio.
+    if (status === 'confirmado' && game.max_jogadores != null) {
+      const { count } = await supabase
+        .from('rsvp_respostas')
+        .select('user_id', { count: 'exact', head: true })
+        .eq('game_id', game.id)
+        .eq('status', 'confirmado')
+        .neq('user_id', req.user.id);
+      if ((count || 0) >= game.max_jogadores) {
+        throw new HttpError(409, 'Jogo cheio. Foste adicionado à lista de espera.');
+      }
+    }
+
     const { error } = await supabase
       .from('rsvp_respostas')
       .upsert(
@@ -142,11 +155,18 @@ router.get(
       statusPorUser[r.user_id] = r.status;
     });
 
+    const confirmados = users.filter((u) => statusPorUser[u.id] === 'confirmado');
+    const max = game.max_jogadores ?? null;
+    const lugaresDisponiveis = max != null ? Math.max(0, max - confirmados.length) : null;
+
     res.json({
       rsvp_aberto: game.rsvp_aberto || false,
       rsvp_prazo: game.rsvp_prazo || null,
       rsvp_fechado: game.rsvp_fechado || false,
-      confirmados: users.filter((u) => statusPorUser[u.id] === 'confirmado'),
+      max_jogadores: max,
+      lugares_disponiveis: lugaresDisponiveis,
+      cheio: max != null && confirmados.length >= max,
+      confirmados,
       recusados: users.filter((u) => statusPorUser[u.id] === 'recusado'),
       pendentes: users.filter((u) => !statusPorUser[u.id]),
     });

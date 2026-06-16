@@ -83,7 +83,7 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, created_at')
+      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
@@ -246,6 +246,7 @@ router.get(
         status: game.status,
         num_times: game.num_times,
         jogadores_por_time: game.jogadores_por_time,
+        max_jogadores: game.max_jogadores ?? null,
         sorteio_realizado: game.sorteio_realizado,
         times_resultado: game.times_resultado,
         // Cancelamento.
@@ -724,6 +725,34 @@ router.post(
       body: corpo,
       url: `/equipa/${game.teams.slug}`,
     });
+  })
+);
+
+/**
+ * PATCH /api/games/:id/capacidade — define o máximo de jogadores (só admin).
+ * Body: { max_jogadores: number|null }. null/0/vazio = sem limite.
+ */
+router.patch(
+  '/api/games/:id/capacidade',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir a capacidade.');
+
+    const raw = req.body?.max_jogadores;
+    let max = null;
+    if (raw !== null && raw !== undefined && raw !== '') {
+      const n = Number(raw);
+      if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Máximo de jogadores inválido.');
+      max = n;
+    }
+
+    const { error } = await supabase.from('games').update({ max_jogadores: max }).eq('id', game.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true, max_jogadores: max });
   })
 );
 
