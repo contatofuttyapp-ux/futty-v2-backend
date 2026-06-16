@@ -348,7 +348,7 @@ router.get(
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -358,6 +358,7 @@ router.get(
       role: m.role,
       pode_postar: !!m.pode_postar,
       categoria: m.categoria || 'linha',
+      posicao: m.posicao || null,
       visivel_ranking: m.visivel_ranking !== false,
       nota_interna: m.nota_interna || null,
       nome: m.users?.nome || null,
@@ -374,6 +375,37 @@ router.get(
       return String(a.nome_jogador || a.nome || '').localeCompare(String(b.nome_jogador || b.nome || ''), 'pt', { sensitivity: 'base' });
     });
     res.json({ membros });
+  })
+);
+
+/**
+ * PATCH /api/equipas/:slug/membros/posicao — define a posição do jogador na equipa.
+ * Qualquer membro define a sua; admin pode definir a de outro (body.user_id).
+ * Body: { posicao: 'GL'|'DEF'|'MEI'|'ATA'|null, user_id? }
+ */
+router.patch(
+  '/api/equipas/:slug/membros/posicao',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const POSICOES = ['GL', 'DEF', 'MEI', 'ATA'];
+    const { posicao, user_id: alvoId } = req.body || {};
+    const pos = posicao == null || posicao === '' ? null : String(posicao);
+    if (pos !== null && !POSICOES.includes(pos)) throw new HttpError(400, 'Posição inválida.');
+
+    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    const targetUserId = alvoId || req.user.id;
+    if (targetUserId !== req.user.id && role !== 'admin') {
+      throw new HttpError(403, 'Só admins podem alterar a posição de outros membros.');
+    }
+
+    const { error } = await supabase
+      .from('team_members')
+      .update({ posicao: pos })
+      .eq('team_id', team.id)
+      .eq('user_id', targetUserId);
+    if (error) throw new HttpError(500, error.message);
+
+    res.json({ ok: true, posicao: pos });
   })
 );
 
