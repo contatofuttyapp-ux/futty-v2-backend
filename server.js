@@ -60,6 +60,10 @@ app.use(cors(corsOptions));
 // para não bloquear as repetições legítimas do Stripe.
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), webhookHandler);
 
+// Atrás de 1 reverse proxy (Codespaces/produção): confia no X-Forwarded-For
+// para que o rate limiter conte por IP real do cliente, e não pelo IP do proxy.
+app.set('trust proxy', 1);
+
 // Rate limiting geral: protege todas as rotas /api de abuso.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
