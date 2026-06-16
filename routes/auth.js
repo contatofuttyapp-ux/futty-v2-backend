@@ -55,7 +55,7 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
 const PERFIL_COLS =
-  'id, nome, email, avatar_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset';
+  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset';
 
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
@@ -92,6 +92,7 @@ router.get(
         email: req.user.email,
         nome: perfil?.nome || null,
         avatar_url: perfil?.avatar_url || null,
+        foto_url: perfil?.foto_url || null,
         nome_jogador: perfil?.nome_jogador || null,
         cor_preferida: perfil?.cor_preferida || null,
         telefone: perfil?.telefone || null,
@@ -199,7 +200,8 @@ router.post(
     // ?v= força o browser a recarregar (o path é fixo porque sobrescreve).
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
-    const { error: updErr } = await supabase.from('users').update({ avatar_url: avatarUrl }).eq('id', userId);
+    // foto_url = foto original permanente; avatar_url = o que o app mostra.
+    const { error: updErr } = await supabase.from('users').update({ foto_url: avatarUrl, avatar_url: avatarUrl }).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
 
     res.json({ avatar_url: avatarUrl });
@@ -218,8 +220,8 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'avatar_url, plan, avatar_ia_mes, avatar_ia_reset');
-    if (!perfil?.avatar_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
+    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset');
+    if (!perfil?.foto_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
 
     // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
     const plano = perfil.plan || 'free';
@@ -249,7 +251,7 @@ router.post(
     const resultado = await comTimeout(
       fal.subscribe(MODELO, {
         input: {
-          image_url: perfil.avatar_url,
+          image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
           prompt:
             'Panini football sticker card portrait, semi-realistic illustration style, vibrant colors, clean gradient background, athletic football pose, sharp details, card art style',
           image_size: 'portrait_4_3',
