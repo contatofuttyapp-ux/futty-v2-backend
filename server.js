@@ -2,6 +2,17 @@
 // Setup do servidor: middleware, ficheiros estáticos, rotas e tratamento de erros.
 require('dotenv').config();
 
+// Error tracking — inicializar logo após o dotenv (DSN/NODE_ENV já carregados) e
+// antes dos restantes requires, para o Sentry instrumentar http/express. Só
+// ativo em produção (SENTRY_DSN definido).
+const Sentry = require('@sentry/node');
+Sentry.init({
+  dsn: process.env.SENTRY_DSN,
+  environment: process.env.NODE_ENV || 'development',
+  enabled: process.env.NODE_ENV === 'production',
+  tracesSampleRate: 0.1,
+});
+
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
@@ -145,6 +156,10 @@ app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado
 app.use((req, res) => {
   res.status(404).json({ error: 'Recurso não encontrado.' });
 });
+
+// Sentry: captura os erros propagados (por defeito só status >= 500) ANTES do
+// handler central. API do @sentry/node v8+ (substitui Sentry.Handlers do v7).
+Sentry.setupExpressErrorHandler(app);
 
 // Error handler central — converte HttpError no status certo; resto é 500.
 // eslint-disable-next-line no-unused-vars
