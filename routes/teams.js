@@ -353,25 +353,57 @@ router.get(
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
-    const membros = (data || []).map((m) => ({
-      id: m.id,
-      user_id: m.users?.id,
-      role: m.role,
-      pode_postar: !!m.pode_postar,
-      categoria: m.categoria || 'linha',
-      posicao: m.posicao || null,
-      ausente_proximo: !!m.ausente_proximo,
-      visivel_ranking: m.visivel_ranking !== false,
-      nota_interna: m.nota_interna || null,
-      nome: m.users?.nome || null,
-      nome_jogador: m.users?.nome_jogador || null,
-      avatar_url: m.users?.avatar_url || null,
-      email: m.users?.email || null,
-      gols: m.gols ?? 0,
-      artilharia: m.artilharia ?? 0,
-      vitorias: m.vitorias ?? 0,
-      destaque: m.destaque ?? 0,
-    }));
+    // Últimos 5 jogos da equipa (mais recente → mais antigo) para o histórico
+    // de presenças. Um jogador esteve presente se tem game_players.confirmado.
+    const { data: ultimosJogos } = await supabase
+      .from('games')
+      .select('id, data, created_at')
+      .eq('team_id', team.id)
+      .order('created_at', { ascending: false })
+      .limit(5);
+    const jogos = ultimosJogos || [];
+    const presentesPorJogo = {}; // game_id -> Set(user_id confirmados)
+    if (jogos.length) {
+      const { data: gps } = await supabase
+        .from('game_players')
+        .select('game_id, user_id, confirmado')
+        .in('game_id', jogos.map((g) => g.id))
+        .eq('confirmado', true);
+      for (const gp of gps || []) {
+        (presentesPorJogo[gp.game_id] = presentesPorJogo[gp.game_id] || new Set()).add(gp.user_id);
+      }
+    }
+
+    const membros = (data || []).map((m) => {
+      const uid = m.users?.id;
+      const presencas = jogos.map((g) => ({
+        game_id: g.id,
+        data: g.data,
+        presente: !!presentesPorJogo[g.id]?.has(uid),
+      }));
+      const presentes = presencas.filter((p) => p.presente).length;
+      return {
+        id: m.id,
+        user_id: uid,
+        role: m.role,
+        pode_postar: !!m.pode_postar,
+        categoria: m.categoria || 'linha',
+        posicao: m.posicao || null,
+        ausente_proximo: !!m.ausente_proximo,
+        visivel_ranking: m.visivel_ranking !== false,
+        nota_interna: m.nota_interna || null,
+        nome: m.users?.nome || null,
+        nome_jogador: m.users?.nome_jogador || null,
+        avatar_url: m.users?.avatar_url || null,
+        email: m.users?.email || null,
+        gols: m.gols ?? 0,
+        artilharia: m.artilharia ?? 0,
+        vitorias: m.vitorias ?? 0,
+        destaque: m.destaque ?? 0,
+        presencas_recentes: presencas,
+        taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
+      };
+    });
     membros.sort((a, b) => {
       if ((a.role === 'admin') !== (b.role === 'admin')) return a.role === 'admin' ? -1 : 1;
       return String(a.nome_jogador || a.nome || '').localeCompare(String(b.nome_jogador || b.nome || ''), 'pt', { sensitivity: 'base' });
