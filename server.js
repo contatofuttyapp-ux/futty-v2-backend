@@ -20,6 +20,7 @@ const feedRoutes = require('./routes/feed');
 const pushRoutes = require('./routes/push');
 const rsvpRoutes = require('./routes/rsvp');
 const campeonatoRoutes = require('./routes/campeonato');
+const superadminRoutes = require('./routes/superadmin');
 const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
@@ -137,6 +138,7 @@ app.use(feedRoutes);
 app.use('/api/push', pushRoutes);
 app.use(rsvpRoutes);
 app.use(campeonatoRoutes);
+app.use(superadminRoutes);
 app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
 // 404 para rotas /api não encontradas

@@ -42,4 +42,28 @@ async function optionalAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireAuth, optionalAuth };
+/**
+ * Exige super-admin: valida o JWT (como requireAuth) e confirma a flag
+ * public.users.is_super_admin. Lança 401 se a sessão for inválida, 403 se não
+ * for super-admin. Usado só nas rotas /api/super/*.
+ */
+async function requireSuperAdmin(req, res, next) {
+  try {
+    const token = bearerToken(req);
+    if (!token) throw new HttpError(401, 'Token em falta.');
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) throw new HttpError(401, 'Sessão inválida.');
+    req.user = data.user;
+    const { data: perfil } = await supabase
+      .from('users')
+      .select('is_super_admin')
+      .eq('id', req.user.id)
+      .maybeSingle();
+    if (!perfil?.is_super_admin) throw new HttpError(403, 'Acesso negado.');
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { requireAuth, optionalAuth, requireSuperAdmin };
