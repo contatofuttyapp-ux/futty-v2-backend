@@ -72,11 +72,11 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
 
+    // Devolve o mais recente (ativo ou terminado).
     const { data: campeonato } = await supabase
       .from('campeonatos')
       .select('*')
       .eq('team_id', team.id)
-      .eq('estado', 'ativo')
       .order('criado_em', { ascending: false })
       .limit(1)
       .maybeSingle();
