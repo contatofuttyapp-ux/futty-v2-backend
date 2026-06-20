@@ -26,7 +26,7 @@ async function buildRanking(teamId, meUserId) {
   // Membros (+ stats + categoria)
   const { data: membros } = await supabase
     .from('team_members')
-    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, ativo, users ( id, nome, email, avatar_url, cor_frame )')
+    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, cor_frame )')
     .eq('team_id', teamId);
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
@@ -79,6 +79,7 @@ async function buildRanking(teamId, meUserId) {
       user_id: u.id,
       sou_eu: meUserId != null && u.id === meUserId, // a própria linha do utilizador
       nome: u.nome || u.email,
+      nome_jogador: u.nome_jogador || null,
       avatar_url: u.avatar_url || null,
       cor_frame: u.cor_frame || 'dourado',
       categoria: ehGR ? 'GR' : 'linha',

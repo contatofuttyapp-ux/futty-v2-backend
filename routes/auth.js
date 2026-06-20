@@ -151,11 +151,7 @@ router.patch(
       if (v && v.length > 500) throw new HttpError(400, 'avatar_url: máximo 500 caracteres.');
       patch.avatar_url = v || null;
     }
-    if ('telefone' in b) {
-      const v = b.telefone == null ? null : String(b.telefone).trim();
-      if (v && v.length > 20) throw new HttpError(400, 'Telefone: máximo 20 caracteres.');
-      patch.telefone = v || null;
-    }
+    // telefone removido: já não é guardado pelo perfil.
     if ('cor_frame' in b) {
       const v = String(b.cor_frame);
       if (!CORES_FRAME.includes(v)) throw new HttpError(400, 'Cor de frame inválida.');
