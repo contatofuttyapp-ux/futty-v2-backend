@@ -185,24 +185,39 @@ router.post(
     if (!ext) throw new HttpError(400, 'Formato de imagem não suportado.');
 
     const userId = req.user.id;
+    // 1. Ficheiro recebido (multer).
+    console.log('[avatar] ficheiro recebido:', { userId, mimetype: file.mimetype, ext, size: file.size });
+
     await ensureUserRow(req.user);
 
     const caminho = `public/${userId}.${ext}`;
+    // 2. Upload para o Supabase Storage (bucket "avatars").
+    console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho });
     const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
       contentType: file.mimetype,
       upsert: true,
       cacheControl: '3600',
     });
-    if (upErr) throw new HttpError(500, upErr.message);
+    if (upErr) {
+      console.error('[avatar] erro no upload:', upErr.message);
+      throw new HttpError(500, upErr.message);
+    }
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     // ?v= força o browser a recarregar (o path é fixo porque sobrescreve).
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+    // URL público — deve usar o domínio do Supabase, não localhost.
+    console.log('[avatar] URL público:', avatarUrl);
 
-    // foto_url = foto original permanente; avatar_url = o que o app mostra.
+    // 3. UPDATE na tabela users (foto_url = original permanente; avatar_url = o que o app mostra).
+    console.log('[avatar] UPDATE users:', { userId });
     const { error: updErr } = await supabase.from('users').update({ foto_url: avatarUrl, avatar_url: avatarUrl }).eq('id', userId);
-    if (updErr) throw new HttpError(500, updErr.message);
+    if (updErr) {
+      console.error('[avatar] erro no UPDATE:', updErr.message);
+      throw new HttpError(500, updErr.message);
+    }
 
+    console.log('[avatar] concluído:', { userId });
     res.json({ avatar_url: avatarUrl });
   })
 );
@@ -359,15 +374,34 @@ router.post(
     }
 
     // Edição da foto real → cromo Panini Futty via gpt-image-1.5/edit.
-    const result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
-      input: {
-        prompt: PROMPT_FUTTY,
-        image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
-        quality: 'low',
-        num_images: 1,
-      },
-      logs: true,
+    console.log('[avatar-ai] a chamar fal com:', {
+      modelo: 'fal-ai/gpt-image-1.5/edit',
+      image_url: perfil.foto_url,
+      prompt_length: PROMPT_FUTTY.length,
+      quality: 'low',
     });
+
+    let result;
+    try {
+      result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
+        input: {
+          prompt: PROMPT_FUTTY,
+          image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
+          quality: 'low',
+          num_images: 1,
+        },
+        logs: true,
+      });
+    } catch (err) {
+      console.error('[avatar-ai] erro completo:', {
+        message: err.message,
+        status: err.status,
+        body: JSON.stringify(err.body),
+        response: err.response,
+        stack: err.stack?.split('\n').slice(0, 3),
+      });
+      throw err;
+    }
 
     const urlGerada = result?.images?.[0]?.url;
     if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
