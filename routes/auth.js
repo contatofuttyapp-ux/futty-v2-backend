@@ -2,6 +2,7 @@
 // (O login/registo é feito no frontend via Supabase Auth; aqui expomos o perfil.)
 const express = require('express');
 const multer = require('multer');
+const sharp = require('sharp');
 const fal = require('@fal-ai/serverless-client');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
@@ -281,16 +282,12 @@ BODY BUILD:
 - Must still look like the same person
 - NOT a bodybuilder — subtle athletic improvement only
 
-SECTION 3 — UNIFORM (FUTTY KIT):
-Jersey base color: #0d0d12 (very dark near-black)
-Bold vertical stripes alternating: #0d0d12 and #d4a017 (warm amber gold)
-Equal width vertical stripes from shoulder to hem
-Retro V-neck collar in gold #d4a017
-Both sleeves solid black #0d0d12, no stripes on sleeves
-LEFT CHEST: small angular letter F badge, gold #d4a017,
-  bold geometric F with 45-degree diagonal cut at top-right
-Shorts: solid black #0d0d12 with thin gold #d4a017 side stripes
-ZERO other brand logos, ZERO sponsor text, ZERO numbers
+SECTION 3 — UNIFORM:
+Plain white jersey, completely blank.
+No logos, no stripes, no patterns.
+Pure white fabric only.
+This is intentional — the jersey will be
+replaced in post-processing.
 
 SECTION 4 — TATTOOS:
 If visible in photo: include naturally on exposed skin
@@ -318,8 +315,13 @@ SECTION 7 — FRAMING:
 - Never crop the head
 
 SECTION 8 — BACKGROUND:
-- Pure white #FFFFFF, completely flat
-- Zero elements, zero shadows, zero gradients
+Pure white #FFFFFF background.
+No shadows, no gradients.
+The character must have a clean white outline
+against the white background.
+CRITICAL: Subject must be perfectly isolated —
+clean edges, no motion blur, no loose strands
+bleeding into background.
 
 NEVER GENERATE:
 - Photorealistic photography style
@@ -338,6 +340,10 @@ Upper body only — head to waist, NO legs.
 Plain white background.
 Futty kit: dark vertical stripes with gold.
 `;
+
+// Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
+const KIT_URL =
+  'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/avatars/Kits/kit1-dark-gold.png';
 
 /**
  * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
@@ -388,10 +394,7 @@ router.post(
       result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
         input: {
           prompt: PROMPT_FUTTY,
-          image_urls: [
-            perfil.foto_url, // 1ª imagem: a foto real do jogador
-            'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/avatars/Kits/kit1-dark-gold.png', // 2ª imagem: o kit Futty (referência)
-          ],
+          image_urls: [perfil.foto_url], // só a foto do jogador (kit aplicado na ETAPA 3)
           quality: 'low',
           num_images: 1,
         },
@@ -410,15 +413,41 @@ router.post(
 
     const urlGerada = result?.images?.[0]?.url;
     if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
+    console.log('[avatar-ai] etapa 1 - GPT Image OK');
 
-    // Descarrega a imagem gerada e envia para o Storage.
-    const resp = await fetch(urlGerada);
-    if (!resp.ok) throw new HttpError(502, 'Falha ao obter a imagem gerada.');
-    const buffer = Buffer.from(await resp.arrayBuffer());
+    // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
+    const removeBgResult = await fal.subscribe('fal-ai/birefnet', {
+      input: {
+        image_url: urlGerada,
+        model: 'General Use (Light)',
+      },
+    });
+    const urlRecortada = removeBgResult?.image?.url;
+    if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
+    console.log('[avatar-ai] etapa 2 - remove bg OK');
+
+    // ETAPA 3 — composição do jogador recortado sobre o kit (sharp).
+    const kitBuffer = await fetch(KIT_URL).then((r) => r.arrayBuffer());
+    const jogadorBuffer = await fetch(urlRecortada).then((r) => r.arrayBuffer());
+
+    const kitMeta = await sharp(Buffer.from(kitBuffer)).metadata();
+    const kitH = kitMeta.height;
+
+    // Jogador a 90% da altura do kit, mantendo proporção.
+    const jogadorRedim = await sharp(Buffer.from(jogadorBuffer))
+      .resize({ height: Math.round(kitH * 0.9), fit: 'inside' })
+      .toBuffer();
+
+    // Kit em baixo, jogador centrado horizontalmente e a começar do topo (gravity north).
+    const imagemFinal = await sharp(Buffer.from(kitBuffer))
+      .composite([{ input: jogadorRedim, gravity: 'north' }])
+      .png()
+      .toBuffer();
+    console.log('[avatar-ai] etapa 3 - composição OK');
 
     await ensureUserRow(req.user);
     const caminho = `public/${userId}-ai.png`;
-    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, imagemFinal, {
       contentType: 'image/png',
       upsert: true,
       cacheControl: '3600',
