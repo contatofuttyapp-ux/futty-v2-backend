@@ -434,11 +434,17 @@ router.post(
     const jogadorBuffer = await fetch(urlRecortada).then((r) => r.arrayBuffer());
 
     const kitMeta = await sharp(Buffer.from(kitBuffer)).metadata();
+    const kitW = kitMeta.width;
     const kitH = kitMeta.height;
 
-    // Jogador a 90% da altura do kit, mantendo proporção.
+    // Jogador limitado a 85% da largura e 90% da altura do kit, mantendo proporção.
     const jogadorRedim = await sharp(Buffer.from(jogadorBuffer))
-      .resize({ height: Math.round(kitH * 0.9), fit: 'inside' })
+      .resize({
+        width: Math.round(kitW * 0.85),
+        height: Math.round(kitH * 0.9),
+        fit: 'inside',
+        withoutEnlargement: true,
+      })
       .toBuffer();
 
     // Kit em baixo, jogador centrado horizontalmente e a começar do topo (gravity north).
