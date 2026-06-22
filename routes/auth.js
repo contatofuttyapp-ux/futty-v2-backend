@@ -386,7 +386,7 @@ router.post(
       result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
         input: {
           prompt: PROMPT_FUTTY,
-          image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
+          image_urls: [perfil.foto_url], // array com 1 elemento — o modelo exige array
           quality: 'low',
           num_images: 1,
         },
