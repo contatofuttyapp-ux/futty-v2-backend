@@ -357,7 +357,7 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset');
+    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
 
     // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
@@ -373,12 +373,15 @@ router.post(
       usados = 0;
       resetData = hojeISO;
     }
-    if (usados >= limite) {
-      const msg =
-        plano === 'free'
-          ? 'Limite de gerações atingido. Faz upgrade para Pro para continuar.'
-          : 'Limite de gerações deste mês atingido.';
-      throw new HttpError(403, msg);
+    // Super-admin não tem limite de gerações.
+    if (!perfil.is_super_admin) {
+      if (usados >= limite) {
+        const msg =
+          plano === 'free'
+            ? 'Limite de gerações atingido. Faz upgrade para Pro para continuar.'
+            : 'Limite de gerações deste mês atingido.';
+        throw new HttpError(403, msg);
+      }
     }
 
     // Edição da foto real → cromo Panini Futty via gpt-image-1.5/edit.
@@ -458,10 +461,13 @@ router.post(
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
     // Persiste o novo avatar + incrementa a quota (e grava o reset se mudou).
-    const { error: updErr } = await supabase
-      .from('users')
-      .update({ avatar_url: avatarUrl, avatar_ia_mes: usados + 1, avatar_ia_reset: resetData })
-      .eq('id', userId);
+    // Super-admin: só actualiza o avatar, sem mexer na quota.
+    const dadosUpdate = { avatar_url: avatarUrl };
+    if (!perfil.is_super_admin) {
+      dadosUpdate.avatar_ia_mes = usados + 1;
+      dadosUpdate.avatar_ia_reset = resetData;
+    }
+    const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
 
     res.json({ avatar_url: avatarUrl });
