@@ -13,15 +13,6 @@ fal.config({ credentials: process.env.FAL_KEY });
 
 const router = express.Router();
 
-// Corre uma promise com timeout (geração de IA pode demorar).
-function comTimeout(promise, ms, msg) {
-  let t;
-  const limite = new Promise((_, rej) => {
-    t = setTimeout(() => rej(new HttpError(504, msg)), ms);
-  });
-  return Promise.race([promise, limite]).finally(() => clearTimeout(t));
-}
-
 // Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
 const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
@@ -216,10 +207,125 @@ router.post(
   })
 );
 
+// Prompt detalhado para a edição da foto real → cromo Panini estilo Futty.
+const PROMPT_FUTTY = `
+You are creating a professional illustrated soccer player sticker.
+I will upload ONE photo of a real person.
+Study the photo carefully before generating anything.
+
+STYLE REFERENCE:
+- Premium Panini sticker collection art style
+- FIFA Ultimate Team card illustration quality
+- Semi-realistic digital painting
+- NOT photographic, NOT hyperrealistic, NOT anime
+- Clean confident brushwork with visible fabric texture
+- Rich deep color rendering
+- Warm skin tone rendering with soft natural shadows
+- Sharp facial details with softer body rendering
+- Professional sports trading card illustration quality
+
+LIGHTING:
+- Soft and even front-facing lighting
+- No harsh shadows on the face
+- Slight warm light from slightly above front
+- Clean vibrant color rendering throughout
+- Face should be the brightest and sharpest element
+
+PRIORITY ORDER:
+1st — Face accuracy (person must be recognizable)
+2nd — Correct uniform
+3rd — Correct pose
+4th — Sticker style and background
+
+SECTION 1 — ANALYZE THE PHOTO FIRST:
+Before generating, carefully study and note:
+- Face shape, features, skin tone, eye color
+- Hair style, color, length and texture
+- Facial hair (exact style)
+- Body type and build
+- Visible tattoos
+- Any accessories (cap, glasses, jewelry)
+- The person's energy and personality
+
+SECTION 2 — FACE AND IDENTITY:
+CRITICAL — The person must be immediately recognizable.
+Preserve ALL of these faithfully:
+- Face shape and proportions
+- Eye shape, color and expression
+- Nose and lip shape
+- Skin tone (exact match)
+- Hair style, color and texture
+- Facial hair (exact style)
+- All distinctive facial features
+
+BODY BUILD:
+- Add exactly 15% more muscle — subtle and natural
+- Slightly broader shoulders, arms more defined
+- Must still look like the same person
+- NOT a bodybuilder — subtle athletic improvement only
+
+SECTION 3 — UNIFORM (FUTTY KIT):
+Jersey base color: #0d0d12 (very dark near-black)
+Bold vertical stripes alternating: #0d0d12 and #d4a017 (warm amber gold)
+Equal width vertical stripes from shoulder to hem
+Retro V-neck collar in gold #d4a017
+Both sleeves solid black #0d0d12, no stripes on sleeves
+LEFT CHEST: small angular letter F badge, gold #d4a017,
+  bold geometric F with 45-degree diagonal cut at top-right
+Shorts: solid black #0d0d12 with thin gold #d4a017 side stripes
+ZERO other brand logos, ZERO sponsor text, ZERO numbers
+
+SECTION 4 — TATTOOS:
+If visible in photo: include naturally on exposed skin
+If not in photo: do NOT add any
+
+SECTION 5 — ACCESSORIES:
+Include cap, glasses, chains ONLY if clearly visible in photo
+NEVER invent accessories not in photo
+
+SECTION 6 — POSE (AUTO-SELECT ONE):
+Analyze personality from photo and choose:
+POSE 1 — Arms crossed: calm, confident people
+POSE 2 — Clenched fist: intense, competitive people
+POSE 3 — Finger pointing up: expressive, proud people
+POSE 5 — Goal celebration: joyful, high energy people
+POSE 6 — Thumbs up: friendly, warm people
+POSE 7 — Finger gun: stylish, cool people
+SELECT ONE ONLY based on personality in photo.
+
+SECTION 7 — FRAMING:
+- Portrait orientation 3:4 ratio
+- Upper body only — head to waist, NO legs
+- Face in upper third of frame
+- Character occupies 85-90% of image height
+- Never crop the head
+
+SECTION 8 — BACKGROUND:
+- Pure white #FFFFFF, completely flat
+- Zero elements, zero shadows, zero gradients
+
+NEVER GENERATE:
+- Photorealistic photography style
+- Anime or cartoon exaggeration
+- Any sport other than soccer
+- American football helmet or equipment
+- Full body showing legs
+- Dark or colored background
+- Multiple characters
+- Weapons
+
+IMPORTANT:
+The uploaded image is a real photograph.
+Transform it completely into Panini illustration style.
+Upper body only — head to waist, NO legs.
+Plain white background.
+Futty kit: dark vertical stripes with gold.
+`;
+
 /**
  * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
- * via fal.ai, e guarda em avatars/public/{userId}-ai.png (separado da foto real).
- * Por agora todos usam FLUX schnell (free).
+ * via fal.ai (gpt-image-1.5/edit), e guarda em avatars/public/{userId}-ai.png
+ * (separado da foto real).
  */
 router.post(
   '/api/me/avatar/ai',
@@ -252,26 +358,18 @@ router.post(
       throw new HttpError(403, msg);
     }
 
-    // Modelo conforme o plano. Por agora, todos em FLUX schnell.
-    const MODELO = 'fal-ai/flux/schnell';
-    // TODO Pro/Elite (quando os planos existirem): 'fal-ai/openai/gpt-image-1'.
+    // Edição da foto real → cromo Panini Futty via gpt-image-1.5/edit.
+    const result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
+      input: {
+        prompt: PROMPT_FUTTY,
+        image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
+        quality: 'low',
+        num_images: 1,
+      },
+      logs: true,
+    });
 
-    const resultado = await comTimeout(
-      fal.subscribe(MODELO, {
-        input: {
-          image_url: perfil.foto_url, // a IA usa sempre a foto real como fonte
-          prompt:
-            'Panini football sticker card portrait, semi-realistic illustration style, vibrant colors, clean gradient background, athletic football pose, sharp details, card art style',
-          image_size: 'portrait_4_3',
-          num_inference_steps: 4,
-          num_images: 1,
-        },
-      }),
-      60000,
-      'A geração demorou demasiado. Tenta novamente.'
-    );
-
-    const urlGerada = resultado?.images?.[0]?.url;
+    const urlGerada = result?.images?.[0]?.url;
     if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
 
     // Descarrega a imagem gerada e envia para o Storage.
