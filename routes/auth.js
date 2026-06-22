@@ -224,6 +224,8 @@ router.post(
 
 // Prompt detalhado para a edição da foto real → cromo Panini estilo Futty.
 const PROMPT_FUTTY = `
+The second image shows the exact jersey and shorts the player must wear. Match the kit design precisely — same colors, same chevron shape, same F badge position.
+
 You are creating a professional illustrated soccer player sticker.
 I will upload ONE photo of a real person.
 Study the photo carefully before generating anything.
@@ -386,7 +388,10 @@ router.post(
       result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
         input: {
           prompt: PROMPT_FUTTY,
-          image_urls: [perfil.foto_url], // array com 1 elemento — o modelo exige array
+          image_urls: [
+            perfil.foto_url, // 1ª imagem: a foto real do jogador
+            'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/avatars/Kits/kit1-dark-gold.png', // 2ª imagem: o kit Futty (referência)
+          ],
           quality: 'low',
           num_images: 1,
         },
