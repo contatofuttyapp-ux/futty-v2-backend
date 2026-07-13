@@ -225,120 +225,108 @@ router.post(
 
 // Prompt detalhado para a edição da foto real → cromo Panini estilo Futty.
 const PROMPT_FUTTY = `
-The second image shows the exact jersey and shorts the player must wear. Match the kit design precisely — same colors, same chevron shape, same F badge position.
-
-You are creating a professional illustrated soccer player sticker.
-I will upload ONE photo of a real person.
-Study the photo carefully before generating anything.
-
-STYLE REFERENCE:
-- Premium Panini sticker collection art style
-- FIFA Ultimate Team card illustration quality
-- Semi-realistic digital painting
-- NOT photographic, NOT hyperrealistic, NOT anime
-- Clean confident brushwork with visible fabric texture
-- Rich deep color rendering
-- Warm skin tone rendering with soft natural shadows
-- Sharp facial details with softer body rendering
-- Professional sports trading card illustration quality
-
-LIGHTING:
-- Soft and even front-facing lighting
-- No harsh shadows on the face
-- Slight warm light from slightly above front
-- Clean vibrant color rendering throughout
-- Face should be the brightest and sharpest element
+You are creating a professional illustrated soccer player sticker card.
+You will receive TWO images:
+- Image 1: photo of a real person (the player)
+- Image 2: the exact soccer kit the player must wear
 
 PRIORITY ORDER:
-1st — Face accuracy (person must be recognizable)
-2nd — Correct uniform
-3rd — Correct pose
-4th — Sticker style and background
+1st — Face accuracy: person must be immediately recognizable
+2nd — Kit accuracy: reproduce Image 2 exactly as described below
+3rd — Pose selection
+4th — Illustration style
 
-SECTION 1 — ANALYZE THE PHOTO FIRST:
-Before generating, carefully study and note:
-- Face shape, features, skin tone, eye color
-- Hair style, color, length and texture
-- Facial hair (exact style)
-- Body type and build
-- Visible tattoos
-- Any accessories (cap, glasses, jewelry)
-- The person's energy and personality
+STYLE:
+- Premium Panini sticker illustration style
+- FIFA Ultimate Team card quality
+- Semi-realistic digital painting
+- NOT photographic, NOT anime, NOT cartoon
+- Clean brushwork with visible fabric texture
+- Rich deep color rendering
 
-SECTION 2 — FACE AND IDENTITY:
-CRITICAL — The person must be immediately recognizable.
-Preserve ALL of these faithfully:
-- Face shape and proportions
+FACE AND IDENTITY — CRITICAL:
+Study Image 1 carefully. Preserve exactly:
+- Face shape, proportions and all features
 - Eye shape, color and expression
 - Nose and lip shape
 - Skin tone (exact match)
 - Hair style, color and texture
-- Facial hair (exact style)
+- Facial hair (exact style if present)
 - All distinctive facial features
+The person must be immediately recognizable in the result.
 
-BODY BUILD:
-- Add exactly 15% more muscle — subtle and natural
-- Slightly broader shoulders, arms more defined
+BODY:
+- Add 15% more muscle — subtle and natural
+- Slightly broader shoulders, more defined arms
 - Must still look like the same person
 - NOT a bodybuilder — subtle athletic improvement only
 
-SECTION 3 — UNIFORM:
-Plain white jersey, completely blank.
-No logos, no stripes, no patterns.
-Pure white fabric only.
-This is intentional — the jersey will be
-replaced in post-processing.
+KIT — CRITICAL — REPRODUCE IMAGE 2 EXACTLY:
+The kit in Image 2 is the Futty Dark Gold jersey. Reproduce it precisely:
 
-SECTION 4 — TATTOOS:
-If visible in photo: include naturally on exposed skin
-If not in photo: do NOT add any
+JERSEY:
+- Base color: deep black #0d0d12
+- Large diagonal panel in metallic gold #d4a017
+  running from upper-left shoulder down to lower-right hem
+- V-neck collar: black with thin gold piping along the edge
+- Short sleeves: black with thin gold trim at cuffs
+- Badge: single Futty monogram (two mirrored F letters forming
+  one unified symbol) in metallic gold on upper-left chest
 
-SECTION 5 — ACCESSORIES:
-Include cap, glasses, chains ONLY if clearly visible in photo
-NEVER invent accessories not in photo
+SHORTS:
+- Base color: deep black #0d0d12
+- Diagonal gold stripe #d4a017 on left side
+- Thin gold trim at waistband and leg openings
 
-SECTION 6 — POSE (AUTO-SELECT ONE):
-Analyze personality from photo and choose:
-POSE 1 — Arms crossed: calm, confident people
-POSE 2 — Clenched fist: intense, competitive people
-POSE 3 — Finger pointing up: expressive, proud people
-POSE 5 — Goal celebration: joyful, high energy people
-POSE 6 — Thumbs up: friendly, warm people
-POSE 7 — Finger gun: stylish, cool people
-SELECT ONE ONLY based on personality in photo.
+CRITICAL KIT RULES:
+- Do NOT change any color, shape or design element
+- Do NOT substitute or invent a different kit
+- Do NOT add extra logos or badges
+- Image 2 is the ground truth — follow it exactly
+- Always use this kit — NEVER generate a white or blank jersey
 
-SECTION 7 — FRAMING:
-- Portrait orientation 3:4 ratio
-- Upper body only — head to waist, NO legs
-- Face in upper third of frame
-- Character occupies 85-90% of image height
+TATTOOS:
+- If visible in Image 1: include naturally on skin
+- If not visible in Image 1: do NOT invent any
+
+ACCESSORIES:
+- Include ONLY what is clearly visible in Image 1
+- NEVER invent caps, glasses or jewelry not present in photo
+
+POSE — AUTO-SELECT ONE based on personality visible in Image 1:
+- Arms crossed: calm, confident person
+- Clenched fist: intense, competitive person
+- Finger pointing up: expressive, proud person
+- Arms wide celebration: joyful, high energy person
+- Thumbs up: friendly, warm person
+- Finger gun: stylish, cool person
+Select ONE only. Do not mix poses.
+
+FRAMING:
+- Portrait 3:4 ratio
+- Upper body only — head to waist, NO legs visible
+- Face positioned in upper third of frame
+- Character occupies 70-75% of image height maximum
+- Clear empty space above head and below waist
 - Never crop the head
+- Player must appear smaller, not filling the entire frame
 
-SECTION 8 — BACKGROUND:
-Pure white #FFFFFF background.
-No shadows, no gradients.
-The character must have a clean white outline
-against the white background.
-CRITICAL: Subject must be perfectly isolated —
-clean edges, no motion blur, no loose strands
-bleeding into background.
+BACKGROUND — CRITICAL:
+- SOLID dark background ONLY: #050810
+- Absolutely NO stadium, NO crowd, NO field, NO grass, NO lights
+- NO environmental elements of any kind
+- NO green, NO arena, NO bokeh
+- Pure flat dark color behind the player
+- This is the most important rule after face accuracy
 
 NEVER GENERATE:
 - Photorealistic photography style
-- Anime or cartoon exaggeration
-- Any sport other than soccer
-- American football helmet or equipment
+- Anime or cartoon style
 - Full body showing legs
-- Dark or colored background
-- Multiple characters
-- Weapons
-
-IMPORTANT:
-The uploaded image is a real photograph.
-Transform it completely into Panini illustration style.
-Upper body only — head to waist, NO legs.
-Plain white background.
-Futty kit: dark vertical stripes with gold.
+- Colored or busy background (stadium, grass, crowd, arena)
+- Multiple people in the image
+- White or blank jersey
+- Any kit different from the Futty Dark Gold described above
 `;
 
 // Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
@@ -397,7 +385,7 @@ router.post(
       result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
         input: {
           prompt: PROMPT_FUTTY,
-          image_urls: [perfil.foto_url], // só a foto do jogador (kit aplicado na ETAPA 3)
+          image_urls: [perfil.foto_url, KIT_URL], // foto do jogador + kit como referência visual
           quality: 'low',
           num_images: 1,
         },
@@ -417,8 +405,10 @@ router.post(
     const urlGerada = result?.images?.[0]?.url;
     if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
     console.log('[avatar-ai] etapa 1 - GPT Image OK');
+    console.log('[avatar-ai] url gerada pela IA:', urlGerada);
 
     // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
+    // O fundo é aplicado depois no frontend (canvas do studio).
     const removeBgResult = await fal.subscribe('fal-ai/birefnet', {
       input: {
         image_url: urlGerada,
@@ -428,35 +418,24 @@ router.post(
     const urlRecortada = removeBgResult?.image?.url;
     if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
     console.log('[avatar-ai] etapa 2 - remove bg OK');
+    console.log('[avatar-ai] url após remove bg:', urlRecortada);
 
-    // ETAPA 3 — composição do jogador recortado sobre o kit (sharp).
-    const kitBuffer = await fetch(KIT_URL).then((r) => r.arrayBuffer());
-    const jogadorBuffer = await fetch(urlRecortada).then((r) => r.arrayBuffer());
+    // ETAPA 3 — redimensiona o PNG recortado (sharp). A troca de cor do kit é feita no frontend.
+    // Descarrega o PNG recortado (transparente) para processar com sharp.
+    const resp = await fetch(urlRecortada);
+    if (!resp.ok) throw new HttpError(502, 'Falha ao obter a imagem recortada.');
+    const recorteBuffer = Buffer.from(await resp.arrayBuffer());
 
-    const kitMeta = await sharp(Buffer.from(kitBuffer)).metadata();
-    const kitW = kitMeta.width;
-    const kitH = kitMeta.height;
-
-    // Jogador limitado a 85% da largura e 90% da altura do kit, mantendo proporção.
-    const jogadorRedim = await sharp(Buffer.from(jogadorBuffer))
-      .resize({
-        width: Math.round(kitW * 0.85),
-        height: Math.round(kitH * 0.9),
-        fit: 'inside',
-        withoutEnlargement: true,
-      })
-      .toBuffer();
-
-    // Kit em baixo, jogador centrado horizontalmente e a começar do topo (gravity north).
-    const imagemFinal = await sharp(Buffer.from(kitBuffer))
-      .composite([{ input: jogadorRedim, gravity: 'north' }])
+    const buffer = await sharp(recorteBuffer)
+      .trim({ threshold: 10 })
+      .resize({ height: 640, width: 512, fit: 'inside' })
       .png()
       .toBuffer();
-    console.log('[avatar-ai] etapa 3 - composição OK');
+    console.log('[avatar-ai] etapa 3 - resize OK');
 
     await ensureUserRow(req.user);
     const caminho = `public/${userId}-ai.png`;
-    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, imagemFinal, {
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
       contentType: 'image/png',
       upsert: true,
       cacheControl: '3600',
