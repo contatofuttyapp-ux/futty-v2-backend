@@ -47,7 +47,7 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
 const PERFIL_COLS =
-  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate';
+  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo';
 
 // Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
 // menos 18 anos. (Não dá para usar coluna gerada STORED — ver migração 034.)
@@ -87,6 +87,10 @@ router.get(
     const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;
     const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
 
+    // Slots de kit já gerados por este utilizador (array de kit_id).
+    const { data: slotRows } = await supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId);
+    const slots = (slotRows || []).map((r) => r.kit_id);
+
     res.json({
       user: {
         id: userId,
@@ -106,7 +110,9 @@ router.get(
         is_super_admin: perfil?.is_super_admin || false,
         birthdate: perfil?.birthdate || null,
         is_adult: calcIsAdult(perfil?.birthdate),
+        kit_ativo: perfil?.kit_ativo || 'dark-gold',
       },
+      slots,
       stats: { nota, jogos: jogos || 0, gols },
     });
   })
@@ -230,7 +236,9 @@ router.post(
 );
 
 // Prompt detalhado para a edição da foto real → cromo Panini estilo Futty.
-const PROMPT_FUTTY = `
+// Prompt base do cromo. A secção KIT é injectada por kit ({{KIT}}) — tudo o resto
+// (face/head completion, body, framing 55-62%, background, never-generate) é comum.
+const PROMPT_BASE = `
 You are creating a professional illustrated soccer player sticker card.
 You will receive TWO images:
 - Image 1: photo of a real person (the player)
@@ -272,29 +280,7 @@ BODY:
 - Must still look like the same person
 - NOT a bodybuilder — subtle athletic improvement only
 
-KIT — CRITICAL — REPRODUCE IMAGE 2 EXACTLY:
-The kit in Image 2 is the Futty Dark Gold jersey. Reproduce it precisely:
-
-JERSEY:
-- Base color: deep black #0d0d12
-- Large diagonal panel in metallic gold #d4a017
-  running from upper-left shoulder down to lower-right hem
-- V-neck collar: black with thin gold piping along the edge
-- Short sleeves: black with thin gold trim at cuffs
-- Badge: single Futty monogram (two mirrored F letters forming
-  one unified symbol) in metallic gold on upper-left chest
-
-SHORTS:
-- Base color: deep black #0d0d12
-- Diagonal gold stripe #d4a017 on left side
-- Thin gold trim at waistband and leg openings
-
-CRITICAL KIT RULES:
-- Do NOT change any color, shape or design element
-- Do NOT substitute or invent a different kit
-- Do NOT add extra logos or badges
-- Image 2 is the ground truth — follow it exactly
-- Always use this kit — NEVER generate a white or blank jersey
+{{KIT}}
 
 TATTOOS:
 - If visible in Image 1: include naturally on skin
@@ -345,6 +331,66 @@ NEVER GENERATE:
 const KIT_URL =
   'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/avatars/Kits/kit1-dark-gold.png';
 
+// Secção KIT do prompt, por kit. O texto do dark-gold é o original (não mexer);
+// os restantes derivam dele só trocando as cores.
+const kitPrompt = (nome, base, acento, extra = '') => `KIT — CRITICAL — REPRODUCE IMAGE 2 EXACTLY:
+The kit in Image 2 is the Futty ${nome} jersey. Reproduce it precisely:
+
+JERSEY:
+- Base color: ${base}
+- Large diagonal panel in ${acento}
+  running from upper-left shoulder down to lower-right hem
+- V-neck collar: ${base} with thin ${acento} piping along the edge
+- Short sleeves: ${base} with thin ${acento} trim at cuffs
+- Badge: single Futty monogram (two mirrored F letters forming
+  one unified symbol) in ${acento} on upper-left chest
+
+SHORTS:
+- Base color: ${base}
+- Diagonal ${acento} stripe on left side
+- Thin ${acento} trim at waistband and leg openings
+${extra}
+CRITICAL KIT RULES:
+- Do NOT change any color, shape or design element
+- Do NOT substitute or invent a different kit
+- Do NOT add extra logos or badges
+- Image 2 is the ground truth — follow it exactly
+- Always use this kit — NEVER generate a white or blank jersey`;
+
+// Catálogo de kits gerávies. `ativo:false` → 400 (ainda sem asset próprio no Storage).
+// `planos` restringe por plano (super-admin é isento). Espelha os 4 ids do frontend.
+const KITS_IA = {
+  'dark-gold': {
+    ativo: true,
+    url: KIT_URL,
+    planos: ['free', 'pro', 'elite'],
+    kitPrompt: kitPrompt('Dark Gold', 'deep black #0d0d12', 'metallic gold #d4a017'),
+  },
+  'dark-purple': {
+    ativo: false,
+    url: null, // asset próprio ainda por criar no Storage (Kits/kit2-dark-purple.png)
+    planos: ['free', 'pro', 'elite'],
+    kitPrompt: kitPrompt('Dark Purple', 'deep black #0d0d12', 'vivid purple #8b5cf6'),
+  },
+  'white-gold': {
+    ativo: false,
+    url: null, // Kits/kit3-white-gold.png
+    planos: ['free', 'pro', 'elite'],
+    kitPrompt: kitPrompt('White Gold', 'off-white #f8f5f0', 'metallic gold #d4a017'),
+  },
+  'elite-gold': {
+    ativo: false,
+    url: null, // Kits/kit4-elite-gold.png
+    planos: ['pro', 'elite'], // kit pago
+    kitPrompt: kitPrompt('Elite Gold', 'metallic gold #d4a017', 'deep black #0d0d12', '\nNOTE: this kit is INVERTED — gold is the base, black is the accent.\n'),
+  },
+};
+
+// Injecta a secção KIT do catálogo no prompt base.
+function promptFutty(kitId) {
+  return PROMPT_BASE.replace('{{KIT}}', KITS_IA[kitId].kitPrompt);
+}
+
 /**
  * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
  * via fal.ai (gpt-image-1.5/edit), e guarda em avatars/public/{userId}-ai.png
@@ -360,8 +406,35 @@ router.post(
     const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
 
-    // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
+    // --- KIT: validação (existe / activo / plano) ---
+    const kitId = String(req.body?.kit || 'dark-gold');
+    const kit = KITS_IA[kitId];
+    if (!kit) throw new HttpError(400, 'Kit inexistente.');
+    if (!kit.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
     const plano = perfil.plan || 'free';
+    if (!perfil.is_super_admin && !kit.planos.includes(plano)) {
+      throw new HttpError(403, 'Este kit exige um plano superior.');
+    }
+
+    // --- IDEMPOTÊNCIA: se já existe slot deste kit, veste-o e NÃO gera nem gasta quota ---
+    const { data: slot } = await supabase
+      .from('user_avatar_slots')
+      .select('avatar_url')
+      .eq('user_id', userId)
+      .eq('kit_id', kitId)
+      .maybeSingle();
+    if (slot?.avatar_url) {
+      await ensureUserRow(req.user);
+      const { error: vestirErr } = await supabase
+        .from('users')
+        .update({ avatar_url: slot.avatar_url, kit_ativo: kitId })
+        .eq('id', userId);
+      if (vestirErr) throw new HttpError(500, vestirErr.message);
+      console.log('[avatar-ai] slot reutilizado (sem geração, sem quota):', { userId, kitId });
+      return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true });
+    }
+
+    // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
     const limite = LIMITES_IA[plano] ?? LIMITES_IA.free;
     const hoje = new Date();
     const hojeISO = hoje.toISOString().slice(0, 10);
@@ -426,7 +499,8 @@ router.post(
     console.log('[avatar-ai] a chamar fal com:', {
       modelo: 'fal-ai/gpt-image-1.5/edit',
       image_url: inputUrl,
-      prompt_length: PROMPT_FUTTY.length,
+      kit: kitId,
+      prompt_length: promptFutty(kitId).length,
       quality: 'medium',
     });
 
@@ -436,8 +510,8 @@ router.post(
       try {
         result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
           input: {
-            prompt: PROMPT_FUTTY,
-            image_urls: [inputUrl, KIT_URL], // input pré-processado + kit de referência
+            prompt: promptFutty(kitId), // secção KIT injectada do catálogo
+            image_urls: [inputUrl, kit.url], // input pré-processado + asset do kit escolhido
             quality: 'medium', // decisão do teste A3 (~$0.03-0.04/imagem)
             num_images: 1,
           },
@@ -516,7 +590,8 @@ router.post(
     console.log('[avatar-ai] etapa 3 - resize OK');
 
     await ensureUserRow(req.user);
-    const caminho = `public/${userId}-ai.png`;
+    // Um ficheiro POR KIT → os slots não se sobrepõem.
+    const caminho = `public/${userId}-ai-${kitId}.png`;
     const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
       contentType: 'image/png',
       upsert: true,
@@ -527,9 +602,16 @@ router.post(
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
-    // Persiste o novo avatar + incrementa a quota (e grava o reset se mudou).
-    // Super-admin: só actualiza o avatar, sem mexer na quota.
-    const dadosUpdate = { avatar_url: avatarUrl };
+    // Guarda o SLOT deste kit (upsert por (user_id, kit_id)) → a próxima vez que o
+    // utilizador pedir este kit é servido do slot, sem gerar nem gastar quota.
+    const { error: slotErr } = await supabase
+      .from('user_avatar_slots')
+      .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl }, { onConflict: 'user_id,kit_id' });
+    if (slotErr) throw new HttpError(500, slotErr.message);
+
+    // Persiste o novo avatar + kit vestido + incrementa a quota (e grava o reset).
+    // Super-admin: só actualiza o avatar/kit, sem mexer na quota.
+    const dadosUpdate = { avatar_url: avatarUrl, kit_ativo: kitId };
     if (!perfil.is_super_admin) {
       dadosUpdate.avatar_ia_mes = usados + 1;
       dadosUpdate.avatar_ia_reset = resetData;
@@ -537,7 +619,47 @@ router.post(
     const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
 
-    res.json({ avatar_url: avatarUrl });
+    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false });
+  })
+);
+
+/**
+ * PUT /api/me/kit — veste um kit JÁ GERADO (slot existente). Não gera nada.
+ * 200 { avatar_url, kit } se houver slot; 409 { precisa_gerar: true, kit } se não.
+ */
+router.put(
+  '/api/me/kit',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const kitId = String(req.body?.kit || '');
+    const kit = KITS_IA[kitId];
+    if (!kit) throw new HttpError(400, 'Kit inexistente.');
+
+    const perfil = await getUserById(userId, 'plan, is_super_admin');
+    const plano = perfil?.plan || 'free';
+    if (!perfil?.is_super_admin && !kit.planos.includes(plano)) {
+      throw new HttpError(403, 'Este kit exige um plano superior.');
+    }
+
+    const { data: slot } = await supabase
+      .from('user_avatar_slots')
+      .select('avatar_url')
+      .eq('user_id', userId)
+      .eq('kit_id', kitId)
+      .maybeSingle();
+
+    // Sem slot → o cliente tem de gerar primeiro (gasta quota). 409 ≠ erro: é um estado.
+    if (!slot?.avatar_url) return res.status(409).json({ precisa_gerar: true, kit: kitId });
+
+    await ensureUserRow(req.user);
+    const { error } = await supabase
+      .from('users')
+      .update({ avatar_url: slot.avatar_url, kit_ativo: kitId })
+      .eq('id', userId);
+    if (error) throw new HttpError(500, error.message);
+
+    res.json({ avatar_url: slot.avatar_url, kit: kitId });
   })
 );
 
