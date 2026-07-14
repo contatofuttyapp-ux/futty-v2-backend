@@ -261,6 +261,11 @@ Study Image 1 carefully. Preserve exactly:
 - All distinctive facial features
 The person must be immediately recognizable in the result.
 
+CRITICAL — HEAD COMPLETION:
+If Image 1 crops any part of the head or hair (top of head cut by the photo edge), you MUST reconstruct the complete head and hairstyle naturally and plausibly, matching the visible hair.
+NEVER reproduce a cropped, flattened or truncated head.
+The output must ALWAYS show the entire head with a natural, complete crown and visible space above it.
+
 BODY:
 - Add 15% more muscle — subtle and natural
 - Slightly broader shoulders, more defined arms
