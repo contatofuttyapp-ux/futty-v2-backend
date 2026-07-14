@@ -130,7 +130,7 @@ router.patch(
     }
     if ('nome_jogador' in b) {
       const v = b.nome_jogador == null ? null : String(b.nome_jogador).trim();
-      if (v && v.length > 30) throw new HttpError(400, 'Nome de jogador: máximo 30 caracteres.');
+      if (v && v.length > 18) throw new HttpError(400, 'Nome de jogador: máximo 18 caracteres.');
       patch.nome_jogador = v || null;
     }
     if ('cor_preferida' in b) {
@@ -210,16 +210,22 @@ router.post(
     // URL público — deve usar o domínio do Supabase, não localhost.
     console.log('[avatar] URL público:', avatarUrl);
 
-    // 3. UPDATE na tabela users (foto_url = original permanente; avatar_url = o que o app mostra).
-    console.log('[avatar] UPDATE users:', { userId });
-    const { error: updErr } = await supabase.from('users').update({ foto_url: avatarUrl, avatar_url: avatarUrl }).eq('id', userId);
+    // 3. UPDATE na tabela users. foto_url = a nova foto (fonte da geração IA).
+    //    avatar_url (o que o card mostra) SÓ é sobrescrito se ainda NÃO houver avatar
+    //    IA; se já houver (avatar_url ≠ foto_url actual), preserva-se → o card continua
+    //    a mostrar o avatar antigo até o utilizador gerar de novo (nunca a foto crua).
+    const atual = await getUserById(userId, 'foto_url, avatar_url');
+    const temAvatarIA = !!atual?.avatar_url && atual.avatar_url !== atual.foto_url;
+    const novoAvatarUrl = temAvatarIA ? atual.avatar_url : avatarUrl;
+    console.log('[avatar] UPDATE users:', { userId, temAvatarIA });
+    const { error: updErr } = await supabase.from('users').update({ foto_url: avatarUrl, avatar_url: novoAvatarUrl }).eq('id', userId);
     if (updErr) {
       console.error('[avatar] erro no UPDATE:', updErr.message);
       throw new HttpError(500, updErr.message);
     }
 
-    console.log('[avatar] concluído:', { userId });
-    res.json({ avatar_url: avatarUrl });
+    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA });
+    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
 );
 
@@ -306,7 +312,8 @@ FRAMING:
 - Portrait 3:4 ratio
 - Upper body only — head to waist, NO legs visible
 - Face positioned in upper third of frame
-- Character occupies 70-75% of image height maximum
+- Character occupies 55-62% of image height maximum — leave generous empty space above the head, this is critical
+- If in doubt about framing, make the character SMALLER and add MORE empty space above the head — cropping the head is the single worst possible error
 - Clear empty space above head and below waist
 - Never crop the head
 - Player must appear smaller, not filling the entire frame
@@ -372,62 +379,132 @@ router.post(
       }
     }
 
-    // Edição da foto real → cromo Panini Futty via gpt-image-1.5/edit.
-    console.log('[avatar-ai] a chamar fal com:', {
-      modelo: 'fal-ai/gpt-image-1.5/edit',
-      image_url: perfil.foto_url,
-      prompt_length: PROMPT_FUTTY.length,
-      quality: 'low',
-    });
-
-    let result;
+    // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
+    // continuação da faixa superior. A IA ancora ao enquadramento do input; dar-lhe
+    // espaço acima da cabeça faz com que deixe de cortar a coroa na saída (CASO B).
+    // Usa upload Supabase (URL pública garantida) em vez de data URI, para não
+    // arriscar uma geração paga num formato de input não confirmado no schema do fal.
+    let inputUrl = perfil.foto_url;
     try {
-      result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
-        input: {
-          prompt: PROMPT_FUTTY,
-          image_urls: [perfil.foto_url, KIT_URL], // foto do jogador + kit como referência visual
-          quality: 'low',
-          num_images: 1,
-        },
-        logs: true,
+      const fotoBuf = Buffer.from(await (await fetch(perfil.foto_url)).arrayBuffer());
+      const meta = await sharp(fotoBuf).metadata();
+      const stripH = Math.max(8, Math.round((meta.height || 0) * 0.02));
+      // cor média da faixa superior (continuação natural, não uma banda artificial)
+      const { data: avg } = await sharp(fotoBuf)
+        .extract({ left: 0, top: 0, width: meta.width, height: stripH })
+        .resize(1, 1)
+        .removeAlpha()
+        .raw()
+        .toBuffer({ resolveWithObject: true });
+      const [r, g, b] = avg;
+      const padTop = Math.round((meta.height || 0) * 0.18);
+      const paddedBuf = await sharp(fotoBuf)
+        .extend({ top: padTop, background: { r, g, b, alpha: 1 } })
+        .jpeg({ quality: 90 })
+        .toBuffer();
+      const caminhoPad = `tmp/${userId}-pad.jpg`;
+      const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, paddedBuf, {
+        contentType: 'image/jpeg',
+        upsert: true,
+        cacheControl: '3600',
       });
-    } catch (err) {
-      console.error('[avatar-ai] erro completo:', {
-        message: err.message,
-        status: err.status,
-        body: JSON.stringify(err.body),
-        response: err.response,
-        stack: err.stack?.split('\n').slice(0, 3),
-      });
-      throw err;
+      if (padErr) throw new Error(padErr.message);
+      const { data: pubPad } = supabase.storage.from('avatars').getPublicUrl(caminhoPad);
+      inputUrl = `${pubPad.publicUrl}?v=${Date.now()}`;
+      console.log('[avatar-ai] etapa 0 - input pré-processado (top pad 18%)', { padTop, cor: { r, g, b } });
+    } catch (e) {
+      console.error('[avatar-ai] etapa 0 falhou, usa foto original:', e.message);
+      inputUrl = perfil.foto_url;
     }
 
-    const urlGerada = result?.images?.[0]?.url;
-    if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
-    console.log('[avatar-ai] etapa 1 - GPT Image OK');
-    console.log('[avatar-ai] url gerada pela IA:', urlGerada);
-
-    // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
-    // O fundo é aplicado depois no frontend (canvas do studio).
-    const removeBgResult = await fal.subscribe('fal-ai/birefnet', {
-      input: {
-        image_url: urlGerada,
-        model: 'General Use (Light)',
-      },
+    // Edição do input pré-processado → cromo Panini Futty via gpt-image-1.5/edit.
+    console.log('[avatar-ai] a chamar fal com:', {
+      modelo: 'fal-ai/gpt-image-1.5/edit',
+      image_url: inputUrl,
+      prompt_length: PROMPT_FUTTY.length,
+      quality: 'medium',
     });
-    const urlRecortada = removeBgResult?.image?.url;
-    if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
-    console.log('[avatar-ai] etapa 2 - remove bg OK');
-    console.log('[avatar-ai] url após remove bg:', urlRecortada);
+
+    // ETAPA 1+2 (retriáveis) — geração + remoção de fundo → buffer recortado.
+    const gerarERecortar = async () => {
+      let result;
+      try {
+        result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
+          input: {
+            prompt: PROMPT_FUTTY,
+            image_urls: [inputUrl, KIT_URL], // input pré-processado + kit de referência
+            quality: 'medium', // decisão do teste A3 (~$0.03-0.04/imagem)
+            num_images: 1,
+          },
+          logs: true,
+        });
+      } catch (err) {
+        console.error('[avatar-ai] erro completo:', {
+          message: err.message,
+          status: err.status,
+          body: JSON.stringify(err.body),
+          response: err.response,
+          stack: err.stack?.split('\n').slice(0, 3),
+        });
+        throw err;
+      }
+      const urlGerada = result?.images?.[0]?.url;
+      if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
+      console.log('[avatar-ai] etapa 1 - GPT Image OK');
+      console.log('[avatar-ai] url gerada pela IA:', urlGerada);
+
+      // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
+      const removeBgResult = await fal.subscribe('fal-ai/birefnet', {
+        input: { image_url: urlGerada, model: 'General Use (Light)' },
+      });
+      const urlRecortada = removeBgResult?.image?.url;
+      if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
+      console.log('[avatar-ai] etapa 2 - remove bg OK');
+      console.log('[avatar-ai] url após remove bg:', urlRecortada);
+
+      const respR = await fetch(urlRecortada);
+      if (!respR.ok) throw new HttpError(502, 'Falha ao obter a imagem recortada.');
+      return { urlGerada, urlRecortada, recorteBuffer: Buffer.from(await respR.arrayBuffer()) };
+    };
+
+    // REDE DE DETECÇÃO — coroa colada ao topo: linhas y=0..2 com muitos pixels
+    // opacos (alpha > 200) = cabeça cortada. Limiar: > 15% da largura.
+    const coroaNoTopo = async (buf) => {
+      const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width: w, height: h, channels: c } = info;
+      let maxCount = 0;
+      for (let y = 0; y <= 2 && y < h; y++) {
+        let cnt = 0;
+        for (let x = 0; x < w; x++) if (data[(y * w + x) * c + 3] > 200) cnt++;
+        if (cnt > maxCount) maxCount = cnt;
+      }
+      return { cortada: maxCount > w * 0.15, maxCount, limiar: Math.round(w * 0.15), largura: w };
+    };
+
+    let gen = await gerarERecortar();
+    let det = await coroaNoTopo(gen.recorteBuffer);
+    console.log('[avatar-ai] detecção coroa no topo:', det);
+    if (det.cortada) {
+      console.log('[avatar-ai] retry: coroa no topo');
+      try {
+        const gen2 = await gerarERecortar();
+        const det2 = await coroaNoTopo(gen2.recorteBuffer);
+        console.log('[avatar-ai] detecção coroa no topo (pós-retry):', det2);
+        gen = gen2;
+        det = det2;
+        if (det2.cortada) console.log('[avatar-ai] AVISO: coroa no topo após retry');
+      } catch (e) {
+        console.error('[avatar-ai] retry falhou, mantém 1ª geração:', e.message);
+      }
+    }
+    const { recorteBuffer } = gen;
 
     // ETAPA 3 — redimensiona o PNG recortado (sharp). A troca de cor do kit é feita no frontend.
-    // Descarrega o PNG recortado (transparente) para processar com sharp.
-    const resp = await fetch(urlRecortada);
-    if (!resp.ok) throw new HttpError(502, 'Falha ao obter a imagem recortada.');
-    const recorteBuffer = Buffer.from(await resp.arrayBuffer());
-
     const buffer = await sharp(recorteBuffer)
       .trim({ threshold: 10 })
+      // Rede de segurança: garante 40px de margem transparente acima de QUALQUER
+      // conteúdo, mesmo que a IA cole a cabeça à borda do PNG.
+      .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })
       .resize({ height: 640, width: 512, fit: 'inside' })
       .png()
       .toBuffer();
