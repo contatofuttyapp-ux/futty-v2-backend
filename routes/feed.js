@@ -11,8 +11,8 @@ const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
 
-// Os 6 emojis permitidos (igual ao CHECK da migração 008).
-const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '😡'];
+// Os 7 emojis permitidos (igual ao CHECK — ver migração 036 que adiciona 🍿).
+const REACTION_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🍿'];
 // Tipos de média aceites por contexto.
 const POST_MEDIA = ['image', 'gif', 'video'];
 const COMENTARIO_MEDIA = ['image', 'gif'];
@@ -20,7 +20,22 @@ const COMENTARIO_MEDIA = ['image', 'gif'];
 const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo', 'outro'];
 
 // Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+// Tecto 50MB (vídeo). As fotos passam pelo crop no cliente (clampadas a 1600px +
+// JPEG), portanto chegam bem abaixo disto. Sem transcodificação de vídeo.
+const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_MAX_BYTES } });
+// Wrapper que traduz o erro de tamanho do multer numa mensagem clara.
+function receberFicheiro(req, res, next) {
+  upload.single('file')(req, res, (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        return next(new HttpError(413, 'Ficheiro grande demais: o limite é 50MB (vídeo). As fotos são otimizadas automaticamente.'));
+      }
+      return next(new HttpError(400, 'Falha ao receber o ficheiro.'));
+    }
+    next();
+  });
+}
 // mimetype -> extensão (lista branca de tipos aceites no upload).
 const UPLOAD_MIME = {
   'image/jpeg': 'jpg',
@@ -87,6 +102,33 @@ async function reacoesParaTargets(targetType, targetIds, userId) {
     if (!slot) continue;
     slot.contagem[r.emoji] = (slot.contagem[r.emoji] || 0) + 1;
     if (r.user_id === userId) slot.minha = r.emoji;
+  }
+  return map;
+}
+
+/**
+ * Para um conjunto de parents do mesmo tipo, devolve um mapa
+ * parentId -> { recentes: [comentario...], total } com os 2 comentários mais
+ * recentes de cada. UMA query por tipo (ordenada DESC), agrupada em memória — não N+1.
+ */
+async function comentariosRecentesParaTargets(parentType, parentIds) {
+  const map = {};
+  for (const id of parentIds) map[id] = { recentes: [], total: 0 };
+  if (!parentIds.length) return map;
+
+  const { data } = await supabase
+    .from('comentarios')
+    .select('parent_id, author_id, body, created_at')
+    .eq('parent_type', parentType)
+    .in('parent_id', parentIds)
+    .is('deleted_at', null)
+    .order('created_at', { ascending: false });
+
+  for (const c of data || []) {
+    const slot = map[c.parent_id];
+    if (!slot) continue;
+    slot.total += 1;
+    if (slot.recentes.length < 2) slot.recentes.push(c);
   }
   return map;
 }
@@ -166,12 +208,20 @@ router.get(
       }
     }
 
-    // Utilizadores referenciados (prémios dos jogos + autores dos posts)
+    // Comentários: os 2 mais recentes + total, por jogo e por post (Bloco F).
+    const comGames = await comentariosRecentesParaTargets('game', (games || []).map((g) => g.id));
+    const comPosts = await comentariosRecentesParaTargets('post', postIds);
+
+    // Utilizadores referenciados (prémios dos jogos + autores dos posts + autores dos
+    // comentários recentes, para lhes resolver nome/avatar na mesma query de users).
     const userIds = new Set();
     for (const g of games || []) {
       for (const id of [g.artilheiro_user_id, g.destaque_user_id, g.rodada_user_id]) if (id) userIds.add(id);
     }
     for (const p of posts || []) if (p.author_id) userIds.add(p.author_id);
+    for (const slot of [...Object.values(comGames), ...Object.values(comPosts)]) {
+      for (const c of slot.recentes) if (c.author_id) userIds.add(c.author_id);
+    }
     const userMap = {};
     if (userIds.size) {
       const { data: us } = await supabase.from('users').select('id, nome, email, avatar_url').in('id', [...userIds]);
@@ -182,6 +232,14 @@ router.get(
       return u ? u.nome || u.email : null;
     };
     const avatarOf = (id) => userMap[id]?.avatar_url || null;
+    const comentariosDe = (slot) => ({
+      comentarios_total: slot?.total || 0,
+      comentarios_recentes: (slot?.recentes || []).map((c) => ({
+        nome: nomeOf(c.author_id),
+        avatar_url: avatarOf(c.author_id),
+        body: c.body,
+      })),
+    });
 
     // Reações dos jogos e dos posts
     const reacGames = await reacoesParaTargets('game', (games || []).map((g) => g.id), req.user.id);
@@ -217,6 +275,7 @@ router.get(
         rodada_avatar_url: g.rodada_user_id ? avatarOf(g.rodada_user_id) : null,
         contagem_reacoes: reacGames[g.id]?.contagem || {},
         minha_reacao: reacGames[g.id]?.minha || null,
+        ...comentariosDe(comGames[g.id]),
       };
     });
 
@@ -237,6 +296,7 @@ router.get(
         media: mediaByPost[p.id] || [],
         contagem_reacoes: reacPosts[p.id]?.contagem || {},
         minha_reacao: reacPosts[p.id]?.minha || null,
+        ...comentariosDe(comPosts[p.id]),
       };
     });
 
@@ -260,8 +320,11 @@ router.post(
     const { team_id: teamId, body, media } = req.body || {};
     if (!teamId) throw new HttpError(400, 'team_id é obrigatório.');
     const texto = String(body ?? '').trim();
-    if (!texto) throw new HttpError(400, 'O post não pode estar vazio.');
+    const mediaList = (Array.isArray(media) ? media : []).filter((m) => m && m.url);
+    // Texto é opcional QUANDO há média; vazio total é rejeitado.
+    if (!texto && mediaList.length === 0) throw new HttpError(400, 'O post precisa de texto ou média.');
     if (texto.length > 2000) throw new HttpError(400, 'Máximo 2000 caracteres.');
+    if (mediaList.length > 4) throw new HttpError(400, 'Máximo 4 anexos por post.');
 
     // Permissão: admin OU pode_postar
     const { data: membership } = await supabase
@@ -284,10 +347,9 @@ router.post(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    // Anexos do post (máx 20)
-    const mediaRows = (Array.isArray(media) ? media : [])
-      .filter((m) => m && m.url)
-      .slice(0, 20)
+    // Anexos do post (máx 4 — validado acima; slice como defesa).
+    const mediaRows = mediaList
+      .slice(0, 4)
       .map((m, i) => ({
         post_id: post.id,
         url: String(m.url),
@@ -495,7 +557,7 @@ router.patch(
 router.post(
   '/api/feed/upload',
   requireAuth,
-  upload.single('file'),
+  receberFicheiro,
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum ficheiro enviado.');
     const ext = UPLOAD_MIME[req.file.mimetype];

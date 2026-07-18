@@ -9,6 +9,10 @@ node_modules/
 # Dados locais
 data/
 
+# Assets de utilizadores (fotos/avatares) — vivem no disco, não versionados
+public/avatares/
+public/fotos-jogos/
+
 # Logs
 *.log
 npm-debug.log*
