@@ -473,15 +473,7 @@ router.post(
     const inativos = new Set((inativosRows || []).map((m) => m.user_id));
     const confirmados = (gp || []).filter((p) => p.users && !inativos.has(p.users.id));
 
-    // Nº de times = confirmados / jogadores por time. Os que sobram são
-    // distribuídos pelos times existentes (snake draft), sem time incompleto.
-    const numTimes = Math.floor(confirmados.length / porTime);
-    if (numTimes < 2) {
-      throw new HttpError(
-        400,
-        `São precisos pelo menos ${porTime * 2} jogadores confirmados (${porTime} por time) para formar 2 times. Há ${confirmados.length} confirmados.`
-      );
-    }
+    // (o mínimo de 2 times valida-se mais abaixo, já com os convidados contados)
 
     const userIds = confirmados.map((p) => p.users.id);
     const ratings = await computeRatings(game.teams.id, userIds);
@@ -496,9 +488,34 @@ router.post(
 
     const all = confirmados.map(toPlayer);
 
+    // CONVIDADOS SEM APP (SPEC-SORTEIO §11): nomes soltos do organizador — entram
+    // no sorteio como linha, sem user_id, zero impacto em users/ranking.
+    const convidados = Array.isArray(req.body?.convidados)
+      ? req.body.convidados.map((n) => String(n).trim()).filter(Boolean).slice(0, 28)
+      : [];
+
+    // TECTOS FORMAIS (SPEC-SORTEIO §14): 3..28 participantes; 2..4 times.
+    const totalParticipantes = all.length + convidados.length;
+    if (totalParticipantes < 3) {
+      throw new HttpError(400, 'São precisos pelo menos 3 jogadores para sortear.');
+    }
+    if (Math.floor(totalParticipantes / porTime) < 2) {
+      throw new HttpError(400, `São precisos pelo menos ${porTime * 2} jogadores (${porTime} por time) para formar 2 times. Há ${totalParticipantes} (confirmados + convidados).`);
+    }
+    if (totalParticipantes > 28) {
+      throw new HttpError(400, 'Máximo de 28 jogadores por sorteio (28 = 4 times de 7).');
+    }
+    if (Math.floor(totalParticipantes / porTime) < 2) {
+      throw new HttpError(400, );
+    }
+    if (Math.floor(totalParticipantes / porTime) > 4) {
+      throw new HttpError(400, 'Máximo de 4 times por sorteio — sobe os jogadores por time.');
+    }
+
     // Sorteio: lógica completa em utils/sorteio.js (goleiros/cabeças 1 por time,
     // excesso vira linha, linha por snake draft, sobra vai para reservas).
-    const sorteio = executarSorteio(all, porTime);
+    // A SEMENTE (SPEC §10) fica no resultado → replay exacto da animação.
+    const sorteio = executarSorteio(all, porTime, { convidados });
 
     const avisos = [];
     const totalGoleiros = all.filter((p) => p.goleiro).length;
@@ -521,7 +538,9 @@ router.post(
 
     const resultado = {
       num_times: sorteio.numTimes,
-      total_jogadores: confirmados.length,
+      total_jogadores: confirmados.length + convidados.length,
+      convidados_total: convidados.length,
+      seed: sorteio.seed, // replay EXACTO da animação (SPEC-SORTEIO §10)
       avisos,
       times,
       reservas: sorteio.reservas,
@@ -529,7 +548,7 @@ router.post(
 
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ jogadores_por_time: porTime, num_times: numTimes, sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
+      .update({ jogadores_por_time: porTime, num_times: sorteio.numTimes, sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
       .eq('id', game.id)
       .select()
       .single();
@@ -538,7 +557,7 @@ router.post(
     res.json({
       game: {
         id: updated.id,
-        num_times: numTimes,
+        num_times: sorteio.numTimes,
         sorteio_realizado: true,
         times_resultado: resultado,
         status: updated.status,
