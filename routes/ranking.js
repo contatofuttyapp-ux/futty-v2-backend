@@ -26,7 +26,7 @@ async function buildRanking(teamId, meUserId) {
   // Membros (+ stats + categoria)
   const { data: membros } = await supabase
     .from('team_members')
-    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, cor_frame )')
+    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
     .eq('team_id', teamId);
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
@@ -81,6 +81,7 @@ async function buildRanking(teamId, meUserId) {
       nome: u.nome || u.email,
       nome_jogador: u.nome_jogador || null,
       avatar_url: u.avatar_url || null,
+      foto_url: u.foto_url || null, // p/ detectar recorte IA (avatar_url != foto_url) vs foto crua
       cor_frame: u.cor_frame || 'dourado',
       categoria: ehGR ? 'GR' : 'linha',
       nota: notaParaExibir(notaInterna), // exibida (6-10) ou null
@@ -156,9 +157,14 @@ router.get(
     // Logo/cor de fundo da equipa (não vêm do requireTeamMember).
     const { data: teamExtra } = await supabase
       .from('teams')
-      .select('logo_url, cor_fundo')
+      .select('logo_url, cor_fundo, mostrar_gols')
       .eq('id', team.id)
       .maybeSingle();
+    const mostrarGols = teamExtra?.mostrar_gols !== false; // default TRUE
+    // Flag OFF (equipa casual): gols+artilharia saem do radar → o polígono adapta-se
+    // (5→3 eixos no front). O tile de Gols e a conquista de Artilheiro escondem-se no
+    // front via team.mostrar_gols.
+    if (!mostrarGols) { radar.gols = null; radar.artilharia = null; }
 
     // Jogos da equipa (com campos de resultado) + participações do jogador.
     const { data: teamGames } = await supabase
@@ -232,6 +238,49 @@ router.get(
       return { data: v.ts, nota: notaParaExibir(soma / (i + 1)) };
     });
 
+    // Escudos: equipas em comum entre o visitante e o jogador (viewer ∩ jogador).
+    // O acesso a este perfil já exige ser membro de :slug (requireTeamMember), por isso
+    // a actividade mostrada é a desta equipa — quem não partilha equipa nem chega aqui.
+    const { data: minhasEquipas } = await supabase.from('team_members').select('team_id').eq('user_id', req.user.id);
+    const { data: equipasDele } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
+    const meusIds = new Set((minhasEquipas || []).map((m) => m.team_id));
+    const partilhadasIds = [...new Set((equipasDele || []).map((m) => m.team_id).filter((id) => meusIds.has(id)))];
+    let equipas_partilhadas = [];
+    if (partilhadasIds.length) {
+      const { data: eqs } = await supabase.from('teams').select('id, nome, slug, cor').in('id', partilhadasIds);
+      equipas_partilhadas = eqs || [];
+    }
+
+    // Actividade social: posts do jogador NAS equipas partilhadas (+ fotos + nº comentários).
+    let atividade = [];
+    if (partilhadasIds.length) {
+      const { data: posts } = await supabase
+        .from('feed_posts')
+        .select('id, team_id, body, created_at')
+        .eq('author_id', userId)
+        .in('team_id', partilhadasIds)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      const postIds = (posts || []).map((p) => p.id);
+      const mediaByPost = {};
+      const comCount = {};
+      if (postIds.length) {
+        const { data: media } = await supabase.from('feed_post_media').select('post_id, url, media_type, position').in('post_id', postIds);
+        for (const m of media || []) (mediaByPost[m.post_id] ||= []).push(m);
+        const { data: coms } = await supabase.from('comentarios').select('parent_id').eq('parent_type', 'post').in('parent_id', postIds).is('deleted_at', null);
+        for (const c of coms || []) comCount[c.parent_id] = (comCount[c.parent_id] || 0) + 1;
+      }
+      const nomeEq = Object.fromEntries(equipas_partilhadas.map((e) => [e.id, e.nome]));
+      atividade = (posts || []).map((p) => ({
+        id: p.id,
+        team_nome: nomeEq[p.team_id] || null,
+        body: p.body,
+        created_at: p.created_at,
+        media: (mediaByPost[p.id] || []).sort((a, b) => a.position - b.position).map((m) => ({ url: m.url, media_type: m.media_type })),
+        comentarios_total: comCount[p.id] || 0,
+      }));
+    }
+
     res.json({
       team: { ...team, ...(teamExtra || {}), role },
       jogador: { ...jogador, posicao, total_com_nota: comNota.length },
@@ -240,6 +289,8 @@ router.get(
       conquistas,
       historico,
       evolucao,
+      equipas_partilhadas,
+      atividade,
     });
   })
 );

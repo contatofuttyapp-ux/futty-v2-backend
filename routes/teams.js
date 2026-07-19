@@ -234,7 +234,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(
       req.params.slug,
-      'id, nome, slug, cor, criado_por, created_at, publica, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade'
+      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade'
     );
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
@@ -286,6 +286,7 @@ router.patch(
       patch.cor = b.cor;
     }
     if ('publica' in b) patch.publica = !!b.publica;
+    if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
     if ('cor_fundo' in b) {
