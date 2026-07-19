@@ -111,6 +111,12 @@ router.get(
         birthdate: perfil?.birthdate || null,
         is_adult: calcIsAdult(perfil?.birthdate),
         kit_ativo: perfil?.kit_ativo || 'dark-gold',
+        // P1-1 — flag do onboarding dia-1 no user_metadata do Auth (sem DDL).
+        // FALSE → qualquer entrada autenticada reencaminha 1x para /onboarding
+        // (resistente ao caminho de entrada: confirmação de email noutro
+        // dispositivo, login fresco, deep-link). Contas antigas foram semeadas
+        // TRUE pelo script backfill-onboarding.js.
+        onboarding_completo: req.user.user_metadata?.onboarding_completo === true,
       },
       slots,
       stats: { nota, jogos: jogos || 0, gols },
@@ -173,6 +179,22 @@ router.patch(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ user: updated });
+  })
+);
+
+/**
+ * POST /api/me/onboarding-completo — marca o onboarding dia-1 como concluído
+ * (P1-1). Grava no user_metadata do Auth via admin API — o próximo /api/me já
+ * devolve onboarding_completo:true e a gate do frontend deixa de reencaminhar.
+ */
+router.post(
+  '/api/me/onboarding-completo',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const meta = { ...(req.user.user_metadata || {}), onboarding_completo: true };
+    const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
+    if (error) throw new HttpError(500, error.message);
+    res.json({ onboarding_completo: true });
   })
 );
 

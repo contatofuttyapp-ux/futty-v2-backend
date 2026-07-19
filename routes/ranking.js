@@ -324,6 +324,51 @@ router.get(
   })
 );
 
+/**
+ * GET /api/me/votacoes-pendentes — (P1-3) agrega, em TODAS as equipas do
+ * utilizador, onde ainda há avaliações por dar. Alimenta o banner do Início —
+ * a votação deixa de ser invisível fora do Ranking.
+ * { pendentes: [{ slug, nome, faltam, pedido_revotacao }] } (só as com trabalho).
+ */
+router.get(
+  '/api/me/votacoes-pendentes',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const uid = req.user.id;
+    const { data: minhas } = await supabase.from('team_members').select('team_id').eq('user_id', uid);
+    const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
+    if (!teamIds.length) return res.json({ pendentes: [] });
+
+    const { data: teams } = await supabase
+      .from('teams')
+      .select('id, slug, nome, revotar_pedido_em')
+      .in('id', teamIds);
+    const { data: membros } = await supabase.from('team_members').select('team_id, user_id').in('team_id', teamIds);
+    const { data: votos } = await supabase
+      .from('votes')
+      .select('team_id, para_user_id, updated_at')
+      .eq('de_user_id', uid)
+      .in('team_id', teamIds);
+
+    const pendentes = [];
+    for (const t of teams || []) {
+      const total = (membros || []).filter((m) => m.team_id === t.id && m.user_id !== uid).length;
+      const meus = (votos || []).filter((v) => v.team_id === t.id);
+      const votados = new Set(meus.map((v) => v.para_user_id)).size;
+      const faltam = Math.max(0, total - votados);
+      const maxUpdated = meus.reduce((mx, v) => Math.max(mx, v.updated_at ? new Date(v.updated_at).getTime() : 0), 0);
+      const pedidoEm = t.revotar_pedido_em ? new Date(t.revotar_pedido_em).getTime() : 0;
+      const pedido_revotacao = pedidoEm > 0 && pedidoEm > maxUpdated;
+      if (total > 0 && (faltam > 0 || pedido_revotacao)) {
+        pendentes.push({ slug: t.slug, nome: t.nome, faltam, pedido_revotacao });
+      }
+    }
+    // Mais urgente primeiro: pedido de revotação do admin, depois mais faltas.
+    pendentes.sort((a, b) => (b.pedido_revotacao - a.pedido_revotacao) || (b.faltam - a.faltam));
+    res.json({ pendentes });
+  })
+);
+
 /** POST /api/teams/:slug/votar — vota/atualiza a nota de um membro. */
 router.post(
   '/api/teams/:slug/votar',

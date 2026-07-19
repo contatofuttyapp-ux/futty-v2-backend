@@ -820,8 +820,10 @@ router.delete(
 );
 
 /**
- * GET /api/me/pedidos — desfechos dos MEUS pedidos (approved/rejected ainda não
- * dispensados). O candidato vê o resultado no app (ciclo v1, sem push).
+ * GET /api/me/pedidos — os MEUS pedidos de entrada visíveis no app (ciclo v1,
+ * sem push): desfechos (approved/rejected ainda não dispensados) E os que ainda
+ * estão PENDING (P1-4 — o candidato via o pendente só no Explorar). O Início
+ * separa: pending → card "pedido pendente · cancelar"; resto → desfecho.
  */
 router.get(
   '/api/me/pedidos',
@@ -831,7 +833,7 @@ router.get(
       .from('team_join_requests')
       .select('id, status, updated_at, teams ( id, nome, slug, cor, logo_url )')
       .eq('user_id', req.user.id)
-      .in('status', ['approved', 'rejected'])
+      .in('status', ['approved', 'rejected', 'pending'])
       .order('updated_at', { ascending: false });
     if (error) throw new HttpError(500, error.message);
     res.json({
