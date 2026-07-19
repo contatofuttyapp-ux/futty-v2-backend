@@ -532,6 +532,47 @@ router.delete(
   })
 );
 
+/**
+ * DELETE /api/teams/:slug/membros/me — SAIR da equipa pelo próprio (SPEC-EQUIPAS).
+ * História preservada (mesmo efeito da remoção pelo admin: o passado fica; sai do
+ * ranking e do futuro). Guardas: último admin não sai sem passar o cargo; sozinho
+ * na equipa → arquivar é vaga futura (recusa com mensagem clara).
+ */
+router.delete(
+  '/api/teams/:slug/membros/me',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, nome');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const role = await getRole(team.id, req.user.id);
+    if (!role) throw new HttpError(400, 'Não és membro desta equipa.');
+
+    const { data: membros, error: em } = await supabase
+      .from('team_members')
+      .select('user_id, role')
+      .eq('team_id', team.id);
+    if (em) throw new HttpError(500, em.message);
+
+    if ((membros || []).length === 1) {
+      throw new HttpError(400, 'És a única pessoa na equipa — arquivar a equipa chega em breve; por agora fala connosco.');
+    }
+    if (role === 'admin') {
+      const outrosAdmins = (membros || []).filter((m) => m.role === 'admin' && m.user_id !== req.user.id);
+      if (outrosAdmins.length === 0) {
+        throw new HttpError(400, 'És o único admin — passa o cargo a outro membro antes de sair.');
+      }
+    }
+
+    const { error } = await supabase
+      .from('team_members')
+      .delete()
+      .eq('team_id', team.id)
+      .eq('user_id', req.user.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ saiu: true });
+  })
+);
+
 /** PATCH /api/teams/:slug/membros/:userId — muda role/pode_postar (só admin). */
 router.patch(
   '/api/teams/:slug/membros/:userId',
@@ -757,6 +798,66 @@ router.post(
     }
 
     res.status(201).json({ pedido: data });
+  })
+);
+
+/** DELETE /api/teams/:slug/pedir-entrada — cancela o MEU pedido pendente. */
+router.delete(
+  '/api/teams/:slug/pedir-entrada',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    const { error } = await supabase
+      .from('team_join_requests')
+      .delete()
+      .eq('team_id', team.id)
+      .eq('user_id', req.user.id)
+      .eq('status', 'pending');
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true });
+  })
+);
+
+/**
+ * GET /api/me/pedidos — desfechos dos MEUS pedidos (approved/rejected ainda não
+ * dispensados). O candidato vê o resultado no app (ciclo v1, sem push).
+ */
+router.get(
+  '/api/me/pedidos',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { data, error } = await supabase
+      .from('team_join_requests')
+      .select('id, status, updated_at, teams ( id, nome, slug, cor, logo_url )')
+      .eq('user_id', req.user.id)
+      .in('status', ['approved', 'rejected'])
+      .order('updated_at', { ascending: false });
+    if (error) throw new HttpError(500, error.message);
+    res.json({
+      pedidos: (data || []).map((p) => ({
+        id: p.id,
+        status: p.status,
+        updated_at: p.updated_at,
+        team: p.teams ? { id: p.teams.id, nome: p.teams.nome, slug: p.teams.slug, cor: p.teams.cor, logo_url: p.teams.logo_url } : null,
+      })),
+    });
+  })
+);
+
+/** DELETE /api/me/pedidos/:id — dispensa o desfecho (apaga a MINHA linha). */
+router.delete(
+  '/api/me/pedidos/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { error } = await supabase
+      .from('team_join_requests')
+      .delete()
+      .eq('id', req.params.id)
+      .eq('user_id', req.user.id)
+      .in('status', ['approved', 'rejected']);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true });
   })
 );
 
