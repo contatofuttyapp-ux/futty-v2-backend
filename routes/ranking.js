@@ -470,3 +470,4 @@ router.delete(
 );
 
 module.exports = router;
+module.exports.buildRanking = buildRanking;

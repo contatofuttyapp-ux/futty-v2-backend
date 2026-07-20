@@ -20,6 +20,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
+const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
 const { HttpError } = require('./utils/http');
 
 const authRoutes = require('./routes/auth');
@@ -31,6 +32,7 @@ const feedRoutes = require('./routes/feed');
 const pushRoutes = require('./routes/push');
 const rsvpRoutes = require('./routes/rsvp');
 const campeonatoRoutes = require('./routes/campeonato');
+const campeonatosRoutes = require('./routes/campeonatos');
 const superadminRoutes = require('./routes/superadmin');
 const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
@@ -149,6 +151,7 @@ app.use(feedRoutes);
 app.use('/api/push', pushRoutes);
 app.use(rsvpRoutes);
 app.use(campeonatoRoutes);
+app.use(campeonatosRoutes);
 app.use(superadminRoutes);
 app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
@@ -175,6 +178,7 @@ app.listen(port, () => {
   console.log(`[Futty] Health check: http://localhost:${port}/health`);
   // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
   ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
+  ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
 });
 
 module.exports = { app, supabase };
