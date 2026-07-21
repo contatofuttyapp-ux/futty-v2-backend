@@ -98,6 +98,21 @@ router.get(
     const teams = (data || [])
       .filter((row) => row.teams)
       .map((row) => ({ ...row.teams, role: row.role }));
+
+    // P2-6: pedidos de entrada pendentes por equipa (só onde sou admin) → badge
+    // no chip do Início, para não apodrecerem por dias sem entrar no hub.
+    const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
+    if (adminIds.length) {
+      const { data: peds } = await supabase
+        .from('team_join_requests')
+        .select('team_id')
+        .in('team_id', adminIds)
+        .eq('status', 'pending');
+      const contagem = {};
+      for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
+      for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
+    }
+
     res.json({ teams });
   })
 );
