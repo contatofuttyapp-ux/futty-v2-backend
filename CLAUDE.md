@@ -21,3 +21,14 @@ para o processo completo: mockup-first, look do utilizador, selo só após aprov
   sobra→reservas); requisito aberto: persistir a SEMENTE para replay exacto.
 - Emails `@futtymock.com` = contas de teste (podem ser semeadas/limpas à vontade);
   contas reais nunca se tocam.
+
+## Conector Supabase (ferramentas)
+- **ATIVO em READ-ONLY** (por desenho — segurança). Leituras SQL diretas: SIM.
+- DDL/escrita: DESLIGADO. Liga-se por ordem expressa do utilizador editando o
+  `.mcp.json` (remover `--read-only`) para corrida pontual, depois volta a fechar.
+- Migrações continuam **"DDL à mão"** (ver Migrations acima) até essa ordem;
+  a `039` = vaga OPCIONAL.
+
+## Higiene (limpeza futura, NUNCA automática)
+- `teams` tem 2 "Teste 1" duplicados de 3 jun (`teste-1-ktbig`, `teste-1-0a2ej`) —
+  limpar na vaga de higiene pré-lançamento, só com ordem expressa. Nunca apagar sozinho.
