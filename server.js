@@ -38,6 +38,8 @@ const campeonatoRoutes = require('./routes/campeonato');
 const campeonatosRoutes = require('./routes/campeonatos');
 const superadminRoutes = require('./routes/superadmin');
 const mediaProxyRoutes = require('./routes/media');
+const denunciasRoutes = require('./routes/denuncias');
+const { ensureDenunciasBucket } = require('./utils/denunciaStore');
 const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
@@ -162,6 +164,7 @@ app.use(campeonatoRoutes);
 app.use(campeonatosRoutes);
 app.use(superadminRoutes);
 app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
+app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
 app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
 // 404 para rotas /api não encontradas
@@ -188,6 +191,7 @@ app.listen(port, () => {
   // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
   ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
   ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
+  ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
   // Tijolo 1: pré-carrega o modelo NSFW uma vez (não bloqueia; falha aberta).
   carregarModelo();
   // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).

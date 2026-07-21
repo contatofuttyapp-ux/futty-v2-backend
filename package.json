@@ -13,6 +13,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.112.4",
     "@fal-ai/serverless-client": "^0.15.0",
     "@sentry/node": "^10.58.0",
     "@supabase/supabase-js": "^2.107.0",
