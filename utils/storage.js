@@ -3,6 +3,7 @@
 // senão fica órfão, público e para sempre. Best-effort: se falhar, regista e segue
 // (nunca quebra o fluxo do utilizador que só quer apagar o post).
 const { supabase } = require('./db');
+const { assinarToken } = require('./mediaToken');
 
 /** Extrai o caminho dentro do bucket a partir de uma URL pública do Storage. */
 function caminhoDeUrl(url, bucket) {
@@ -106,6 +107,27 @@ async function assinarPayload(payload, expiresIn = 3600) {
 }
 
 /**
+ * Reescreve, IN-PLACE, os URLs de buckets privados para URLs ESTÁVEIS do proxy
+ * (`${base}/api/media/<token>`). Tijolo 2: o DOM deixa de segurar URLs assinados
+ * de vida curta → sem expiração à vista; o bucket continua privado. `base` é a
+ * origem do backend (ex. http://localhost:3001).
+ */
+function proxificarPayload(payload, base) {
+  try {
+    if (!payload || typeof payload !== 'object' || !base) return payload;
+    percorrer(payload, (s) => {
+      const p = parseUrlPublico(s);
+      if (!p) return undefined;
+      return `${base}/api/media/${assinarToken(p.bucket, p.path)}`;
+    });
+    return payload;
+  } catch (e) {
+    console.error('[media] proxificarPayload falhou (fail-open):', e.message);
+    return payload;
+  }
+}
+
+/**
  * Remove (para '') os URLs de buckets privados no payload — usado nas páginas
  * PÚBLICAS de partilha: sem sessão, cai na silhueta/fallback do frontend.
  */
@@ -138,6 +160,7 @@ module.exports = {
   caminhoDeUrl,
   parseUrlPublico,
   assinarPayload,
+  proxificarPayload,
   despublicarPayload,
   privatizarBuckets,
   BUCKETS_PRIVADOS,

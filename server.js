@@ -37,6 +37,7 @@ const rsvpRoutes = require('./routes/rsvp');
 const campeonatoRoutes = require('./routes/campeonato');
 const campeonatosRoutes = require('./routes/campeonatos');
 const superadminRoutes = require('./routes/superadmin');
+const mediaProxyRoutes = require('./routes/media');
 const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
@@ -160,6 +161,7 @@ app.use(rsvpRoutes);
 app.use(campeonatoRoutes);
 app.use(campeonatosRoutes);
 app.use(superadminRoutes);
+app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
 app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
 // 404 para rotas /api não encontradas

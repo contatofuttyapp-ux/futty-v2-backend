@@ -12,7 +12,23 @@
 const sharp = require('sharp');
 const { HttpError } = require('./http');
 
-const LIMIAR = 0.85; // Porn/Hentai acima disto = recusa
+// ─────────────────────────────────────────────────────────────────────────────
+// LIMIAR — CALIBRADO (Tijolo 2). LEI, não palpite. Medido por scripts/calibrar-nsfw.js
+// contra uma bateria LIMPA de 15 imagens (11 fotos reais da casa + 4 proxies dos
+// extremos do futebol amador). Resultado (max na bateria legítima):
+//   max PORN   = 0.016 · max HENTAI = 0.025 · max explícito = 0.025
+//   max SEXY   = 0.947  ← uma celebração de campeão (sem-camisa/abraço colado):
+//                         SEXY altíssimo mas PORN 0.001. POR ISSO **nunca bloquear
+//                         em Sexy** — mataria celebrações, praia, balneário.
+// Só bloqueamos em PORN/HENTAI. O fosso é enorme (legítimo ≤ 0.025 vs explícito
+// real ~0.9+), o que dá para descer de 0.85 → 0.75 e ganhar sensibilidade a
+// conteúdo mesmo assim com ~30× de margem sobre o pior caso legítimo (0.025).
+// 0 falsos positivos na bateria a QUALQUER limiar entre 0.6 e 0.9.
+// Se surgir falso positivo real, SOBE este número (não desças abaixo de 0.6).
+const LIMIAR = 0.75; // max(Porn,Hentai) acima disto = recusa. NUNCA se usa Sexy.
+// MENSAGEM ÚNICA (decisão Tijolo 2): variar por categoria vazaria o motivo
+// (= detalhe técnico proibido) e podia envergonhar. Uma frase neutra e digna serve
+// todos os casos e não dá pista para "afinar" um upload malicioso.
 const MSG = 'Esta imagem não pode entrar no Futty. Escolhe outra e segue em frente.';
 // Só sabemos decodificar imagem estática; vídeo/gif passam sem análise (fora do
 // âmbito do NSFWJS — anotado para a fase de vídeo/moderação reativa).
