@@ -8,6 +8,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { notaParaExibir } = require('../utils/helpers');
+const { filtroNSFW } = require('../utils/nsfwFilter');
 
 // fal.ai — credenciais via FAL_KEY (.env).
 fal.config({ credentials: process.env.FAL_KEY });
@@ -207,6 +208,7 @@ router.post(
   '/api/me/avatar',
   requireAuth,
   receberAvatar,
+  filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (avatar + onboarding)
   asyncHandler(async (req, res) => {
     const file = req.file;
     if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "avatar").');

@@ -21,6 +21,9 @@ const rateLimit = require('express-rate-limit');
 
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
+const { carregarModelo } = require('./utils/nsfwFilter');
+const { mediaUrls } = require('./middleware/mediaUrls');
+const { privatizarBuckets } = require('./utils/storage');
 const { HttpError } = require('./utils/http');
 
 const authRoutes = require('./routes/auth');
@@ -141,6 +144,10 @@ app.get('/', (req, res) => {
   res.json({ name: 'Futty v2.0 API', status: 'running' });
 });
 
+// Tijolo 1C — assina/despublica URLs de média (buckets privados) na fronteira,
+// ANTES das rotas (embrulha res.json). Autenticadas → assinado; /api/p/ → silhueta.
+app.use(mediaUrls);
+
 // Rotas da API
 app.use(authRoutes);
 app.use(teamsRoutes);
@@ -179,6 +186,10 @@ app.listen(port, () => {
   // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
   ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
   ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
+  // Tijolo 1: pré-carrega o modelo NSFW uma vez (não bloqueia; falha aberta).
+  carregarModelo();
+  // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
+  privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
 });
 
 module.exports = { app, supabase };

@@ -8,6 +8,8 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
+const { filtroNSFW } = require('../utils/nsfwFilter');
+const { removerFicheirosPorUrl } = require('../utils/storage');
 
 const router = express.Router();
 
@@ -447,9 +449,25 @@ router.delete(
       throw new HttpError(403, 'Só o autor ou um admin pode apagar.');
     }
 
-    // feed_post_media tem ON DELETE CASCADE
+    // Peça 2 (Tijolo 1B): antes do cascade na BD, junta as URLs da média para
+    // apagar os OBJETOS no Storage — senão ficam órfãos, públicos e para sempre.
+    const { data: media } = await supabase
+      .from('feed_post_media')
+      .select('url')
+      .eq('post_id', post.id);
+
+    // feed_post_media tem ON DELETE CASCADE (apaga as linhas)
     const { error } = await supabase.from('feed_posts').delete().eq('id', post.id);
     if (error) throw new HttpError(500, error.message);
+
+    // Best-effort: mata os ficheiros no bucket. Se falhar, regista e segue — o
+    // utilizador já viu o post desaparecer; não quebramos o fluxo por um órfão.
+    const urls = (media || []).map((m) => m.url);
+    if (urls.length) {
+      const r = await removerFicheirosPorUrl(STORAGE_BUCKET, urls);
+      console.log('[feed] post apagado, ficheiros no Storage:', { post: post.id, ...r });
+    }
+
     res.json({ deleted: true });
   })
 );
@@ -558,6 +576,7 @@ router.post(
   '/api/feed/upload',
   requireAuth,
   receberFicheiro,
+  filtroNSFW, // Tijolo 1: bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum ficheiro enviado.');
     const ext = UPLOAD_MIME[req.file.mimetype];

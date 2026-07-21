@@ -21,3 +21,6 @@ npm-debug.log*
 .DS_Store
 .vscode/*
 .idea/
+
+# Spike NSFW — imagens de benchmark nunca entram no git
+scripts/_bench/
