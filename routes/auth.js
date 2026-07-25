@@ -43,7 +43,10 @@ function receberAvatar(req, res, next) {
 const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzento'];
 // Preferências da figurinha (igual aos CHECKs da migração 018).
 const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
-const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'preto'];
+const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden'];
+// Fundos PREMIUM (gated no plano) — planos permitidos por fundo, no molde dos kits
+// (White/Elite Gold). GOLDEN = 1º fundo premium. Super-admin passa sempre.
+const FUNDOS_PREMIUM = { golden: ['pro', 'elite'] };
 // Limites de gerações de avatar IA por plano.
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
@@ -165,6 +168,15 @@ router.patch(
     if ('fundo_figurinha' in b) {
       const v = String(b.fundo_figurinha);
       if (!FUNDOS_FIGURINHA.includes(v)) throw new HttpError(400, 'Fundo de figurinha inválido.');
+      // GATE PREMIUM (servidor é a fonte da verdade — sem truque de frontend): um fundo
+      // premium só entra se o plano o permitir (ou super-admin).
+      if (FUNDOS_PREMIUM[v]) {
+        const perfil = await getUserById(req.user.id, 'plan, is_super_admin');
+        const plano = perfil?.plan || 'free';
+        if (!perfil?.is_super_admin && !FUNDOS_PREMIUM[v].includes(plano)) {
+          throw new HttpError(403, 'Este fundo exige um plano superior.');
+        }
+      }
       patch.fundo_figurinha = v;
     }
 
@@ -352,8 +364,13 @@ NEVER GENERATE:
 `;
 
 // Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
+// Assets dos kits em bucket PÚBLICO próprio ('kits') — são assets do app, não PII.
+// (Antes viviam em avatars/Kits/; o tijolo 1C privatizou avatars e partia o fal +
+// as thumbnails. Movidos para 'kits' público, que a privatização não toca.)
 const KIT_URL =
-  'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/avatars/Kits/kit1-dark-gold.png';
+  'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit1-dark-gold.png';
+const KIT2_URL =
+  'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit2-dark-purple.png';
 
 // Secção KIT do prompt, por kit. O texto do dark-gold é o original (não mexer);
 // os restantes derivam dele só trocando as cores.
@@ -391,8 +408,8 @@ const KITS_IA = {
     kitPrompt: kitPrompt('Dark Gold', 'deep black #0d0d12', 'metallic gold #d4a017'),
   },
   'dark-purple': {
-    ativo: false,
-    url: null, // asset próprio ainda por criar no Storage (Kits/kit2-dark-purple.png)
+    ativo: true, // KIT 2 oficial (gerado do dark-gold; roxo #8b5cf6). Livre por agora.
+    url: KIT2_URL,
     planos: ['free', 'pro', 'elite'],
     kitPrompt: kitPrompt('Dark Purple', 'deep black #0d0d12', 'vivid purple #8b5cf6'),
   },
