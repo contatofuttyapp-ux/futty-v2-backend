@@ -7,6 +7,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFW } = require('../utils/nsfwFilter');
+const { geocodar } = require('../utils/geocode');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
@@ -127,9 +128,11 @@ router.get(
     const q = String(req.query.q ?? '').trim();
     const loc = String(req.query.localizacao ?? '').trim();
 
+    // geo_lat/geo_lng (arredondados) vão no payload → o cliente calcula a distância
+    // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
     let query = supabase
       .from('teams')
-      .select('id, nome, slug, cor, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade')
+      .select('id, nome, slug, cor, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng')
       .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
     // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
     if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
@@ -170,6 +173,8 @@ router.get(
         modo_visibilidade: t.modo_visibilidade,
         localizacao: t.localizacao,
         descricao: t.descricao,
+        geo_lat: t.geo_lat ?? null, // arredondado ~1km; só entra na busca por distância se não-nulo
+        geo_lng: t.geo_lng ?? null,
         membro_count: counts[t.id] || 0,
         ja_membro: meus.has(t.id),
         pedido_pendente: pendentes.has(t.id),
@@ -248,7 +253,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(
       req.params.slug,
-      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade'
+      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng'
     );
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
@@ -303,6 +308,18 @@ router.patch(
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
+    // GEO (opt-in): a cidade é só o INPUT do geocode (Nominatim) → geo_lat/geo_lng
+    // ARREDONDADOS no servidor. Não há coluna `cidade` (041 só criou geo_*) — o texto não
+    // se guarda; guarda-se só o ponto arredondado. Limpar = sair da busca por distância.
+    if ('cidade' in b) {
+      const v = b.cidade ? String(b.cidade).trim().slice(0, 100) : null;
+      if (v) {
+        const g = await geocodar(v);
+        if (g) { patch.geo_lat = g.lat; patch.geo_lng = g.lng; } // senão, mantém o geo anterior
+      } else {
+        patch.geo_lat = null; patch.geo_lng = null;
+      }
+    }
     if ('cor_fundo' in b) {
       const v = b.cor_fundo == null ? null : String(b.cor_fundo).trim();
       if (v && v.length > 20) throw new HttpError(400, 'cor_fundo inválida.');
@@ -317,7 +334,12 @@ router.patch(
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
-    const { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
+    let { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
+    // Resiliência: se as colunas geo ainda não existirem (DDL 041 por correr), repete sem elas.
+    if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
+      const semGeo = { ...patch }; delete semGeo.geo_lat; delete semGeo.geo_lng; delete semGeo.cidade;
+      ({ data: updated, error } = await supabase.from('teams').update(semGeo).eq('id', team.id).select().single());
+    }
     if (error) throw new HttpError(500, error.message);
     res.json({ team: updated });
   })
