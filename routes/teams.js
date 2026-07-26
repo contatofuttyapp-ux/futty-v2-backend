@@ -1,13 +1,12 @@
 // Futty v2.0 — Rotas de equipas e convites.
 const express = require('express');
 const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
 const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
 const { agregadosDaEquipa } = require('../utils/agregados');
+const { filtroNSFW } = require('../utils/nsfwFilter');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
@@ -16,9 +15,8 @@ const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
 const CONVITE_DIAS = 7;
 
-// Upload do logo da equipa (em memória; gravado depois no disco em public/logos).
+// Upload do logo da equipa (em memória; gravado no bucket privado "avatars").
 const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
-const LOGOS_DIR = path.join(__dirname, '..', 'public', 'logos');
 const uploadLogo = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
@@ -325,11 +323,17 @@ router.patch(
   })
 );
 
-/** POST /api/teams/:slug/logo — carrega o logo da equipa (só admin; PNG/JPG/WEBP, máx 2MB). */
+/**
+ * POST /api/teams/:slug/logo — carrega o logo da equipa (só admin; PNG/JPG/WEBP, máx 2MB).
+ * LEIS DA SEGURANÇA: filtro NSFW (explícito → 403) ANTES de guardar; ficheiro no bucket
+ * PRIVADO "avatars" (path logos/{teamId}); o URL é assinado/proxied na fronteira da API
+ * (middleware mediaUrls), como os avatares. EscudoEquipa/TeamAvatar já mostram o logo_url.
+ */
 router.post(
   '/api/teams/:slug/logo',
   requireAuth,
   logoMiddleware,
+  filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (moderação)
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
@@ -340,9 +344,13 @@ router.post(
     if (!req.file) throw new HttpError(400, 'Envia uma imagem PNG, JPG ou WEBP (máx 2MB).');
     const ext = LOGO_EXT[req.file.mimetype];
 
-    fs.mkdirSync(LOGOS_DIR, { recursive: true });
-    fs.writeFileSync(path.join(LOGOS_DIR, `${team.id}.${ext}`), req.file.buffer);
-    const logoUrl = `/public/logos/${team.id}.${ext}`;
+    const caminho = `logos/${team.id}.${ext}`;
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, req.file.buffer, {
+      contentType: req.file.mimetype, upsert: true, cacheControl: '3600',
+    });
+    if (upErr) throw new HttpError(500, upErr.message);
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
+    const logoUrl = `${pub.publicUrl}?v=${Date.now()}`; // ?v= força recarga (path fixo)
 
     const { error } = await supabase.from('teams').update({ logo_url: logoUrl }).eq('id', team.id);
     if (error) throw new HttpError(500, error.message);
