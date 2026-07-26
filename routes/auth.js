@@ -74,6 +74,14 @@ router.get(
     await ensureUserRow(req.user);
     const perfil = await getUserById(userId, PERFIL_COLS);
 
+    // Consentimento de rosto público (Opção B). Leitura DEFENSIVA e separada: se a
+    // coluna ainda não existir (DDL 040 por correr), não parte o /api/me — default TRUE.
+    let mostrarRostoPublico = true;
+    try {
+      const cons = await getUserById(userId, 'mostrar_rosto_publico');
+      if (cons && typeof cons.mostrar_rosto_publico === 'boolean') mostrarRostoPublico = cons.mostrar_rosto_publico;
+    } catch { mostrarRostoPublico = true; }
+
     // Stats agregadas (todas as equipas):
     // jogos = presenças confirmadas; gols = soma; nota = média dos votos recebidos.
     const { count: jogos } = await supabase
@@ -114,6 +122,7 @@ router.get(
         is_super_admin: perfil?.is_super_admin || false,
         birthdate: perfil?.birthdate || null,
         is_adult: calcIsAdult(perfil?.birthdate),
+        mostrar_rosto_publico: mostrarRostoPublico,
         kit_ativo: perfil?.kit_ativo || 'dark-gold',
         // P1-1 — flag do onboarding dia-1 no user_metadata do Auth (sem DDL).
         // FALSE → qualquer entrada autenticada reencaminha 1x para /onboarding
@@ -178,6 +187,25 @@ router.patch(
         }
       }
       patch.fundo_figurinha = v;
+    }
+    // Consentimento de rosto público (Opção B): toggle no Perfil → Privacidade.
+    if ('mostrar_rosto_publico' in b) {
+      patch.mostrar_rosto_publico = b.mostrar_rosto_publico === true;
+    }
+    // Data de nascimento (pedido único do Início a quem não a tem). SET-ONCE: se já
+    // existir, não deixa mudar (evita a passagem trivial menor→adulto).
+    if ('birthdate' in b) {
+      const v = b.birthdate == null || b.birthdate === '' ? null : String(b.birthdate).slice(0, 10);
+      if (v) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new HttpError(400, 'Data de nascimento inválida.');
+        const d = new Date(`${v}T00:00:00Z`);
+        if (Number.isNaN(d.getTime()) || d > new Date() || d.getUTCFullYear() < 1900) {
+          throw new HttpError(400, 'Data de nascimento inválida.');
+        }
+        const atual = await getUserById(req.user.id, 'birthdate');
+        if (atual && atual.birthdate) throw new HttpError(400, 'A data de nascimento já está definida.');
+        patch.birthdate = v;
+      }
     }
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');

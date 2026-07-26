@@ -5,6 +5,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
+const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
@@ -296,6 +297,27 @@ router.get(
       gols = (data || []).map((g) => ({ user_id: g.user_id, gols: g.gols || 0, nome: g.users?.nome || null }));
     }
 
+    // PRIVACIDADE /p/ (Opção B): decide POR JOGADOR se o rosto entra — adulto E
+    // consentimento → URL do proxy público; senão silhueta (fail-closed). O snapshot
+    // times_resultado só tem user_id/avatar_url, por isso juntamos os donos aqui.
+    if (game.times_resultado) {
+      const ids = new Set();
+      const colher = (j) => { if (j && j.user_id) ids.add(j.user_id); };
+      (game.times_resultado.times || []).forEach((t) => (t.jogadores || []).forEach(colher));
+      (game.times_resultado.reservas || []).forEach(colher);
+      const usersById = new Map();
+      if (ids.size) {
+        // Se a coluna mostrar_rosto_publico ainda não existir (DDL por correr), a query
+        // devolve erro → mapa vazio → TODOS caem em silhueta (fail-closed, seguro).
+        const { data: donos } = await supabase
+          .from('users')
+          .select('id, birthdate, mostrar_rosto_publico')
+          .in('id', [...ids]);
+        (donos || []).forEach((u) => usersById.set(u.id, u));
+      }
+      aplicarRostoPublico(game.times_resultado, usersById, `${req.protocol}://${req.get('host')}`);
+    }
+
     res.json({
       equipa: { nome: game.teams.nome, slug: game.teams.slug },
       times_resultado: game.times_resultado || null,
@@ -307,6 +329,29 @@ router.get(
         gols,
       },
     });
+  })
+);
+
+/**
+ * POST /api/games/:id/partilha-declarada — TERMO de quem partilha (1-clique).
+ * Registo de auditoria: quem copiou/partilhou o link declarou ter o direito de o
+ * fazer. NÃO altera a privacidade (a regra de rosto é independente e sempre ligada);
+ * é só a cobertura legal. Idempotente (upsert por game+user).
+ */
+router.post(
+  '/api/games/:id/partilha-declarada',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    // só quem tem papel na equipa (membro/admin) pode declarar a partilha
+    const role = await getRole(game.teams.id, req.user.id);
+    if (!role) throw new HttpError(403, 'Sem permissão para partilhar este sorteio.');
+    const { error } = await supabase
+      .from('share_declarations')
+      .upsert({ game_id: game.id, user_id: req.user.id }, { onConflict: 'game_id,user_id' });
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true });
   })
 );
 
