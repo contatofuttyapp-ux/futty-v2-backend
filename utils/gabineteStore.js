@@ -32,6 +32,13 @@ const SEED = {
   campanhas: [],
   // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
   toggles: { inicio: false, sorteio: false, p: false },
+  // Proteção de dados (LGPD/compliance) — editável à mão. Default tudo por tratar/publicar.
+  protecao_dados: {
+    dpas: ['Supabase', 'Railway', 'Vercel', 'fal.ai', 'Stripe', 'Anthropic'].map((nome) => ({ nome, estado: 'por tratar', data: '', link: '' })),
+    politica_privacidade: { estado: 'por publicar', data: '', url: '' },
+    termos_uso: { estado: 'por publicar', data: '', url: '' },
+    canal_titular: { estado: 'por definir', destino: '' },
+  },
 };
 
 async function ler() {
@@ -52,6 +59,7 @@ async function gravar(obj) {
     cobertura: obj?.cobertura && typeof obj.cobertura === 'object' ? obj.cobertura : SEED.cobertura,
     campanhas: Array.isArray(obj?.campanhas) ? obj.campanhas : [],
     toggles: obj?.toggles && typeof obj.toggles === 'object' ? obj.toggles : SEED.toggles,
+    protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
   };
   await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true });
   return limpo;
