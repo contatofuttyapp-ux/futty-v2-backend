@@ -37,6 +37,7 @@ const rsvpRoutes = require('./routes/rsvp');
 const campeonatoRoutes = require('./routes/campeonato');
 const campeonatosRoutes = require('./routes/campeonatos');
 const superadminRoutes = require('./routes/superadmin');
+const gabineteRoutes = require('./routes/gabinete');
 const mediaProxyRoutes = require('./routes/media');
 const denunciasRoutes = require('./routes/denuncias');
 const { ensureDenunciasBucket } = require('./utils/denunciaStore');
@@ -163,6 +164,7 @@ app.use(rsvpRoutes);
 app.use(campeonatoRoutes);
 app.use(campeonatosRoutes);
 app.use(superadminRoutes);
+app.use(gabineteRoutes); // /api/super/gabinete — Gabinete do Dono (super-admin)
 app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
 app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
 app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
