@@ -33,7 +33,7 @@ router.post(
   '/api/games',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime } = req.body || {};
+    const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime, historico } = req.body || {};
     if (!teamSlug || !data) throw new HttpError(400, 'Equipa e data são obrigatórias.');
 
     const porTime = parseInt(jogadoresPorTime, 10);
@@ -45,29 +45,37 @@ router.post(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
 
+    // LEI (jogo histórico/retroativo): carregamento de dados — NÃO notifica ninguém.
+    const eHistorico = historico === true;
     // num_times fica por definir; é calculado no sorteio conforme os confirmados.
-    const { data: game, error } = await supabase
-      .from('games')
-      .insert({
-        team_id: team.id,
-        data: new Date(data).toISOString(),
-        local: local?.trim() || null,
-        jogadores_por_time: porTime,
-      })
-      .select()
-      .single();
-    if (error) throw new HttpError(500, error.message);
+    const linha = {
+      team_id: team.id,
+      data: new Date(data).toISOString(),
+      local: local?.trim() || null,
+      jogadores_por_time: porTime,
+    };
+    if (eHistorico) linha.historico = true; // coluna opcional (migração à mão); ver nota abaixo
+    let insert = await supabase.from('games').insert(linha).select().single();
+    // Resiliência: se a coluna `historico` ainda não existir (DDL por correr), repete sem ela.
+    if (insert.error && eHistorico && /historico/i.test(insert.error.message || '')) {
+      delete linha.historico;
+      insert = await supabase.from('games').insert(linha).select().single();
+    }
+    if (insert.error) throw new HttpError(500, insert.error.message);
+    const game = insert.data;
 
     res.status(201).json({ game });
 
-    // Notifica todos os membros da equipa (fire-and-forget).
-    membrosDaEquipa(team.id).then((memberIds) =>
-      enviarNotificacao(memberIds, {
-        title: '⚽ Novo jogo criado',
-        body: `${team.nome || 'A tua equipa'} · ${dataCurtaPT(game.data)}`,
-        url: '/home',
-      })
-    );
+    // Notifica os membros — EXCETO em jogo histórico (silencioso por lei).
+    if (!eHistorico) {
+      membrosDaEquipa(team.id).then((memberIds) =>
+        enviarNotificacao(memberIds, {
+          title: '⚽ Novo jogo criado',
+          body: `${team.nome || 'A tua equipa'} · ${dataCurtaPT(game.data)}`,
+          url: '/home',
+        })
+      );
+    }
   })
 );
 
@@ -464,6 +472,108 @@ router.post(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ meuEstado: { confirmado: !!confirmado, goleiro: !!goleiro } });
+  })
+);
+
+/**
+ * POST /api/games/:id/presencas — ADMIN marca quem jogou (jogo manual/retroativo).
+ * Distinto do self-confirm: aqui o ADMIN da equipa marca a presença de TERCEIROS a
+ * partir de uma checklist. Autoritativo: os user_id enviados ficam confirmados; os
+ * membros confirmados que NÃO vierem na lista são desmarcados (a lista é a verdade).
+ * Body: { jogadores: [{ user_id, goleiro? }] }. Só membros da equipa entram.
+ */
+router.post(
+  '/api/games/:id/presencas',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem marcar presenças por outros.');
+
+    const lista = Array.isArray(req.body?.jogadores) ? req.body.jogadores : [];
+    // valida que cada user_id é membro da equipa
+    const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', game.teams.id);
+    const membroIds = new Set((membros || []).map((m) => m.user_id));
+    const escolhidos = [];
+    for (const j of lista) {
+      if (j && j.user_id && membroIds.has(j.user_id)) escolhidos.push({ game_id: game.id, user_id: j.user_id, confirmado: true, goleiro: !!j.goleiro });
+    }
+    const escolhidosSet = new Set(escolhidos.map((e) => e.user_id));
+
+    if (escolhidos.length) {
+      const { error } = await supabase.from('game_players').upsert(escolhidos, { onConflict: 'game_id,user_id' });
+      if (error) throw new HttpError(500, error.message);
+    }
+    // desmarca (confirmado=false) os que estavam confirmados e não vieram na lista
+    const { data: atuais } = await supabase.from('game_players').select('user_id, confirmado').eq('game_id', game.id).eq('confirmado', true);
+    const remover = (atuais || []).filter((p) => !escolhidosSet.has(p.user_id)).map((p) => p.user_id);
+    if (remover.length) {
+      await supabase.from('game_players').update({ confirmado: false }).eq('game_id', game.id).in('user_id', remover);
+    }
+    res.json({ ok: true, confirmados: escolhidos.length });
+  })
+);
+
+/**
+ * POST /api/games/:id/times-manuais — ADMIN define os times À MÃO (jogo manual/retroativo).
+ * Grava direto em times_resultado (mesma forma que o sorteio produz) SEM passar pelo
+ * endpoint de sorteio e SEM `seed` (sem replay/cerimónia — LEI). Convidados sem app
+ * entram como nome solto (user_id null). Membros têm de estar confirmados (presenças
+ * marcadas primeiro). NÃO notifica.
+ * Body: { times: [{ nome, jogadores:[{user_id?, nome, avatar_url?, convidado?}] }], reservas? }
+ */
+router.post(
+  '/api/games/:id/times-manuais',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir os times.');
+
+    const times = Array.isArray(req.body?.times) ? req.body.times : null;
+    if (!times || !times.length) throw new HttpError(400, 'Indica os times.');
+    const reservas = Array.isArray(req.body?.reservas) ? req.body.reservas : [];
+    for (const t of times) {
+      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) throw new HttpError(400, 'Cada time tem de ter pelo menos 1 jogador.');
+    }
+    const todos = [...times.flatMap((t) => t.jogadores || []), ...reservas];
+    const ids = todos.map((j) => j.user_id).filter(Boolean);
+    if (new Set(ids).size !== ids.length) throw new HttpError(400, 'Há jogadores repetidos entre os times.');
+
+    // Membros (com user_id) têm de estar confirmados neste jogo (presenças marcadas antes).
+    const { data: gp } = await supabase.from('game_players').select('user_id').eq('game_id', game.id).eq('confirmado', true);
+    const confirmados = new Set((gp || []).map((p) => p.user_id));
+    for (const id of ids) {
+      if (!confirmados.has(id)) throw new HttpError(400, 'Marca as presenças antes: todos os jogadores com conta têm de estar confirmados.');
+    }
+
+    const nomear = (t, i) => ({
+      nome: (t.nome || NOMES_TIMES[i] || `Time ${i + 1}`),
+      jogadores: (t.jogadores || []).map((j) => ({
+        user_id: j.user_id || null,
+        convidado: j.convidado || undefined,
+        nome: j.nome,
+        avatar_url: j.avatar_url || null,
+      })),
+    });
+    const tr = {
+      num_times: times.length,
+      total_jogadores: ids.length + todos.filter((j) => !j.user_id).length,
+      manual: true, // sem seed → sem cerimónia/replay (o frontend gateia por seed)
+      times: times.map(nomear),
+      reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
+    };
+
+    const { data: updated, error } = await supabase
+      .from('games')
+      .update({ times_resultado: tr, num_times: tr.times.length, sorteio_realizado: true, status: 'em_curso' })
+      .eq('id', game.id)
+      .select('id, times_resultado, num_times, sorteio_realizado, status')
+      .single();
+    if (error) throw new HttpError(500, error.message);
+    res.json({ game: updated });
   })
 );
 
