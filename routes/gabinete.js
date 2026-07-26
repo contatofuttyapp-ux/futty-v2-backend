@@ -9,6 +9,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
+const adsStore = require('../utils/adsStore');
 
 const router = express.Router();
 
@@ -126,6 +127,29 @@ router.put(
   asyncHandler(async (req, res) => {
     if (!req.body || typeof req.body !== 'object') throw new HttpError(400, 'Dados inválidos.');
     res.json(await gabineteStore.gravar(req.body));
+  })
+);
+
+/** GET /api/super/gabinete/publicidade — campanhas + métricas (imp/cli/CTR/dias) + alertas. */
+router.get(
+  '/api/super/gabinete/publicidade',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const store = await gabineteStore.ler();
+    const metricas = await adsStore.ler();
+    const hoje = inicioDiaUTC(new Date()).toISOString().slice(0, 10);
+    const campanhas = (store.campanhas || []).map((c) => {
+      const t = adsStore.totais(metricas, c.id);
+      const ctr = t.imp ? Number((t.cli / t.imp * 100).toFixed(1)) : 0;
+      const diasRestantes = c.fim ? Math.max(0, Math.round((new Date(c.fim) - new Date(hoje)) / DIA)) : null;
+      return { ...c, imp: t.imp, cli: t.cli, ctr, dias_restantes: diasRestantes };
+    });
+    const alertas = [];
+    campanhas.forEach((c) => {
+      if (c.estado === 'ativa' && c.dias_restantes != null && c.dias_restantes < 7) alertas.push(`"${c.nome}" expira em ${c.dias_restantes}d`);
+      if (c.estado === 'ativa' && c.imp > 0 && c.cli === 0) alertas.push(`"${c.nome}" sem cliques`);
+    });
+    res.json({ campanhas, toggles: store.toggles || {}, alertas });
   })
 );
 

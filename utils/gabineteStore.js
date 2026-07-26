@@ -30,7 +30,8 @@ const SEED = {
     bloqueado: ['🇺🇸 EUA', 'USD', '+ resto por ativar no Stripe'],
   },
   campanhas: [],
-  toggles: { 'sorteio in-app': false, 'pública /p/': false },
+  // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
+  toggles: { inicio: false, sorteio: false, p: false },
 };
 
 async function ler() {
