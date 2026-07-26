@@ -27,15 +27,20 @@ function fisherYates(arr, rng = Math.random) {
 }
 
 /**
- * Ordena por rating desc com desempate aleatório (semeado).
- * Baralha primeiro e depois faz um sort estável — quando os ratings são iguais
- * (ex.: todos a zero) o resultado é praticamente aleatório (aleatoriedade máxima).
+ * Ordena por rating desc com desempate aleatório (semeado). Se um jogador tiver
+ * `_rr` (rating COM RUÍDO, ver executarSorteio), ordena por esse — assim jogadores de
+ * força parecida trocam de ordem de vez em quando (variedade) sem perder o equilíbrio.
+ * Baralha primeiro (desempate) e depois faz o sort.
  */
 function ordenarPorRating(jogadores, rng = Math.random) {
   const arr = fisherYates(jogadores.slice(), rng);
-  arr.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+  arr.sort((a, b) => ((b._rr != null ? b._rr : (b.rating || 0)) - (a._rr != null ? a._rr : (a.rating || 0))));
   return arr;
 }
+
+// DOSE do ruído de variedade (modo B): perturbação máxima ±DOSE na escala de rating
+// (~0.5–5). Calibrada para os 2 melhores calharem juntos "às vezes", não sempre nem nunca.
+const RUIDO_DOSE = 0.9;
 
 /** Separa os confirmados em goleiros, cabeças de chave e jogadores de linha. */
 function separarPorCategoria(jogadores) {
@@ -111,6 +116,13 @@ function executarSorteio(confirmados, jogadoresPorTime, opts = {}) {
     .map((nome, i) => ({ user_id: null, convidado: true, nome, rating: 0, goleiro: false, cabeca_chave: false, avatar_url: null }));
   const todos = confirmados.concat(convidados);
 
+  // VARIEDADE (modo B) — ruído derivado da SEED: cada rating leva uma perturbação
+  // pequena e determinística (`_rr`). Como vem do mesmo rng semeado, o replay continua
+  // EXACTO; muda entre sorteios (seeds diferentes) → a forma dos times deixa de ser
+  // previsível, mas o equilíbrio geral mantém-se (a dose é pequena). Guarda-se em `_rr`
+  // e NUNCA toca no `rating` real (as reservas e o resto mostram o rating verdadeiro).
+  for (const j of todos) j._rr = (j.rating || 0) + (rng() * 2 - 1) * RUIDO_DOSE;
+
   const porTime = Math.max(1, parseInt(jogadoresPorTime, 10) || 1);
   const numTimes = Math.floor(todos.length / porTime);
   // Mínimo 2 times. O chamador valida antes, mas protegemos na mesma.
@@ -173,6 +185,7 @@ function executarSorteio(confirmados, jogadoresPorTime, opts = {}) {
       return r;
     });
 
+  todos.forEach((j) => { delete j._rr; }); // limpa o campo interno do ruído (não vai para o JSON)
   return { numTimes, times, reservas, seed };
 }
 
