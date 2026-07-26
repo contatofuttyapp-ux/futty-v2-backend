@@ -132,7 +132,7 @@ router.get(
     // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
     let query = supabase
       .from('teams')
-      .select('id, nome, slug, cor, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng')
+      .select('id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng')
       .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
     // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
     if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
@@ -172,6 +172,7 @@ router.get(
         cor_fundo: t.cor_fundo || null,
         modo_visibilidade: t.modo_visibilidade,
         localizacao: t.localizacao,
+        cidade: t.cidade || null,
         descricao: t.descricao,
         geo_lat: t.geo_lat ?? null, // arredondado ~1km; só entra na busca por distância se não-nulo
         geo_lng: t.geo_lng ?? null,
@@ -253,7 +254,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(
       req.params.slug,
-      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng'
+      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng'
     );
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
 
@@ -308,11 +309,12 @@ router.patch(
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
-    // GEO (opt-in): a cidade é só o INPUT do geocode (Nominatim) → geo_lat/geo_lng
-    // ARREDONDADOS no servidor. Não há coluna `cidade` (041 só criou geo_*) — o texto não
-    // se guarda; guarda-se só o ponto arredondado. Limpar = sair da busca por distância.
+    // GEO (opt-in): guarda o nome da CIDADE (texto) + geocodifica (Nominatim) →
+    // geo_lat/geo_lng ARREDONDADOS no servidor (a morada exacta nunca entra). Limpar a
+    // cidade tira a equipa da busca por distância.
     if ('cidade' in b) {
       const v = b.cidade ? String(b.cidade).trim().slice(0, 100) : null;
+      patch.cidade = v;
       if (v) {
         const g = await geocodar(v);
         if (g) { patch.geo_lat = g.lat; patch.geo_lng = g.lng; } // senão, mantém o geo anterior
