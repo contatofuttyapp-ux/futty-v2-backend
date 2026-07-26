@@ -7,6 +7,7 @@ const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
+const { agregadosDaEquipa } = require('../utils/agregados');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 
 const router = express.Router();
@@ -404,6 +405,9 @@ router.get(
       }
     }
 
+    // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
+    const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = await agregadosDaEquipa(team.id);
+
     const membros = (data || []).map((m) => {
       const uid = m.users?.id;
       const presencas = jogos.map((g) => ({
@@ -429,10 +433,10 @@ router.get(
         nome_jogador: m.users?.nome_jogador || null,
         avatar_url: m.users?.avatar_url || null,
         email: m.users?.email || null,
-        gols: m.gols ?? 0,
-        artilharia: m.artilharia ?? 0,
-        vitorias: m.vitorias ?? 0,
-        destaque: m.destaque ?? 0,
+        gols: golsMap[uid] || 0,
+        artilharia: artilhariaMap[uid] || 0,
+        vitorias: vitoriasMap[uid] || 0,
+        destaque: destaquesMap[uid] || 0,
         presencas_recentes: presencas,
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
         nota_media: notaMedia,

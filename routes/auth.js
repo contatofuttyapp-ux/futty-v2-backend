@@ -7,6 +7,7 @@ const fal = require('@fal-ai/serverless-client');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
+const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 
@@ -90,8 +91,9 @@ router.get(
       .eq('user_id', userId)
       .eq('confirmado', true);
 
-    const { data: tmRows } = await supabase.from('team_members').select('gols').eq('user_id', userId);
-    const gols = (tmRows || []).reduce((sum, r) => sum + (r.gols || 0), 0);
+    // RANKING VIVO: os golos vêm da FONTE (gols_jogadores), não da coluna legado de
+    // team_members — bate com o número do ranking para o mesmo jogador (uma só verdade).
+    const gols = await golosDoJogador(userId);
 
     // Nota exibida (1-10 com boost) — mín. 3 votos, como no ranking.
     const { data: voteRows } = await supabase.from('votes').select('nota').eq('para_user_id', userId);

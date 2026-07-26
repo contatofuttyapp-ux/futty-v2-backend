@@ -5,6 +5,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
+const { agregadosDaEquipa } = require('../utils/agregados');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
 
@@ -23,10 +24,13 @@ function notaValida(n) {
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
 async function buildRanking(teamId, meUserId) {
-  // Membros (+ stats + categoria)
+  // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
+  // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
+  // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
+  // destaque), mais abaixo. Zero drift, zero DDL, sempre verdadeiro.
   const { data: membros } = await supabase
     .from('team_members')
-    .select('user_id, gols, artilharia, vitorias, destaque, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
+    .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
     .eq('team_id', teamId);
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
@@ -42,9 +46,10 @@ async function buildRanking(teamId, meUserId) {
     if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = Number(v.nota);
   }
 
+  // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
+  const { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds } = await agregadosDaEquipa(teamId);
+
   // Presença: confirmações no último mês.
-  const { data: gameRows } = await supabase.from('games').select('id').eq('team_id', teamId);
-  const gameIds = (gameRows || []).map((g) => g.id);
   const presCount = {};
   if (gameIds.length) {
     const presCut = new Date(Date.now() - 30 * 86400000).toISOString();
@@ -63,11 +68,11 @@ async function buildRanking(teamId, meUserId) {
     const total = a ? a.count : 0;
     const notaInterna = total >= MIN_VOTOS ? a.sum / a.count : null;
     const ehGR = m.categoria === 'GR';
-    const vitorias = m.vitorias || 0;
-    const destaques = m.destaque || 0;
+    const vitorias = vitoriasMap[u.id] || 0;
+    const destaques = destaquesMap[u.id] || 0;
     const presenca = presCount[u.id] || 0;
-    const gols = m.gols || 0;
-    const artilharia = m.artilharia || 0;
+    const gols = golsMap[u.id] || 0;
+    const artilharia = artilhariaMap[u.id] || 0;
     const notaNorm = notaInterna || 0; // 1-5 (0 se ainda sem nota)
 
     // Score ponderado por posição (valores brutos × peso).
