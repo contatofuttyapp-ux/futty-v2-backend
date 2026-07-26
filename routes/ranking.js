@@ -49,56 +49,72 @@ async function buildRanking(teamId, meUserId) {
   // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
   const { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds } = await agregadosDaEquipa(teamId);
 
-  // Presença: confirmações no último mês.
-  const presCount = {};
+  // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
+  // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
+  const jogosMap = {};
   if (gameIds.length) {
-    const presCut = new Date(Date.now() - 30 * 86400000).toISOString();
-    const { data: gps } = await supabase
-      .from('game_players')
-      .select('user_id, created_at')
-      .in('game_id', gameIds)
-      .eq('confirmado', true)
-      .gte('created_at', presCut);
-    for (const gp of gps || []) presCount[gp.user_id] = (presCount[gp.user_id] || 0) + 1;
+    const { data: gps } = await supabase.from('game_players').select('user_id').in('game_id', gameIds).eq('confirmado', true);
+    for (const gp of gps || []) jogosMap[gp.user_id] = (jogosMap[gp.user_id] || 0) + 1;
   }
 
-  const base = rows.map((m) => {
+  // ── RANKING v2 — TUDO por jogo, mín. 3 jogos para entrar. Cada eixo NORMALIZADO
+  // (0..1) antes de ponderar → os pesos são verdade. Rácios por jogo (não totais) →
+  // o veterano não "acumula" vantagem; a fidelidade (jogos totais) SATURA aos 30. ──
+  const MIN_JOGOS = 3;
+  const elig = rows.map((m) => {
     const u = m.users;
     const a = agg[u.id];
     const total = a ? a.count : 0;
     const notaInterna = total >= MIN_VOTOS ? a.sum / a.count : null;
-    const ehGR = m.categoria === 'GR';
+    const jogos = jogosMap[u.id] || 0;
     const vitorias = vitoriasMap[u.id] || 0;
-    const destaques = destaquesMap[u.id] || 0;
-    const presenca = presCount[u.id] || 0;
     const gols = golsMap[u.id] || 0;
     const artilharia = artilhariaMap[u.id] || 0;
-    const notaNorm = notaInterna || 0; // 1-5 (0 se ainda sem nota)
+    const destaques = destaquesMap[u.id] || 0;
+    return {
+      u, m, total, notaInterna, jogos, vitorias, gols, artilharia, destaques,
+      ehGR: m.categoria === 'GR',
+      nota: notaInterna || 0, // 0 se ainda sem 3 votos (não pontua no eixo nota)
+      winrate: jogos ? vitorias / jogos : 0,
+      golosJogo: jogos ? gols / jogos : 0,
+      artJogo: jogos ? artilharia / jogos : 0,
+      destJogo: jogos ? destaques / jogos : 0,
+      fidelidade: Math.min(jogos, 30) / 30, // satura aos 30 — 200 não supera 30
+    };
+  }).filter((p) => p.jogos >= MIN_JOGOS);
 
-    // Score ponderado por posição (valores brutos × peso).
-    const score = ehGR
-      ? notaNorm * 40 + vitorias * 35 + destaques * 15 + presenca * 10
-      : notaNorm * 40 + vitorias * 20 + gols * 15 + artilharia * 12 + destaques * 8 + presenca * 5;
+  // Normalização por eixo (÷ máximo da equipa nesse eixo). Fidelidade já é 0..1 absoluto.
+  const maxDe = (f) => Math.max(1e-9, ...elig.map(f));
+  const mNota = maxDe((p) => p.nota); const mWin = maxDe((p) => p.winrate);
+  const mGol = maxDe((p) => p.golosJogo); const mArt = maxDe((p) => p.artJogo); const mDest = maxDe((p) => p.destJogo);
 
+  const base = elig.map((p) => {
+    const u = p.u;
+    const notaN = p.nota / mNota; const winN = p.winrate / mWin;
+    const golN = p.golosJogo / mGol; const artN = p.artJogo / mArt; const destN = p.destJogo / mDest;
+    // Pesos que somam 1 (os "verdade" pedidos): linha 25/25/20/10/10/10 · GR 25/35/25/15.
+    const score = p.ehGR
+      ? notaN * 0.25 + winN * 0.35 + destN * 0.25 + p.fidelidade * 0.15
+      : notaN * 0.25 + winN * 0.25 + golN * 0.20 + artN * 0.10 + destN * 0.10 + p.fidelidade * 0.10;
     return {
       user_id: u.id,
-      sou_eu: meUserId != null && u.id === meUserId, // a própria linha do utilizador
+      sou_eu: meUserId != null && u.id === meUserId,
       nome: u.nome || u.email,
       nome_jogador: u.nome_jogador || null,
       avatar_url: u.avatar_url || null,
-      foto_url: u.foto_url || null, // p/ detectar recorte IA (avatar_url != foto_url) vs foto crua
+      foto_url: u.foto_url || null,
       cor_frame: u.cor_frame || 'dourado',
-      categoria: ehGR ? 'GR' : 'linha',
-      nota: notaParaExibir(notaInterna), // exibida (6-10) ou null
-      nota_interna: notaInterna, // 1-5 (uso interno: radar)
-      total_votos: total,
+      categoria: p.ehGR ? 'GR' : 'linha',
+      nota: notaParaExibir(p.notaInterna),
+      nota_interna: p.notaInterna,
+      total_votos: p.total,
       minha_nota: minhaNota[u.id] ?? null,
-      vitorias,
-      gols,
-      artilharia,
-      destaques,
-      presenca,
-      score: round2(score),
+      vitorias: p.vitorias,
+      gols: p.gols,
+      artilharia: p.artilharia,
+      destaques: p.destaques,
+      presenca: p.jogos, // agora = jogos TOTAIS
+      score: round2(score * 100), // 0..100 legível
     };
   });
 
