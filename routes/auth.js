@@ -132,6 +132,9 @@ router.get(
         // dispositivo, login fresco, deep-link). Contas antigas foram semeadas
         // TRUE pelo script backfill-onboarding.js.
         onboarding_completo: req.user.user_metadata?.onboarding_completo === true,
+        // Tour de boas-vindas (E8): o "já vi" vive no user (Auth metadata, sem DDL) —
+        // assim não reaparece noutro dispositivo nem quando o localStorage é limpo.
+        tour_inicio_visto: req.user.user_metadata?.tour_inicio_visto === true,
       },
       slots,
       stats: { nota, jogos: jogos || 0, gols },
@@ -238,6 +241,22 @@ router.post(
     const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
     if (error) throw new HttpError(500, error.message);
     res.json({ onboarding_completo: true });
+  })
+);
+
+/**
+ * POST /api/me/tour-visto — marca o tour de boas-vindas como VISTO no user (E8).
+ * Guarda no user_metadata do Auth (sem DDL); o próximo /api/me devolve
+ * tour_inicio_visto:true e o tour não volta a aparecer (em qualquer dispositivo).
+ */
+router.post(
+  '/api/me/tour-visto',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const meta = { ...(req.user.user_metadata || {}), tour_inicio_visto: true };
+    const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
+    if (error) throw new HttpError(500, error.message);
+    res.json({ tour_inicio_visto: true });
   })
 );
 
