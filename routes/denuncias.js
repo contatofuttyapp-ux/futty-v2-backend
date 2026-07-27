@@ -8,9 +8,16 @@ const { supabase, getRole, getTeamBySlug } = require('../utils/db');
 const { removerFicheirosPorUrl } = require('../utils/storage');
 const { triar } = require('../utils/triagem');
 const store = require('../utils/denunciaStore');
+const plataforma = require('../utils/plataformaStore');
 
 const router = express.Router();
 const STORAGE_BUCKET = 'resenha';
+
+// ══ LEI (dono cego, com exceção de moderação) ════════════════════════════════
+// A Super vê conteúdo denunciado SÓ via a fila (alguém PEDIU revisão — não é
+// bisbilhotice); NUNCA navega conteúdo por vontade própria. As decisões (da IA ou
+// humanas) entram sempre no log append-only do caso (eventos[]) — nada se apaga.
+// ═════════════════════════════════════════════════════════════════════════════
 
 function agoraISO() { return new Date().toISOString(); }
 
@@ -198,6 +205,104 @@ router.get(
     const ids = (teams || []).map((t) => t.id);
     ids.push('_sem'); // casos sem equipa (perfil)
     res.json(await store.agregados(ids));
+  })
+);
+
+// ─── FILA ACIONÁVEL DA SUPER (global) ────────────────────────────────────────
+// Resolve o AUTOR do conteúdo denunciado (para suspender a conta).
+async function resolverAutor(caso) {
+  if (caso.target_type === 'post') {
+    const { data } = await supabase.from('feed_posts').select('user_id').eq('id', caso.target_id).maybeSingle();
+    return data?.user_id || null;
+  }
+  if (caso.target_type === 'comentario') {
+    const { data } = await supabase.from('comentarios').select('user_id').eq('id', caso.target_id).maybeSingle();
+    return data?.user_id || null;
+  }
+  if (caso.target_type === 'perfil') return caso.target_id; // o alvo É o utilizador
+  return null;
+}
+
+// IDs de todas as equipas + os casos sem equipa (perfil → '_sem').
+async function idsDeTodasEquipas() {
+  const { data: teams } = await supabase.from('teams').select('id');
+  const ids = (teams || []).map((t) => t.id);
+  ids.push(null);
+  return ids;
+}
+
+/**
+ * GET /api/super/denuncias/fila — fila GLOBAL acionável: o que a IA NÃO resolveu
+ * (estado 'fila' ou 'escalada'). Menores primeiro (nunca auto-arquivam → sobem
+ * sempre). Traz o conteúdo denunciado (visível aqui, por lei — alguém pediu revisão).
+ */
+router.get(
+  '/api/super/denuncias/fila',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const ids = await idsDeTodasEquipas();
+    const listas = await Promise.all(ids.map((t) => store.listarEquipa(t)));
+    const casos = listas.flat().filter((c) => c.estado === 'fila' || c.estado === 'escalada');
+    casos.sort((a, b) => (b.prioritaria - a.prioritaria) || a.criado_em.localeCompare(b.criado_em));
+
+    const fila = await Promise.all(casos.map(async (c) => {
+      let preview_texto = null; let preview_media = null;
+      if (c.target_type === 'post') {
+        const { data: p } = await supabase.from('feed_posts').select('body').eq('id', c.target_id).maybeSingle();
+        preview_texto = p?.body || null;
+        const { data: m } = await supabase.from('feed_post_media').select('url').eq('post_id', c.target_id).limit(1);
+        preview_media = m?.[0]?.url || null;
+      } else if (c.target_type === 'comentario') {
+        const { data: cm } = await supabase.from('comentarios').select('body').eq('id', c.target_id).maybeSingle();
+        preview_texto = cm?.body || null;
+      }
+      return {
+        id: c.id, team_id: c.team_id, categoria: c.categoria, target_type: c.target_type,
+        prioritaria: !!c.prioritaria, estado: c.estado, criado_em: c.criado_em, descricao: c.descricao,
+        preview_texto, preview_media, autor_id: await resolverAutor(c),
+      };
+    }));
+    res.json({ fila, total: fila.length });
+  })
+);
+
+/**
+ * POST /api/super/denuncias/:id/decidir — decisão HUMANA da Super:
+ *   manter | remover | suspender_autor. Entra no log append-only do caso.
+ *   'remover' e 'suspender_autor' tiram o conteúdo (não se deixa conteúdo
+ *   procedente no ar); 'suspender_autor' ainda suspende a conta do autor (flag de
+ *   plataforma). Body: { team_id, acao }.
+ */
+router.post(
+  '/api/super/denuncias/:id/decidir',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const teamId = req.body?.team_id ?? null;
+    const acao = req.body?.acao;
+    if (!['manter', 'remover', 'suspender_autor'].includes(acao)) throw new HttpError(400, 'Ação inválida.');
+
+    const caso = await store.obterCaso(teamId, req.params.id);
+    if (!caso) throw new HttpError(404, 'Denúncia não encontrada.');
+    if (caso.estado === 'resolvida') return res.json({ ok: true, ja: true });
+
+    const quando = agoraISO();
+    let alvo_user = null;
+    if (acao === 'manter') {
+      await store.ajustarPeso(caso.reporter_id, false); // manter = improcedente
+    } else {
+      const { urls } = await resolverAlvo(caso.target_type, caso.target_id).catch(() => ({ urls: [] }));
+      await removerConteudo(caso, urls);
+      await store.ajustarPeso(caso.reporter_id, true); // procedente
+      if (acao === 'suspender_autor') {
+        alvo_user = await resolverAutor(caso);
+        if (alvo_user && alvo_user !== req.user.id) await plataforma.definirUser(alvo_user, true);
+      }
+    }
+    store.logar(caso, { quem: `super:${req.user.id}`, tipo: acao, quando, ...(alvo_user ? { alvo_user } : {}) });
+    caso.estado = 'resolvida';
+    caso.resolvido_em = quando;
+    await store.guardarCaso(caso);
+    res.json({ ok: true, acao });
   })
 );
 
