@@ -16,10 +16,18 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-/** Procura uma equipa pelo slug. Devolve null se não existir. */
+/** Procura uma equipa pelo slug. Devolve null se não existir OU se estiver
+ *  suspensa pela plataforma (equipa suspensa = invisível e inativa em TODAS as
+ *  rotas de equipa; a Super mexe pelo team.id, por isso mantém o controlo).
+ *  Lazy-require do store para evitar dependência circular (plataformaStore → db). */
 async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, created_at') {
-  const { data } = await supabase.from('teams').select(columns).eq('slug', slug).maybeSingle();
-  return data || null;
+  const cols = /(^|,\s*)id(\s*,|$)/.test(columns) ? columns : `id, ${columns}`;
+  const { data } = await supabase.from('teams').select(cols).eq('slug', slug).maybeSingle();
+  if (!data) return null;
+  // eslint-disable-next-line global-require
+  const plataforma = require('./plataformaStore');
+  if (data.id && (await plataforma.equipaSuspensa(data.id))) return null;
+  return data;
 }
 
 /** Procura um utilizador pelo id. Devolve null se não existir. */

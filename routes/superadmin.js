@@ -1,10 +1,18 @@
 // Futty v2.0 — Painel super-admin (gestão global de utilizadores e equipas).
 // Todas as rotas exigem requireSuperAdmin. Montado sem prefixo em server.js
 // (os paths /api/super/... são definidos aqui).
+//
+// ══ LEI DO DONO ══════════════════════════════════════════════════════════════
+// A Super age sobre a PLATAFORMA (contas, planos, suspensão), NUNCA sobre o
+// CONTEÚDO (notas, votos, fotos). Moderação de conteúdo = SÓ pelo caminho
+// registado (denúncias → triagem → decisão em log append-only). Aqui não se vê
+// nem se edita conteúdo de ninguém: só se suspende/reativa e se muda o plano.
+// ═════════════════════════════════════════════════════════════════════════════
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
+const plataforma = require('../utils/plataformaStore');
 
 const router = express.Router();
 
@@ -34,7 +42,30 @@ router.get(
       .range(off, off + limit - 1);
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ users: data || [], page, limit, total: count || 0 });
+    // Estado de suspensão (store de plataforma, sem DDL) anexado a cada linha.
+    const { users: susUsers } = await plataforma.conjuntos();
+    const users = (data || []).map((u) => ({ ...u, suspenso: susUsers.has(u.id) }));
+
+    res.json({ users, page, limit, total: count || 0 });
+  })
+);
+
+/**
+ * PATCH /api/super/users/:id/suspender — suspende/reativa uma conta via FLAG de
+ * plataforma. Body: { suspenso: true|false }. NÃO apaga nada, NÃO vê o conteúdo do
+ * utilizador. Conta suspensa deixa de entrar (gate em requireAuth → 403 digno).
+ */
+router.patch(
+  '/api/super/users/:id/suspender',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const suspenso = req.body?.suspenso === true;
+    // Salvaguarda: a Super não se suspende a si própria (evita auto-trancar-se fora).
+    if (suspenso && req.params.id === req.user.id) {
+      throw new HttpError(400, 'Não podes suspender a tua própria conta.');
+    }
+    await plataforma.definirUser(req.params.id, suspenso);
+    res.json({ id: req.params.id, suspenso });
   })
 );
 
@@ -100,9 +131,25 @@ router.get(
     const contagem = {};
     for (const m of membros || []) contagem[m.team_id] = (contagem[m.team_id] || 0) + 1;
 
+    const { equipas: susEquipas } = await plataforma.conjuntos();
     res.json({
-      teams: (teams || []).map((t) => ({ ...t, nr_membros: contagem[t.id] || 0 })),
+      teams: (teams || []).map((t) => ({ ...t, nr_membros: contagem[t.id] || 0, suspensa: susEquipas.has(t.id) })),
     });
+  })
+);
+
+/**
+ * PATCH /api/super/teams/:id/suspender — suspende/reativa uma equipa via FLAG de
+ * plataforma. Body: { suspensa: true|false }. NÃO edita o interior da equipa. Equipa
+ * suspensa fica invisível na descoberta e inacessível (getTeamBySlug devolve 404).
+ */
+router.patch(
+  '/api/super/teams/:id/suspender',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const suspensa = req.body?.suspensa === true;
+    await plataforma.definirEquipa(req.params.id, suspensa);
+    res.json({ id: req.params.id, suspensa });
   })
 );
 

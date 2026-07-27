@@ -5,10 +5,13 @@
  * error handler central em server.js (devolve { error } com o status certo).
  */
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = null) {
     super(message);
     this.name = 'HttpError';
     this.status = status;
+    // Código opcional legível pela máquina (ex.: 'CONTA_SUSPENSA') — o frontend
+    // distingue o motivo sem depender do texto da mensagem.
+    this.code = code;
   }
 }
 

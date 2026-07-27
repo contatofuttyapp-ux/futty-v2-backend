@@ -1,6 +1,11 @@
 // Futty v2.0 — Middleware de autenticação (valida o JWT do Supabase).
 const { supabase } = require('../utils/db');
 const { HttpError } = require('../utils/http');
+const plataforma = require('../utils/plataformaStore');
+
+// Mensagem digna para a conta suspensa (a Super age sobre a PLATAFORMA, nunca sobre
+// o conteúdo). O frontend distingue pelo code 'CONTA_SUSPENSA' e mostra o ecrã próprio.
+const MSG_SUSPENSO = 'A tua conta está suspensa. Se achas que é engano, fala connosco.';
 
 /** Extrai o token "Bearer <token>" do header Authorization (ou null). */
 function bearerToken(req) {
@@ -19,6 +24,11 @@ async function requireAuth(req, res, next) {
     const { data, error } = await supabase.auth.getUser(token);
     if (error || !data?.user) throw new HttpError(401, 'Sessão inválida.');
     req.user = data.user;
+    // Gate de suspensão: conta suspensa NÃO entra (mensagem digna). Cache em memória
+    // (TTL curto) → custo ~nulo; fail-open se o store falhar (não tranca ninguém).
+    if (await plataforma.userSuspenso(req.user.id)) {
+      throw new HttpError(403, MSG_SUSPENSO, 'CONTA_SUSPENSA');
+    }
     next();
   } catch (err) {
     next(err);

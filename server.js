@@ -185,7 +185,9 @@ Sentry.setupExpressErrorHandler(app);
 app.use((err, req, res, next) => {
   const status = err instanceof HttpError ? err.status : 500;
   if (status >= 500) console.error('[Futty] Erro:', err.message);
-  res.status(status).json({ error: err.message || 'Erro interno.' });
+  const corpo = { error: err.message || 'Erro interno.' };
+  if (err instanceof HttpError && err.code) corpo.code = err.code;
+  res.status(status).json(corpo);
 });
 
 const port = process.env.PORT || 3001;

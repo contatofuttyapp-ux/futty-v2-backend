@@ -9,6 +9,7 @@ const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { geocodar } = require('../utils/geocode');
 const { slugify, notaParaExibir } = require('../utils/helpers');
+const plataforma = require('../utils/plataformaStore');
 
 const router = express.Router();
 
@@ -138,8 +139,12 @@ router.get(
     if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
     if (loc) query = query.ilike('localizacao', `%${loc}%`);
 
-    const { data: teams, error } = await query;
+    const { data: teamsRaw, error } = await query;
     if (error) throw new HttpError(500, error.message);
+
+    // Equipa suspensa = invisível na descoberta.
+    const { equipas: susEquipas } = await plataforma.conjuntos();
+    const teams = (teamsRaw || []).filter((t) => !susEquipas.has(t.id));
 
     const ids = (teams || []).map((t) => t.id);
     const counts = {};
@@ -196,13 +201,15 @@ router.get(
   '/api/teams/publicas',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: teams, error } = await supabase
+    const { data: teamsRaw, error } = await supabase
       .from('teams')
       .select('id, nome, slug, descricao, localizacao, logo_url, cor_fundo, modo_visibilidade')
       .in('modo_visibilidade', ['publico_aberto', 'publico_aprovacao']);
     if (error) throw new HttpError(500, error.message);
 
-    const lista = teams || [];
+    // Equipa suspensa = invisível na descoberta.
+    const { equipas: susEquipas } = await plataforma.conjuntos();
+    const lista = (teamsRaw || []).filter((t) => !susEquipas.has(t.id));
     const ids = lista.map((t) => t.id);
 
     const membros = {};
