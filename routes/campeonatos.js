@@ -132,6 +132,55 @@ router.get(
   })
 );
 
+// Nomes-cor dos times do campeonato-de-sorteio — a mesma identidade que o admin
+// acabou de ver na cerimónia (CerimoniaSorteio.MARCA_TIME). Cicla se houver mais
+// de 4 times (o KITS do campeonatoStore também cicla, mesma ordem de cor).
+const NOMES_COR_SORTEIO = ['Time Ouro', 'Time Roxo', 'Time Prata', 'Time Bronze'];
+
+/**
+ * POST /api/equipas/:slug/campeonatos/de-sorteio — cria um campeonato REUSANDO os
+ * times de um jogo já sorteado (SPEC-CAMPEONATOS "a partir de times sorteados").
+ * Body: { game_id, formato }. O admin só escolhe o formato — plantéis e nomes vêm
+ * do times_resultado do jogo (adaptador; estruturas compatíveis, ver spec).
+ */
+router.post(
+  '/api/equipas/:slug/campeonatos/de-sorteio',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin da equipa cria campeonatos.');
+
+    const gameId = String(req.body?.game_id || '');
+    if (!gameId) throw new HttpError(400, 'game_id em falta.');
+    const formato = req.body?.formato === 'mata' ? 'mata' : 'pontos';
+
+    const { data: game } = await supabase.from('games').select('id, team_id, data, times_resultado').eq('id', gameId).maybeSingle();
+    if (!game || game.team_id !== team.id) throw new HttpError(404, 'Jogo não encontrado nesta equipa.');
+    const timesSorteio = game.times_resultado?.times || [];
+    if (timesSorteio.length < MIN_TIMES) {
+      throw new HttpError(400, `Este jogo não tem times sorteados suficientes (mínimo ${MIN_TIMES}).`);
+    }
+
+    // Cap 2-8 (limite do campeonato) — corta o excesso se o sorteio tiver mais.
+    const times = timesSorteio.slice(0, MAX_TIMES);
+    const nomes = times.map((_, i) => NOMES_COR_SORTEIO[i % NOMES_COR_SORTEIO.length]);
+    // Adaptador: jogador do sorteio (user_id/nome/rating/goleiro/cabeca_chave/avatar_url)
+    // → plantel do campeonato (só os campos que o campeonato conhece).
+    const plantel = times.map((t) => (t.jogadores || []).slice(0, 22).map((j) => ({
+      user_id: j.user_id || null,
+      nome: j.nome || 'Jogador',
+      avatar_url: j.avatar_url || null,
+      convidado: !!j.convidado,
+    })));
+
+    const dataJogo = game.data ? new Date(game.data).toLocaleDateString('pt-BR') : null;
+    const nome = dataJogo ? `Campeonato do sorteio · ${dataJogo}` : 'Campeonato do sorteio';
+
+    const camp = await store.criar(team.id, req.user.id, { nome, formato, usar_sorteio: false, nomes, plantel });
+    res.status(201).json({ campeonato: enriquecer(camp) });
+  })
+);
+
 /** POST /api/equipas/:slug/campeonatos — cria (só admin). */
 router.post(
   '/api/equipas/:slug/campeonatos',
