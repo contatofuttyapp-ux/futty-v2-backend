@@ -27,17 +27,17 @@ const SEED = {
   ],
   cobertura: {
     vende: ['🇵🇹 Portugal', '🇧🇷 Brasil', 'EUR', 'BRL'],
-    bloqueado: ['🇺🇸 EUA', 'USD', '+ resto por ativar no Stripe'],
+    bloqueado: ['🇺🇸 EUA', 'USD', '+ resto por ativar no IAP das lojas'],
   },
   campanhas: [],
   // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
   toggles: { inicio: false, sorteio: false, p: false },
   // Proteção de dados (LGPD/compliance) — editável à mão. Default tudo por tratar/publicar.
   protecao_dados: {
-    dpas: ['Supabase', 'Railway', 'Vercel', 'fal.ai', 'Stripe', 'Anthropic'].map((nome) => ({ nome, estado: 'por tratar', data: '', link: '' })),
-    politica_privacidade: { estado: 'por publicar', data: '', url: '' },
-    termos_uso: { estado: 'por publicar', data: '', url: '' },
-    canal_titular: { estado: 'por definir', destino: '' },
+    dpas: ['Supabase', 'Railway', 'Vercel', 'fal.ai', 'Anthropic', 'Apple (IAP)', 'Google (IAP)'].map((nome) => ({ nome, estado: 'por tratar', data: '', link: '' })),
+    politica_privacidade: { estado: 'publicada (revisão jurídica pendente)', data: '2026-07-28', url: '/privacidade' },
+    termos_uso: { estado: 'publicada (revisão jurídica pendente)', data: '2026-07-28', url: '/termos' },
+    canal_titular: { estado: 'ativo', destino: 'contatofuttyapp@gmail.com' },
   },
 };
 
