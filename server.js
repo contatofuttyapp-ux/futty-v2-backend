@@ -42,6 +42,7 @@ const adsRoutes = require('./routes/ads');
 const mediaProxyRoutes = require('./routes/media');
 const denunciasRoutes = require('./routes/denuncias');
 const { ensureDenunciasBucket } = require('./utils/denunciaStore');
+const blocksRoutes = require('./routes/blocks');
 
 const app = express();
 
@@ -163,6 +164,7 @@ app.use(gabineteRoutes); // /api/super/gabinete — Gabinete do Dono (super-admi
 app.use(adsRoutes); // /api/ads — serving + medição de publicidade
 app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
 app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
+app.use(blocksRoutes); // /api/blocks — bloqueio entre jogadores (Apple UGC 1.2)
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {

@@ -10,6 +10,7 @@ const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame }
 const { enviarNotificacao } = require('./push');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { removerFicheirosPorUrl } = require('../utils/storage');
+const { conjuntoMutuo } = require('../utils/blocksStore');
 
 const router = express.Router();
 
@@ -113,7 +114,7 @@ async function reacoesParaTargets(targetType, targetIds, userId) {
  * parentId -> { recentes: [comentario...], total } com os 2 comentários mais
  * recentes de cada. UMA query por tipo (ordenada DESC), agrupada em memória — não N+1.
  */
-async function comentariosRecentesParaTargets(parentType, parentIds) {
+async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados) {
   const map = {};
   for (const id of parentIds) map[id] = { recentes: [], total: 0 };
   if (!parentIds.length) return map;
@@ -127,6 +128,9 @@ async function comentariosRecentesParaTargets(parentType, parentIds) {
     .order('created_at', { ascending: false });
 
   for (const c of data || []) {
+    // Bloqueio entre jogadores (Apple UGC 1.2): o comentário de quem está numa
+    // relação de bloqueio com o pedinte simplesmente não existe para ele.
+    if (bloqueados && bloqueados.has(c.author_id)) continue;
     const slot = map[c.parent_id];
     if (!slot) continue;
     slot.total += 1;
@@ -175,6 +179,10 @@ router.get(
     }
     if (!teamIds.length) return res.json({ items: [] });
 
+    // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
+    // este utilizador não aparece na Resenha dele — nem posts nem comentários.
+    const bloqueados = await conjuntoMutuo(req.user.id);
+
     // Jogos com campeão definido
     const { data: games, error: gErr } = await supabase
       .from('games')
@@ -188,13 +196,14 @@ router.get(
       .order('created_at', { ascending: false });
     if (gErr) throw new HttpError(500, gErr.message);
 
-    // Posts editoriais
-    const { data: posts, error: pErr } = await supabase
+    // Posts editoriais (menos os de quem está bloqueado/me bloqueou)
+    const { data: postsRaw, error: pErr } = await supabase
       .from('feed_posts')
       .select('id, team_id, author_id, body, tipo, conteudo, created_at')
       .in('team_id', teamIds)
       .order('created_at', { ascending: false });
     if (pErr) throw new HttpError(500, pErr.message);
+    const posts = (postsRaw || []).filter((p) => !bloqueados.has(p.author_id));
 
     // Média dos posts
     const postIds = (posts || []).map((p) => p.id);
@@ -211,8 +220,8 @@ router.get(
     }
 
     // Comentários: os 2 mais recentes + total, por jogo e por post (Bloco F).
-    const comGames = await comentariosRecentesParaTargets('game', (games || []).map((g) => g.id));
-    const comPosts = await comentariosRecentesParaTargets('post', postIds);
+    const comGames = await comentariosRecentesParaTargets('game', (games || []).map((g) => g.id), bloqueados);
+    const comPosts = await comentariosRecentesParaTargets('post', postIds, bloqueados);
 
     // Utilizadores referenciados (prémios dos jogos + autores dos posts + autores dos
     // comentários recentes, para lhes resolver nome/avatar na mesma query de users).
@@ -672,13 +681,16 @@ router.get(
     const role = await getRole(teamId, req.user.id);
     if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
 
+    // Bloqueio entre jogadores: comentários de quem está bloqueado/me bloqueou não existem para mim.
+    const bloqueados = await conjuntoMutuo(req.user.id);
+
     const { data: rows } = await supabase
       .from('comentarios')
       .select('id, body, author_id, reply_to, mentioned_user_ids, created_at, deleted_at')
       .eq('parent_type', parentType)
       .eq('parent_id', parentId)
       .order('created_at', { ascending: true });
-    const all = rows || [];
+    const all = (rows || []).filter((c) => !bloqueados.has(c.author_id));
     const visiveis = all.filter((c) => !c.deleted_at);
     const ids = visiveis.map((c) => c.id);
 
