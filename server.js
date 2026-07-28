@@ -42,7 +42,6 @@ const adsRoutes = require('./routes/ads');
 const mediaProxyRoutes = require('./routes/media');
 const denunciasRoutes = require('./routes/denuncias');
 const { ensureDenunciasBucket } = require('./utils/denunciaStore');
-const { router: stripeRoutes, webhookHandler } = require('./routes/stripe');
 
 const app = express();
 
@@ -76,11 +75,6 @@ const corsOptions = {
   },
 };
 app.use(cors(corsOptions));
-
-// Webhook do Stripe ANTES do express.json: precisa do corpo cru para validar
-// a assinatura (express.raw devolve um Buffer). Fica também antes do rate limiter
-// para não bloquear as repetições legítimas do Stripe.
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), webhookHandler);
 
 // Atrás de 1 reverse proxy (Codespaces/produção): confia no X-Forwarded-For
 // para que o rate limiter conte por IP real do cliente, e não pelo IP do proxy.
@@ -169,7 +163,6 @@ app.use(gabineteRoutes); // /api/super/gabinete — Gabinete do Dono (super-admi
 app.use(adsRoutes); // /api/ads — serving + medição de publicidade
 app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
 app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
-app.use(stripeRoutes); // POST /api/stripe/checkout (o webhook já foi registado acima)
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {
