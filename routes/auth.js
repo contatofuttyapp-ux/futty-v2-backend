@@ -481,6 +481,23 @@ function promptFutty(kitId) {
   return PROMPT_BASE.replace('{{KIT}}', KITS_IA[kitId].kitPrompt);
 }
 
+// O bucket "avatars" é PRIVADO (Tijolo 1C) — um users.foto_url guardado como URL
+// "público" do Storage já não é descarregável por ninguém de fora (nem a própria fal.ai,
+// que busca a imagem do lado dela). Estas duas funções extraem o CAMINHO desse URL
+// legado e emitem um URL ASSINADO de vida curta, o único que a fal consegue mesmo buscar.
+function caminhoNoBucket(urlPublico, bucket) {
+  if (!urlPublico) return null;
+  const marcador = `/object/public/${bucket}/`;
+  const i = urlPublico.indexOf(marcador);
+  if (i === -1) return null;
+  return urlPublico.slice(i + marcador.length).split('?')[0];
+}
+async function assinarUrlAvatars(caminho, ttlSeg = 600) {
+  const { data, error } = await supabase.storage.from('avatars').createSignedUrl(caminho, ttlSeg);
+  if (error) throw new Error(`Falha ao assinar URL do avatar: ${error.message}`);
+  return data.signedUrl;
+}
+
 /**
  * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
  * via fal.ai (gpt-image-1.5/edit), e guarda em avatars/public/{userId}-ai.png
@@ -550,11 +567,17 @@ router.post(
     // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
     // continuação da faixa superior. A IA ancora ao enquadramento do input; dar-lhe
     // espaço acima da cabeça faz com que deixe de cortar a coroa na saída (CASO B).
-    // Usa upload Supabase (URL pública garantida) em vez de data URI, para não
-    // arriscar uma geração paga num formato de input não confirmado no schema do fal.
-    let inputUrl = perfil.foto_url;
+    // Usa upload Supabase (URL assinado) em vez de data URI, para não arriscar uma
+    // geração paga num formato de input não confirmado no schema do fal.
+    const caminhoFoto = caminhoNoBucket(perfil.foto_url, 'avatars');
+    let inputUrl = caminhoFoto ? await assinarUrlAvatars(caminhoFoto) : perfil.foto_url;
     try {
-      const fotoBuf = Buffer.from(await (await fetch(perfil.foto_url)).arrayBuffer());
+      if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
+      // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
+      // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
+      const { data: fotoBlob, error: dlErr } = await supabase.storage.from('avatars').download(caminhoFoto);
+      if (dlErr) throw new Error(dlErr.message);
+      const fotoBuf = Buffer.from(await fotoBlob.arrayBuffer());
       const meta = await sharp(fotoBuf).metadata();
       const stripH = Math.max(8, Math.round((meta.height || 0) * 0.02));
       // cor média da faixa superior (continuação natural, não uma banda artificial)
@@ -577,12 +600,10 @@ router.post(
         cacheControl: '3600',
       });
       if (padErr) throw new Error(padErr.message);
-      const { data: pubPad } = supabase.storage.from('avatars').getPublicUrl(caminhoPad);
-      inputUrl = `${pubPad.publicUrl}?v=${Date.now()}`;
+      inputUrl = await assinarUrlAvatars(caminhoPad);
       console.log('[avatar-ai] etapa 0 - input pré-processado (top pad 18%)', { padTop, cor: { r, g, b } });
     } catch (e) {
-      console.error('[avatar-ai] etapa 0 falhou, usa foto original:', e.message);
-      inputUrl = perfil.foto_url;
+      console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
     }
 
     // Edição do input pré-processado → cromo Panini Futty via gpt-image-1.5/edit.
@@ -615,6 +636,14 @@ router.post(
           response: err.response,
           stack: err.stack?.split('\n').slice(0, 3),
         });
+        // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (ficheiro
+        // corrompido ou inacessível) — causa acionável (fotografia, não instabilidade
+        // do serviço). Código próprio para o frontend distinguir sem depender do texto.
+        let corpo = err.body;
+        if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
+        if (corpo?.detail?.some((d) => d.type === 'file_download_error')) {
+          throw new HttpError(422, 'A tua foto não pôde ser processada. Tenta enviar uma foto nova.', 'FOTO_INVALIDA');
+        }
         throw err;
       }
       const urlGerada = result?.images?.[0]?.url;
