@@ -67,6 +67,13 @@ const allowedOrigins = [
   /\.app\.github\.dev$/, // Codespaces
   ...envOrigins,
 ];
+// VAGA DO CELULAR (dev-rede): fora de produção, aceita qualquer origem da rede
+// local (192.168.x.x / 10.x.x.x / 172.16-31.x.x), porta 5173 — o telefone do
+// dono na mesma wifi acede via http://<IP-da-máquina>:5173. Nunca em produção
+// (NODE_ENV==='production' desliga isto; CORS_ORIGINS continua a via oficial lá).
+if (process.env.NODE_ENV !== 'production') {
+  allowedOrigins.push(/^http:\/\/(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)[\d.]+:5173$/);
+}
 const corsOptions = {
   origin(origin, callback) {
     // Pedidos sem Origin (curl, server-to-server) → permitir.
