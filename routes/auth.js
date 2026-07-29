@@ -46,8 +46,18 @@ const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzen
 const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
 const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden'];
 // Fundos PREMIUM (gated no plano) — planos permitidos por fundo, no molde dos kits
-// (White/Elite Gold). GOLDEN = 1º fundo premium. Super-admin passa sempre.
-const FUNDOS_PREMIUM = { golden: ['pro', 'elite'] };
+// (White/Elite Gold). GOLDEN, AURA e ÉPICO ('gradiente', chave interna) — todos
+// pro/elite. Super-admin passa sempre.
+//
+// LEI DA REGRA JUSTA (sem punição retroativa): o gate só corre AQUI, no PATCH que
+// TROCA fundo_figurinha — nunca em leitura (GET /api/me) nem no render. Quem já
+// tinha Aura/Épico equipado antes deste gate MANTÉM (a coluna já gravada nunca é
+// revalidada até o próprio utilizador mexer nela). Só ao tentar EQUIPAR de novo
+// (depois de trocar pra outro fundo) é que o plano passa a ser exigido — ninguém
+// perde o que já tinha, mas ninguém re-adquire de graça. Ver Figurinha.jsx
+// `escolherFundo` (o `if (k === fundo) return` early-return é o que preserva isto:
+// reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
+const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], gradiente: ['pro', 'elite'] };
 // Limites de gerações de avatar IA por plano.
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
