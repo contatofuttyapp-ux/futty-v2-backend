@@ -146,6 +146,10 @@ app.get('/health', async (req, res) => {
   res.json(health);
 });
 
+// Health check mínimo sob /api — o diagnóstico de rede (vaga do celular) bate
+// aqui primeiro; vale a pena existir sem depender do Supabase.
+app.get('/api/health', (req, res) => res.json({ ok: true }));
+
 // Raiz
 app.get('/', (req, res) => {
   res.json({ name: 'Futty v2.0 API', status: 'running' });
