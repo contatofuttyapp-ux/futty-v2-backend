@@ -44,7 +44,7 @@ function receberAvatar(req, res, next) {
 const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzento'];
 // Preferências da figurinha (igual aos CHECKs da migração 018).
 const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
-const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden'];
+const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden', 'royal'];
 // Fundos PREMIUM (gated no plano) — planos permitidos por fundo, no molde dos kits
 // (White/Elite Gold). GOLDEN, AURA e ÉPICO ('gradiente', chave interna) — todos
 // pro/elite. Super-admin passa sempre.
@@ -57,7 +57,7 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden'];
 // perde o que já tinha, mas ninguém re-adquire de graça. Ver Figurinha.jsx
 // `escolherFundo` (o `if (k === fundo) return` early-return é o que preserva isto:
 // reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
-const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], gradiente: ['pro', 'elite'] };
+const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], gradiente: ['pro', 'elite'], royal: ['pro', 'elite'] };
 // Limites de gerações de avatar IA por plano.
 const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
