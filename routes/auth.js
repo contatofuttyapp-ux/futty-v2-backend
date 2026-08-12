@@ -46,6 +46,8 @@ const CORES_UNIFORME = ['verde', 'azul', 'vermelho', 'preto', 'amarelo', 'cinzen
 // Preferências da figurinha (igual aos CHECKs da migração 018).
 const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
 const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden', 'royal'];
+// Avatar genérico escolhido (migração 044) — masc m1-m3, fem f1-f3. NULL = rodízio.
+const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // Fundos PREMIUM (gated no plano) — planos permitidos por fundo, no molde dos kits
 // (White/Elite Gold). GOLDEN, AURA e ÉPICO ('gradiente', chave interna) — todos
 // pro/elite. Super-admin passa sempre.
@@ -60,7 +62,7 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden', 'ro
 // reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
 const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], gradiente: ['pro', 'elite'], royal: ['pro', 'elite'] };
 // Limites de gerações de avatar IA por plano.
-const LIMITES_IA = { free: 3, pro: 50, elite: 100 };
+const LIMITES_IA = { free: 2, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
 const PERFIL_COLS =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo';
@@ -93,6 +95,15 @@ router.get(
       const cons = await getUserById(userId, 'mostrar_rosto_publico');
       if (cons && typeof cons.mostrar_rosto_publico === 'boolean') mostrarRostoPublico = cons.mostrar_rosto_publico;
     } catch { mostrarRostoPublico = true; }
+
+    // Avatar genérico escolhido (migração 044). Leitura DEFENSIVA e separada: se a
+    // coluna ainda não existir (DDL por correr), não parte o /api/me — default null
+    // (rodízio por id, comportamento actual).
+    let avatarGenerico = null;
+    try {
+      const ag = await getUserById(userId, 'avatar_generico');
+      if (ag && AVATARES_GENERICOS.includes(ag.avatar_generico)) avatarGenerico = ag.avatar_generico;
+    } catch { avatarGenerico = null; }
 
     // Stats agregadas (todas as equipas):
     // jogos = presenças confirmadas; gols = soma; nota = média dos votos recebidos.
@@ -137,6 +148,7 @@ router.get(
         is_adult: calcIsAdult(perfil?.birthdate),
         mostrar_rosto_publico: mostrarRostoPublico,
         kit_ativo: perfil?.kit_ativo || 'dark-gold',
+        avatar_generico: avatarGenerico,
         // P1-1 — flag do onboarding dia-1 no user_metadata do Auth (sem DDL).
         // FALSE → qualquer entrada autenticada reencaminha 1x para /onboarding
         // (resistente ao caminho de entrada: confirmação de email noutro
@@ -208,6 +220,13 @@ router.patch(
     if ('mostrar_rosto_publico' in b) {
       patch.mostrar_rosto_publico = b.mostrar_rosto_publico === true;
     }
+    // Avatar genérico escolhido a dedo (migração 044). O app não pergunta sexo — a
+    // pessoa escolhe entre os 6 no seletor; null limpa a escolha e volta ao rodízio.
+    if ('avatar_generico' in b) {
+      const v = b.avatar_generico == null || b.avatar_generico === '' ? null : String(b.avatar_generico);
+      if (v && !AVATARES_GENERICOS.includes(v)) throw new HttpError(400, 'Avatar genérico inválido.');
+      patch.avatar_generico = v;
+    }
     // Data de nascimento (pedido único do Início a quem não a tem). SET-ONCE: se já
     // existir, não deixa mudar (evita a passagem trivial menor→adulto).
     if ('birthdate' in b) {
@@ -235,7 +254,10 @@ router.patch(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ user: updated });
+    // avatar_generico não vive em PERFIL_COLS (mesma razão do mostrar_rosto_publico:
+    // coluna nova, leitura defensiva) — devolve o valor que acabou de gravar.
+    const userOut = 'avatar_generico' in patch ? { ...updated, avatar_generico: patch.avatar_generico } : updated;
+    res.json({ user: userOut });
   })
 );
 
@@ -458,38 +480,63 @@ CRITICAL KIT RULES:
 - Image 2 is the ground truth — follow it exactly
 - Always use this kit — NEVER generate a white or blank jersey`;
 
+// Ronda 3 (30-jul): no low os detalhes pequenos do kit somem (o friso da manga
+// foi o primeiro visto na prova de produção). Checklist explícito no fim do prompt.
+const kitChecklist = (acento) => `KIT CHECKLIST — before finishing, verify ALL FIVE elements are present:
+1. base colour of the jersey exactly as Image 2
+2. the large diagonal panel in ${acento}
+3. V-neck collar with thin ${acento} piping
+4. thin ${acento} trim at BOTH sleeve cuffs — a plain black cuff with no ${acento} trim line is a kit ERROR
+5. the solid ${acento} emblem on the upper-left chest
+A missing cuff trim or missing piping is a kit ERROR. Image 2 is ground truth.`;
+
 // Catálogo de kits gerávies. `ativo:false` → 400 (ainda sem asset próprio no Storage).
 // `planos` restringe por plano (super-admin é isento). Espelha os 4 ids do frontend.
+// `acento` alimenta o KIT CHECKLIST (promptFutty) — mesma cor passada a kitPrompt().
 const KITS_IA = {
   'dark-gold': {
     ativo: true,
     url: KIT_URL,
     planos: ['free', 'pro', 'elite'],
+    acento: 'metallic gold #d4a017',
     kitPrompt: kitPrompt('Dark Gold', 'deep black #0d0d12', 'metallic gold #d4a017'),
   },
   'dark-purple': {
-    ativo: true, // KIT 2 oficial (gerado do dark-gold; roxo #8b5cf6). Livre por agora.
+    ativo: true, // KIT 2 oficial (gerado do dark-gold; roxo #8b5cf6).
     url: KIT2_URL,
-    planos: ['free', 'pro', 'elite'],
+    planos: ['pro', 'elite'], // PAGO desde 31-jul (dono): grátis é só o dark-gold
+    acento: 'vivid purple #8b5cf6',
     kitPrompt: kitPrompt('Dark Purple', 'deep black #0d0d12', 'vivid purple #8b5cf6'),
   },
   'white-gold': {
-    ativo: false,
-    url: null, // Kits/kit3-white-gold.png
-    planos: ['free', 'pro', 'elite'],
+    ativo: true, // asset escolhido pelo dono (31-jul): white-gold-c1 → kit3
+    url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit3-white-gold.png',
+    planos: ['pro', 'elite'], // pago — grátis é SÓ o dark-gold (decisão do dono, 31-jul)
+    acento: 'metallic gold #d4a017',
     kitPrompt: kitPrompt('White Gold', 'off-white #f8f5f0', 'metallic gold #d4a017'),
   },
   'elite-gold': {
-    ativo: false,
-    url: null, // Kits/kit4-elite-gold.png
+    ativo: true, // asset escolhido pelo dono (31-jul): elite-gold-c1 → kit4
+    url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit4-elite-gold.png',
     planos: ['pro', 'elite'], // kit pago
+    acento: 'deep black #0d0d12', // kit invertido — o acento aqui é o preto, não o ouro
     kitPrompt: kitPrompt('Elite Gold', 'metallic gold #d4a017', 'deep black #0d0d12', '\nNOTE: this kit is INVERTED — gold is the base, black is the accent.\n'),
+  },
+  'royal-purple': {
+    ativo: true, // 5º kit do lançamento (31-jul): royal-purple-c3 → kit5. Par do Elite Gold.
+    url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit5-royal-purple.png',
+    planos: ['pro', 'elite'], // kit pago
+    acento: 'deep black #0d0d12', // invertido — roxo é a base, preto é o acento
+    kitPrompt: kitPrompt('Royal Purple', 'vivid purple #8b5cf6', 'deep black #0d0d12', '\nNOTE: this kit is INVERTED — purple is the base, black is the accent.\n'),
   },
 };
 
-// Injecta a secção KIT do catálogo no prompt base.
+// Injecta a secção KIT + o checklist de detalhes no prompt base.
 function promptFutty(kitId) {
-  return PROMPT_BASE.replace('{{KIT}}', KITS_IA[kitId].kitPrompt);
+  const kit = KITS_IA[kitId];
+  return PROMPT_BASE
+    .replace('{{KIT}}', kit.kitPrompt)
+    .replace('{{KIT_CHECKLIST}}', kitChecklist(kit.acento));
 }
 
 // O bucket "avatars" é PRIVADO (Tijolo 1C) — um users.foto_url guardado como URL
