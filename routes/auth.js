@@ -10,6 +10,7 @@ const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { filtroNSFW } = require('../utils/nsfwFilter');
+const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
 
 // fal.ai — credenciais via FAL_KEY (.env).
@@ -303,6 +304,7 @@ router.post(
   requireAuth,
   receberAvatar,
   filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (avatar + onboarding)
+  olheiroEntrada, // 11-ago: barra foto sem futuro (pequena/corrompida/preta/estourada) antes de guardar
   asyncHandler(async (req, res) => {
     const file = req.file;
     if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "avatar").');
