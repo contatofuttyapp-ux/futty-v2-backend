@@ -10,6 +10,7 @@ const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { filtroNSFW } = require('../utils/nsfwFilter');
+const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
 
 // fal.ai — credenciais via FAL_KEY (.env).
 fal.config({ credentials: process.env.FAL_KEY });
@@ -520,8 +521,8 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin');
-    if (!perfil?.foto_url) throw new HttpError(400, 'Adiciona uma foto primeiro.');
+    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, created_at');
+    if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
 
     // --- KIT: validação (existe / activo / plano) ---
     const kitId = String(req.body?.kit || 'dark-gold');
@@ -568,10 +569,34 @@ router.post(
       if (usados >= limite) {
         const msg =
           plano === 'free'
-            ? 'Limite de gerações atingido. Faz upgrade para Pro para continuar.'
+            ? 'Limite de gerações atingido. Faça upgrade para Pro para continuar.'
             : 'Limite de gerações deste mês atingido.';
         throw new HttpError(403, msg);
       }
+    }
+
+    // PACOTE ANTI-ABUSO DE CUSTO (11-ago) — três gates, só a partir daqui (uma
+    // geração real vai custar dinheiro; o slot-reuse acima nunca passa por aqui).
+    //
+    // 1. E-MAIL-GATE: contas Google confirmam e-mail no próprio login (passam
+    //    direto); contas email+senha precisam ter clicado no link de confirmação.
+    //    Só trava a GERAÇÃO — nunca cadastro, login ou navegação.
+    const provedor = req.user.app_metadata?.provider;
+    if (provedor !== 'google' && !req.user.email_confirmed_at) {
+      throw new HttpError(403, 'Confirme seu e-mail para gerar (enviamos o link).', 'EMAIL_NAO_CONFIRMADO');
+    }
+    // 2. TETO DIÁRIO — paraquedas com alerta, nunca teto de vidro: super-admin
+    //    (uso interno/testes) sempre passa; o resto pausa ao bater 100% do dia.
+    if (!perfil.is_super_admin) {
+      const teto = await verificarTeto();
+      if (teto.bloqueado) {
+        throw new HttpError(503, 'Estamos com procura recorde. Tenta de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
+      }
+    }
+    // 3. AUTO-FREEZE — regra de ferro, só contas <48h (usuários reais não sentem).
+    const freeze = await verificarFreeze(perfil.created_at);
+    if (freeze.congelado) {
+      throw new HttpError(503, 'Estamos com procura recorde. Tenta de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
     }
 
     // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
@@ -815,6 +840,11 @@ router.post(
     }
     const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
+
+    // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
+    // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
+    // derruba a resposta — a figurinha já foi entregue ao utilizador).
+    registrarGeracao({ userId, ip: req.ip }).catch(() => {});
 
     res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false });
   })
