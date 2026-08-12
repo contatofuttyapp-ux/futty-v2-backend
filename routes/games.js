@@ -71,7 +71,7 @@ router.post(
       membrosDaEquipa(team.id).then((memberIds) =>
         enviarNotificacao(memberIds, {
           title: '⚽ Novo jogo criado',
-          body: `${team.nome || 'A tua equipa'} · ${dataCurtaPT(game.data)}`,
+          body: `${team.nome || 'Seu time'} · ${dataCurtaPT(game.data)}`,
           url: '/home',
         })
       );
@@ -664,7 +664,7 @@ router.post(
       throw new HttpError(400, );
     }
     if (Math.floor(totalParticipantes / porTime) > 4) {
-      throw new HttpError(400, 'Máximo de 4 times por sorteio — aumente os jogadores por time.');
+      throw new HttpError(400, 'Máximo de 4 times por sorteio: aumente os jogadores por time.');
     }
 
     // Sorteio: lógica completa em utils/sorteio.js (goleiros/cabeças 1 por time,
@@ -1007,7 +1007,7 @@ router.post(
       membrosDaEquipa(team.id).then((memberIds) =>
         enviarNotificacao(memberIds, {
           title: '⚽ Novos jogos agendados',
-          body: `${team.nome || 'A tua equipa'} · ${aInserir.length} jogos nas próximas semanas`,
+          body: `${team.nome || 'Seu time'} · ${aInserir.length} jogos nas próximas semanas`,
           url: '/home',
         })
       );

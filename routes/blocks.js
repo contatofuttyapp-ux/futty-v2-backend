@@ -16,7 +16,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const blockedId = String(req.body?.blocked_id || '');
     if (!blockedId) throw new HttpError(400, 'blocked_id em falta.');
-    if (blockedId === req.user.id) throw new HttpError(400, 'Não podes bloquear-te a ti próprio.');
+    if (blockedId === req.user.id) throw new HttpError(400, 'Você não pode bloquear a si mesmo.');
 
     const { error } = await supabase
       .from('user_blocks')

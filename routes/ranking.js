@@ -448,8 +448,8 @@ router.post(
       const votaram = new Set((votos.data || []).map((v) => v.de_user_id));
       const naoVotaramIds = (membros.data || []).map((m) => m.user_id).filter((id) => !votaram.has(id));
       return enviarNotificacao(naoVotaramIds, {
-        title: '⭐ Actualize a sua nota',
-        body: 'O admin pediu que actualizem as notas',
+        title: '⭐ Atualize a sua nota',
+        body: 'O admin pediu que atualizem as notas',
         url: `/equipa/${team.slug}/ranking`,
       });
     });

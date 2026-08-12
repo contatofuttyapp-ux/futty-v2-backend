@@ -637,13 +637,13 @@ router.post(
     if (!perfil.is_super_admin) {
       const teto = await verificarTeto();
       if (teto.bloqueado) {
-        throw new HttpError(503, 'Estamos com procura recorde. Tenta de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
+        throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
       }
     }
     // 3. AUTO-FREEZE — regra de ferro, só contas <48h (usuários reais não sentem).
     const freeze = await verificarFreeze(perfil.created_at);
     if (freeze.congelado) {
-      throw new HttpError(503, 'Estamos com procura recorde. Tenta de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
+      throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
     }
 
     // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
@@ -845,7 +845,7 @@ router.post(
       // entrega, não grava slot, não consome quota (o throw acontece antes
       // de qualquer um dos três, mais abaixo neste handler).
       console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
-      throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra — de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
+      throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra: de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
     }
 
     // ETAPA 3 — redimensiona o PNG já recortado e trimado (sharp). A troca de cor do kit é feita no frontend.

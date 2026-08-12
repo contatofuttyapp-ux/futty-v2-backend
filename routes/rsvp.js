@@ -52,7 +52,7 @@ async function promoverDaEspera(game) {
 
   enviarNotificacao([primeiro.user_id], {
     title: '✅ Vaga disponível!',
-    body: `Foste confirmado para o jogo de ${dataCurtaPT(game.data)}. Confirma a tua presença no app.`,
+    body: `Você foi confirmado para o jogo de ${dataCurtaPT(game.data)}. Confirme sua presença no app.`,
     url: `/equipa/${game.teams.slug}`,
   });
 }

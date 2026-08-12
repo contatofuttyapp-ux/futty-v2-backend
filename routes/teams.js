@@ -612,12 +612,12 @@ router.delete(
     if (em) throw new HttpError(500, em.message);
 
     if ((membros || []).length === 1) {
-      throw new HttpError(400, 'Você é a única pessoa no time — arquivar o time chega em breve; por enquanto, fale conosco.');
+      throw new HttpError(400, 'Você é a única pessoa no time: arquivar o time chega em breve; por enquanto, fale conosco.');
     }
     if (role === 'admin') {
       const outrosAdmins = (membros || []).filter((m) => m.role === 'admin' && m.user_id !== req.user.id);
       if (outrosAdmins.length === 0) {
-        throw new HttpError(400, 'Você é o único admin — passe o cargo a outro membro antes de sair.');
+        throw new HttpError(400, 'Você é o único admin: passe o cargo a outro membro antes de sair.');
       }
     }
 
