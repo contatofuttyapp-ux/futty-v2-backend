@@ -325,102 +325,102 @@ router.post(
       throw new HttpError(500, updErr.message);
     }
 
+    // Hash da foto (pacote anti-abuso, 11-ago) — matéria-prima do sinal de farm
+    // de contas. Best-effort e SEPARADO do update principal: se a coluna ainda
+    // não existir (migração 048 por correr), nunca pode derrubar o upload.
+    try {
+      await supabase.from('users').update({ foto_hash: sha256Hex(file.buffer) }).eq('id', userId);
+    } catch (e) {
+      console.error('[avatar] foto_hash não gravado (migração 048 por correr?):', e.message);
+    }
+
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
 );
 
-// Prompt detalhado para a edição da foto real → cromo Panini estilo Futty.
-// Prompt base do cromo. A secção KIT é injectada por kit ({{KIT}}) — tudo o resto
-// (face/head completion, body, framing 55-62%, background, never-generate) é comum.
-const PROMPT_BASE = `
-You are creating a professional illustrated soccer player sticker card.
-You will receive TWO images:
-- Image 1: photo of a real person (the player)
-- Image 2: the exact soccer kit the player must wear
+// Prompt do cromo — receita L2P (bancada 30-jul, achatamento 0,00-0,07 em 6/6 fotos,
+// $0,015/fig). Retrato 1024×1536 em vez de quadrado: dá altura para cabeça + busto sem
+// cortar a coroa (o quadrado forçava achatamento 0,66-0,96 mesmo com ordem de folga no
+// prompt). A secção KIT é injectada por kit ({{KIT}}) — resto é comum a todos os kits.
+// Fonte: scripts/_bench/prompts-low.js (variante L2P = função L2 + ENQ_RETRATO + fundo cinza).
+const PROMPT_BASE = `You are illustrating a premium soccer player sticker card.
+Image 1 = photo of a real person (the player). Image 2 = the exact kit he must wear.
 
-PRIORITY ORDER:
-1st — Face accuracy: person must be immediately recognizable
-2nd — Kit accuracy: reproduce Image 2 exactly as described below
-3rd — Pose selection
-4th — Illustration style
+PRIORITY ORDER: 1st face likeness · 2nd complete head with space above it ·
+3rd the kit from Image 2 · 4th style.
 
-STYLE:
-- Premium Panini sticker illustration style
-- FIFA Ultimate Team card quality
-- Semi-realistic digital painting
+FACE — HIGHEST PRIORITY:
+Study Image 1 and preserve exactly: face shape and proportions, eye shape and
+expression, nose, lips, skin tone, hair colour, beard/moustache style.
+Image 1 may be blurry, noisy, dark or low resolution — read the underlying
+facial STRUCTURE and redraw it cleanly and confidently. Do NOT reproduce noise,
+grain or blur.
+Never invent what is not visible in Image 1: no cap, no jewellery,
+no tattoos unless clearly present.
+SUNGLASSES RULE: if the person wears sunglasses or dark glasses in Image 1,
+REMOVE them and paint natural, open eyes that match the face, age and
+expression. NEVER keep sunglasses on the card. (Clear prescription glasses,
+if obviously part of the person's look, may stay.)
+The person must be instantly recognizable by a friend.
+
+HEAD — NEVER CROP:
+Always draw the ENTIRE head with a complete, rounded crown and generous empty
+space above it. If the head is cut by the edge of Image 1, reconstruct it
+plausibly from the visible hair. A flat, truncated or edge-touching top of the
+head is the single worst possible error in this task.
+
+ARMS — COMPLETE FIGURE:
+- BOTH arms fully drawn and complete — shoulder, elbow, forearm and hand
+- NEVER a missing, amputated, hidden or half-drawn limb
+- The figure must NOT touch the LEFT, RIGHT or TOP edges of the image; keep
+  clear margin on both sides (the bottom edge is the natural bust crop)
+- If the pose does not fit, draw the figure SMALLER — never cut an arm
+
+STYLE — SEMI-REALISTIC DIGITAL PAINTING, BROAD BRUSH:
+- Premium Panini / trading-card painting, painterly but CLEAN
+- Broad confident brushwork; large simple shapes; crisp silhouette
+- HAIR painted as masses with a clear outline — never strand by strand
+- SKIN smooth, sculpted with light and shadow — no pores, no fine texture
+- FABRIC as a few bold folds — NO visible weave or thread texture
+- Rich deep colour, high contrast; must hold up when seen small on a phone
 - NOT photographic, NOT anime, NOT cartoon
-- Clean brushwork with visible fabric texture
-- Rich deep color rendering
 
-FACE AND IDENTITY — CRITICAL:
-Study Image 1 carefully. Preserve exactly:
-- Face shape, proportions and all features
-- Eye shape, color and expression
-- Nose and lip shape
-- Skin tone (exact match)
-- Hair style, color and texture
-- Facial hair (exact style if present)
-- All distinctive facial features
-The person must be immediately recognizable in the result.
+LIGHTING:
+- Strong rim/edge light along the top of the head, the shoulders and the arms,
+  clearly separating the figure from whatever is behind it
+- Main light from the front-upper-left, warm; cool fill on the shadow side
+- High contrast, deep blacks, no washed-out greys
 
-CRITICAL — HEAD COMPLETION:
-If Image 1 crops any part of the head or hair (top of head cut by the photo edge), you MUST reconstruct the complete head and hairstyle naturally and plausibly, matching the visible hair.
-NEVER reproduce a cropped, flattened or truncated head.
-The output must ALWAYS show the entire head with a natural, complete crown and visible space above it.
+BODY: slightly athletic — a little broader in the shoulders, defined arms.
+Still unmistakably the same person. Not a bodybuilder.
 
-BODY:
-- Add 15% more muscle — subtle and natural
-- Slightly broader shoulders, more defined arms
-- Must still look like the same person
-- NOT a bodybuilder — subtle athletic improvement only
+POSE: pick ONE that matches the personality visible in Image 1 — arms
+crossed, clenched fist, thumbs up, or pointing up. One pose only, never mixed.
 
 {{KIT}}
 
-TATTOOS:
-- If visible in Image 1: include naturally on skin
-- If not visible in Image 1: do NOT invent any
+{{KIT_CHECKLIST}}
 
-ACCESSORIES:
-- Include ONLY what is clearly visible in Image 1
-- NEVER invent caps, glasses or jewelry not present in photo
+FRAMING — PORTRAIT:
+- Portrait 2:3 composition (taller than wide)
+- Bust only: head down to mid-chest. No legs. No hands below chest level.
+- The figure must occupy only the BOTTOM 80% of the image
+- The TOP 20% of the image must be COMPLETELY EMPTY — no hair, no head, nothing
+- Head horizontally centred; eyes at roughly 40% of the height
+- The figure spans AT MOST 85% of the image width: keep a clearly visible empty
+  margin on BOTH sides — elbows and arms must never come near the left/right edges
+- If in doubt, draw the figure SMALLER and leave MORE empty space above the head
 
-POSE — AUTO-SELECT ONE based on personality visible in Image 1:
-- Arms crossed: calm, confident person
-- Clenched fist: intense, competitive person
-- Finger pointing up: expressive, proud person
-- Arms wide celebration: joyful, high energy person
-- Thumbs up: friendly, warm person
-- Finger gun: stylish, cool person
-Select ONE only. Do not mix poses.
+BACKGROUND:
+- Perfectly flat, uniform MID-GREY #8a8a8a. Nothing else.
+- This background is removed automatically afterwards; it exists ONLY so the
+  figure's silhouette — including dark hair — separates cleanly from it.
+- No scenery, no stadium, no crowd, no grass, no gradient, no vignette, no props.
 
-FRAMING:
-- Portrait 3:4 ratio
-- Upper body only — head to waist, NO legs visible
-- Face positioned in upper third of frame
-- Character occupies 55-62% of image height maximum — leave generous empty space above the head, this is critical
-- If in doubt about framing, make the character SMALLER and add MORE empty space above the head — cropping the head is the single worst possible error
-- Clear empty space above head and below waist
-- Never crop the head
-- Player must appear smaller, not filling the entire frame
-
-BACKGROUND — CRITICAL:
-- SOLID dark background ONLY: #050810
-- Absolutely NO stadium, NO crowd, NO field, NO grass, NO lights
-- NO environmental elements of any kind
-- NO green, NO arena, NO bokeh
-- Pure flat dark color behind the player
-- This is the most important rule after face accuracy
-
-NEVER GENERATE:
-- Photorealistic photography style
-- Anime or cartoon style
-- Full body showing legs
-- Colored or busy background (stadium, grass, crowd, arena)
-- Multiple people in the image
-- White or blank jersey
-- Any kit different from the Futty Dark Gold described above
-`;
+NEVER: photographic realism, anime, chibi, cartoon mascot, any text or
+lettering, watermark, extra logos, more than one person, white or blank kit,
+legs, cropped head.`;
 
 // Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
 // Assets dos kits em bucket PÚBLICO próprio ('kits') — são assets do app, não PII.
@@ -442,8 +442,8 @@ JERSEY:
   running from upper-left shoulder down to lower-right hem
 - V-neck collar: ${base} with thin ${acento} piping along the edge
 - Short sleeves: ${base} with thin ${acento} trim at cuffs
-- Badge: single Futty monogram (two mirrored F letters forming
-  one unified symbol) in ${acento} on upper-left chest
+- Badge: ONE small, simple, SOLID emblem in ${acento} on the upper-left chest —
+  a bold compact shape, not fine lettering. No text, no thin lines.
 
 SHORTS:
 - Base color: ${base}
@@ -616,13 +616,22 @@ router.post(
       console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
     }
 
+    // Lei da casa: grátis = low, pago (pro/elite) = medium — a diferença de
+    // qualidade é a fronteira do produto. Retrato 1024×1536 (receita L2P).
+    // 31-jul (decisão do dono, revoga "grátis=low/pago=medium"): qualidade é UMA
+    // só — low, para todos os planos. Nas comparações o low ganhou ~80% das vezes
+    // (o prompt L2P é afinado para ele); o medium custava 3,5× por nada. O pago
+    // diferencia-se por kits, fundos e créditos, não por qualidade de pintura.
+    const qualidadeIA = 'low';
+
     // Edição do input pré-processado → cromo Panini Futty via gpt-image-1.5/edit.
     console.log('[avatar-ai] a chamar fal com:', {
       modelo: 'fal-ai/gpt-image-1.5/edit',
       image_url: inputUrl,
       kit: kitId,
       prompt_length: promptFutty(kitId).length,
-      quality: 'medium',
+      quality: qualidadeIA,
+      image_size: '1024x1536',
     });
 
     // ETAPA 1+2 (retriáveis) — geração + remoção de fundo → buffer recortado.
@@ -633,7 +642,8 @@ router.post(
           input: {
             prompt: promptFutty(kitId), // secção KIT injectada do catálogo
             image_urls: [inputUrl, kit.url], // input pré-processado + asset do kit escolhido
-            quality: 'medium', // decisão do teste A3 (~$0.03-0.04/imagem)
+            quality: qualidadeIA, // low para todos (31-jul)
+            image_size: '1024x1536', // retrato — dá altura à coroa (receita L2P, 30-jul)
             num_images: 1,
           },
           logs: true,
@@ -675,41 +685,99 @@ router.post(
       return { urlGerada, urlRecortada, recorteBuffer: Buffer.from(await respR.arrayBuffer()) };
     };
 
-    // REDE DE DETECÇÃO — coroa colada ao topo: linhas y=0..2 com muitos pixels
-    // opacos (alpha > 200) = cabeça cortada. Limiar: > 15% da largura.
-    const coroaNoTopo = async (buf) => {
+    // REDE DE DETECÇÃO 1 — contacto com a borda, ANTES do trim. Topo (linhas
+    // y=0..2, como antes): cabeça cortada. Laterais (colunas x=0..2 e
+    // x=w-3..w-1, opacos > 15% da ALTURA): braço cortado pela borda.
+    const bordaCortada = async (buf) => {
       const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
       const { width: w, height: h, channels: c } = info;
-      let maxCount = 0;
+      const opaco = (x, y) => data[(y * w + x) * c + 3] > 200;
+
+      let topoCount = 0;
       for (let y = 0; y <= 2 && y < h; y++) {
         let cnt = 0;
-        for (let x = 0; x < w; x++) if (data[(y * w + x) * c + 3] > 200) cnt++;
-        if (cnt > maxCount) maxCount = cnt;
+        for (let x = 0; x < w; x++) if (opaco(x, y)) cnt++;
+        if (cnt > topoCount) topoCount = cnt;
       }
-      return { cortada: maxCount > w * 0.15, maxCount, limiar: Math.round(w * 0.15), largura: w };
+      const topoLimiar = Math.round(w * 0.15);
+
+      const contarColuna = (x0) => {
+        let cnt = 0;
+        for (let y = 0; y < h; y++) if (opaco(x0, y)) cnt++;
+        return cnt;
+      };
+      let esqCount = 0;
+      for (let x = 0; x <= 2 && x < w; x++) esqCount = Math.max(esqCount, contarColuna(x));
+      let dirCount = 0;
+      for (let x = Math.max(0, w - 3); x < w; x++) dirCount = Math.max(dirCount, contarColuna(x));
+      // HIERARQUIA DOS DEFEITOS (11-ago, dono): braço tocando a borda lateral NÃO
+      // reprova — é linguagem de cromo (Panini/FIFA cortam braço na moldura) e era
+      // a causa nº1 de retry (~31% de custo a mais). Vira AVISO no log. Rede de
+      // segurança: contacto EXTREMO (>60% da altura colada) ainda reprova.
+      const lateralAviso = Math.round(h * 0.15);
+      const lateralExtremo = Math.round(h * 0.6);
+
+      const topo = { cortado: topoCount > topoLimiar, count: topoCount, limiar: topoLimiar };
+      const esquerda = { cortado: esqCount > lateralExtremo, aviso: esqCount > lateralAviso, count: esqCount };
+      const direita = { cortado: dirCount > lateralExtremo, aviso: dirCount > lateralAviso, count: dirCount };
+      if ((esquerda.aviso && !esquerda.cortado) || (direita.aviso && !direita.cortado)) {
+        console.log('[avatar-ai] AVISO: braço na borda lateral, aceite como enquadramento', { esq: esqCount, dir: dirCount, h });
+      }
+      return { cortada: topo.cortado || esquerda.cortado || direita.cortado, topo, esquerda, direita };
+    };
+
+    // REDE DE DETECÇÃO 2 — achatamento da coroa, APÓS o trim: largura da 1ª
+    // linha opaca ÷ largura máxima nas primeiras ~10% de linhas da figura.
+    // > 0,5 = coroa comida. (scripts/_bench/prova-producao.js)
+    const achatamentoCoroa = async (buf) => {
+      const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      const { width: w, height: h, channels: c } = info;
+      const larg = (y) => { let n = 0; for (let x = 0; x < w; x++) if (data[(y * w + x) * c + 3] > 200) n++; return n; };
+      let y0 = -1;
+      for (let y = 0; y < h && y0 < 0; y++) if (larg(y) > 0) y0 = y;
+      if (y0 < 0) return { razao: null, cortada: false };
+      const faixa = Math.min(h, y0 + Math.max(8, Math.round(h * 0.10)));
+      const primeira = larg(y0);
+      let maxima = 0;
+      for (let y = y0; y < faixa; y++) maxima = Math.max(maxima, larg(y));
+      const razao = maxima ? primeira / maxima : 0;
+      return { razao, cortada: razao > 0.5 };
+    };
+
+    // As duas verificações por geração: borda (pré-trim) + achatamento (pós-trim).
+    // Guarda o buffer já trimado para reaproveitar na ETAPA 3 sem trim duplo.
+    const verificarQualidade = async (recorteBuffer) => {
+      const borda = await bordaCortada(recorteBuffer);
+      const trimado = await sharp(recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
+      const achatamento = await achatamentoCoroa(trimado);
+      return { ok: !borda.cortada && !achatamento.cortada, borda, achatamento, trimado };
     };
 
     let gen = await gerarERecortar();
-    let det = await coroaNoTopo(gen.recorteBuffer);
-    console.log('[avatar-ai] detecção coroa no topo:', det);
-    if (det.cortada) {
-      console.log('[avatar-ai] retry: coroa no topo');
+    let verif = await verificarQualidade(gen.recorteBuffer);
+    console.log('[avatar-ai] verificação de qualidade:', { borda: verif.borda, achatamento: verif.achatamento });
+    if (!verif.ok) {
+      console.log('[avatar-ai] retry: reprovada na 1ª geração', { borda: verif.borda, achatamento: verif.achatamento });
       try {
         const gen2 = await gerarERecortar();
-        const det2 = await coroaNoTopo(gen2.recorteBuffer);
-        console.log('[avatar-ai] detecção coroa no topo (pós-retry):', det2);
+        const verif2 = await verificarQualidade(gen2.recorteBuffer);
+        console.log('[avatar-ai] verificação de qualidade (pós-retry):', { borda: verif2.borda, achatamento: verif2.achatamento });
         gen = gen2;
-        det = det2;
-        if (det2.cortada) console.log('[avatar-ai] AVISO: coroa no topo após retry');
+        verif = verif2;
       } catch (e) {
         console.error('[avatar-ai] retry falhou, mantém 1ª geração:', e.message);
       }
     }
-    const { recorteBuffer } = gen;
+    if (!verif.ok) {
+      // Lei da casa: cabeça cortada nunca sai. Falhou nas duas rondas → não
+      // entrega, não grava slot, não consome quota (o throw acontece antes
+      // de qualquer um dos três, mais abaixo neste handler).
+      console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
+      throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra — de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
+    }
 
-    // ETAPA 3 — redimensiona o PNG recortado (sharp). A troca de cor do kit é feita no frontend.
-    const buffer = await sharp(recorteBuffer)
-      .trim({ threshold: 10 })
+    // ETAPA 3 — redimensiona o PNG já recortado e trimado (sharp). A troca de cor do kit é feita no frontend.
+    const buffer = await sharp(verif.trimado)
       // Rede de segurança: garante 40px de margem transparente acima de QUALQUER
       // conteúdo, mesmo que a IA cole a cabeça à borda do PNG.
       .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })
