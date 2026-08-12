@@ -117,8 +117,8 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(String(req.query.slug || ''));
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
-    if ((await getRole(team.id, req.user.id)) !== 'admin') throw new HttpError(403, 'Só o admin da equipa.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+    if ((await getRole(team.id, req.user.id)) !== 'admin') throw new HttpError(403, 'Só o admin do time.');
 
     const casos = await store.listarEquipa(team.id);
     const fila = casos
@@ -155,8 +155,8 @@ router.post(
     const { slug, acao } = req.body || {};
     if (!['remover', 'manter', 'avisar'].includes(acao)) throw new HttpError(400, 'Ação inválida.');
     const team = await getTeamBySlug(String(slug || ''));
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
-    if ((await getRole(team.id, req.user.id)) !== 'admin') throw new HttpError(403, 'Só o admin da equipa.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+    if ((await getRole(team.id, req.user.id)) !== 'admin') throw new HttpError(403, 'Só o admin do time.');
 
     const caso = await store.obterCaso(team.id, req.params.id);
     if (!caso) throw new HttpError(404, 'Denúncia não encontrada.');

@@ -28,7 +28,7 @@ const uploadLogo = multer({
 function logoMiddleware(req, res, next) {
   uploadLogo.single('logo')(req, res, (err) => {
     if (err) {
-      return next(new HttpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Logo: máximo 2MB.' : 'Ficheiro inválido.'));
+      return next(new HttpError(400, err.code === 'LIMIT_FILE_SIZE' ? 'Logo: máximo 2MB.' : 'Arquivo inválido.'));
     }
     next();
   });
@@ -40,7 +40,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { nome, cor, publica, localizacao, descricao } = req.body || {};
-    if (!nome || !nome.trim()) throw new HttpError(400, 'O nome da equipa é obrigatório.');
+    if (!nome || !nome.trim()) throw new HttpError(400, 'O nome do time é obrigatório.');
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
@@ -69,7 +69,7 @@ router.post(
       else if (error.code === '23505') lastError = error; // slug duplicado -> tenta de novo
       else throw new HttpError(500, error.message);
     }
-    if (!team) throw new HttpError(500, lastError?.message || 'Não foi possível criar a equipa.');
+    if (!team) throw new HttpError(500, lastError?.message || 'Não foi possível criar o time.');
 
     // Adiciona o criador como admin (rollback se falhar)
     const { error: memberError } = await supabase
@@ -263,10 +263,10 @@ router.get(
       req.params.slug,
       'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng'
     );
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     const { data: rawMembers, error } = await supabase
       .from('team_members')
@@ -295,10 +295,10 @@ router.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar a equipa.');
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar o time.');
 
     const b = req.body || {};
     const patch = {};
@@ -367,12 +367,12 @@ router.post(
   filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (moderação)
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem mudar o logo.');
 
-    if (!req.file) throw new HttpError(400, 'Envia uma imagem PNG, JPG ou WEBP (máx 2MB).');
+    if (!req.file) throw new HttpError(400, 'Envie uma imagem PNG, JPG ou WEBP (máx 2MB).');
     const ext = LOGO_EXT[req.file.mimetype];
 
     const caminho = `logos/${team.id}.${ext}`;
@@ -398,10 +398,10 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     const { data, error } = await supabase
       .from('team_members')
@@ -552,10 +552,10 @@ router.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só admins podem marcar jogadores como inactivos.');
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem marcar jogadores como inativos.');
 
     const ativo = !!(req.body || {}).ativo;
     const { error } = await supabase
@@ -574,11 +574,11 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover membros.');
-    if (req.params.userId === req.user.id) throw new HttpError(400, 'Não te podes remover a ti próprio.');
+    if (req.params.userId === req.user.id) throw new HttpError(400, 'Você não pode remover a si mesmo.');
 
     const { error } = await supabase
       .from('team_members')
@@ -601,9 +601,9 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug, nome');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(400, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(400, 'Você não é membro deste time.');
 
     const { data: membros, error: em } = await supabase
       .from('team_members')
@@ -612,12 +612,12 @@ router.delete(
     if (em) throw new HttpError(500, em.message);
 
     if ((membros || []).length === 1) {
-      throw new HttpError(400, 'És a única pessoa na equipa — arquivar a equipa chega em breve; por agora fala connosco.');
+      throw new HttpError(400, 'Você é a única pessoa no time — arquivar o time chega em breve; por enquanto, fale conosco.');
     }
     if (role === 'admin') {
       const outrosAdmins = (membros || []).filter((m) => m.role === 'admin' && m.user_id !== req.user.id);
       if (outrosAdmins.length === 0) {
-        throw new HttpError(400, 'És o único admin — passa o cargo a outro membro antes de sair.');
+        throw new HttpError(400, 'Você é o único admin — passe o cargo a outro membro antes de sair.');
       }
     }
 
@@ -637,7 +637,7 @@ router.patch(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar membros.');
@@ -646,7 +646,7 @@ router.patch(
     const patch = {};
     if ('role' in b) {
       if (!['admin', 'member'].includes(b.role)) throw new HttpError(400, 'role inválido.');
-      if (req.params.userId === req.user.id) throw new HttpError(400, 'Não podes mudar o teu próprio role.');
+      if (req.params.userId === req.user.id) throw new HttpError(400, 'Você não pode mudar o seu próprio role.');
       patch.role = b.role;
     }
     if ('pode_postar' in b) patch.pode_postar = !!b.pode_postar;
@@ -764,7 +764,7 @@ router.post(
       .select('id, slug, nome, cor')
       .eq('id', convite.team_id)
       .single();
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     await ensureUserRow(req.user);
 
@@ -806,11 +806,11 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug, modo_visibilidade');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
-    if (team.modo_visibilidade === 'privado') throw new HttpError(403, 'Esta equipa não é pública.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+    if (team.modo_visibilidade === 'privado') throw new HttpError(403, 'Este time não é público.');
 
     const role = await getRole(team.id, req.user.id);
-    if (role) throw new HttpError(400, 'Já és membro desta equipa.');
+    if (role) throw new HttpError(400, 'Você já é membro deste time.');
 
     await ensureUserRow(req.user);
 
@@ -865,7 +865,7 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const { error } = await supabase
       .from('team_join_requests')
       .delete()
@@ -927,7 +927,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os pedidos.');
@@ -962,7 +962,7 @@ router.patch(
     if (!['approved', 'rejected'].includes(status)) throw new HttpError(400, 'status inválido.');
 
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem decidir pedidos.');
@@ -1000,7 +1000,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os convites.');
 
@@ -1039,7 +1039,7 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem revogar convites.');
 
@@ -1062,7 +1062,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver as estatísticas.');
 

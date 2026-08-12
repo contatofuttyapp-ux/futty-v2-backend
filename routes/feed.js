@@ -32,9 +32,9 @@ function receberFicheiro(req, res, next) {
   upload.single('file')(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return next(new HttpError(413, 'Ficheiro grande demais: o limite é 50MB (vídeo). As fotos são otimizadas automaticamente.'));
+        return next(new HttpError(413, 'Arquivo grande demais: o limite é 50MB (vídeo). As fotos são otimizadas automaticamente.'));
       }
-      return next(new HttpError(400, 'Falha ao receber o ficheiro.'));
+      return next(new HttpError(400, 'Falha ao receber o arquivo.'));
     }
     next();
   });
@@ -174,7 +174,7 @@ router.get(
     let teamIds = Object.keys(teamMap);
     const filtro = req.query.team_id;
     if (filtro) {
-      if (!teamMap[filtro]) throw new HttpError(403, 'Não és membro desta equipa.');
+      if (!teamMap[filtro]) throw new HttpError(403, 'Você não é membro deste time.');
       teamIds = [filtro];
     }
     if (!teamIds.length) return res.json({ items: [] });
@@ -344,9 +344,9 @@ router.post(
       .eq('team_id', teamId)
       .eq('user_id', req.user.id)
       .maybeSingle();
-    if (!membership) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!membership) throw new HttpError(403, 'Você não é membro deste time.');
     if (membership.role !== 'admin' && !membership.pode_postar) {
-      throw new HttpError(403, 'Não tens permissão para publicar nesta equipa.');
+      throw new HttpError(403, 'Você não tem permissão para publicar neste time.');
     }
 
     await ensureUserRow(req.user);
@@ -402,7 +402,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem publicar anúncios.');
 
@@ -453,9 +453,9 @@ router.delete(
     if (!post) throw new HttpError(404, 'Post não encontrado.');
 
     const role = await getRole(post.team_id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
     if (post.author_id !== req.user.id && role !== 'admin') {
-      throw new HttpError(403, 'Só o autor ou um admin pode apagar.');
+      throw new HttpError(403, 'Só o autor ou um admin pode excluir.');
     }
 
     // Peça 2 (Tijolo 1B): antes do cascade na BD, junta as URLs da média para
@@ -565,8 +565,8 @@ router.patch(
       .eq('team_id', game.teams.id)
       .then(({ data }) =>
         enviarNotificacao((data || []).map((m) => m.user_id), {
-          title: '🏆 Resultado registado!',
-          body: `Vê quem foi o destaque em ${game.local || 'Jogo'}`,
+          title: '🏆 Resultado registrado!',
+          body: `Veja quem foi o destaque em ${game.local || 'Jogo'}`,
           url: '/feed',
         })
       );
@@ -587,9 +587,9 @@ router.post(
   receberFicheiro,
   filtroNSFW, // Tijolo 1: bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
-    if (!req.file) throw new HttpError(400, 'Nenhum ficheiro enviado.');
+    if (!req.file) throw new HttpError(400, 'Nenhum arquivo enviado.');
     const ext = UPLOAD_MIME[req.file.mimetype];
-    if (!ext) throw new HttpError(400, 'Tipo de ficheiro não permitido.');
+    if (!ext) throw new HttpError(400, 'Tipo de arquivo não permitido.');
 
     await ensureBucket();
 
@@ -628,7 +628,7 @@ router.post(
     const teamId = await targetTeamId(targetType, targetId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     await ensureUserRow(req.user);
 
@@ -679,7 +679,7 @@ router.get(
     const teamId = await parentTeamId(parentType, parentId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     // Bloqueio entre jogadores: comentários de quem está bloqueado/me bloqueou não existem para mim.
     const bloqueados = await conjuntoMutuo(req.user.id);
@@ -755,7 +755,7 @@ router.post(
     const teamId = await parentTeamId(parentType, parentId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     // reply_to tem de pertencer ao mesmo parent
     if (replyTo) {
@@ -844,9 +844,9 @@ router.delete(
 
     const teamId = await parentTeamId(c.parent_type, c.parent_id);
     const role = teamId ? await getRole(teamId, req.user.id) : null;
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
     if (c.author_id !== req.user.id && role !== 'admin') {
-      throw new HttpError(403, 'Só o autor ou um admin pode apagar.');
+      throw new HttpError(403, 'Só o autor ou um admin pode excluir.');
     }
 
     const now = new Date().toISOString();
@@ -880,7 +880,7 @@ router.post(
     const teamId = await targetTeamId(targetType, targetId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
 
     await ensureUserRow(req.user);
 

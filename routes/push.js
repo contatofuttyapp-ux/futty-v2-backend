@@ -73,15 +73,15 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem enviar avisos.');
     if (!pushConfigurado) throw new HttpError(503, 'Notificações push não estão configuradas no servidor.');
 
     const titulo = String(req.body?.titulo || '').trim();
     const mensagem = String(req.body?.mensagem || '').trim();
-    if (!titulo) throw new HttpError(400, 'Indica o título.');
-    if (!mensagem) throw new HttpError(400, 'Indica a mensagem.');
+    if (!titulo) throw new HttpError(400, 'Indique o título.');
+    if (!mensagem) throw new HttpError(400, 'Indique a mensagem.');
 
     // Subscrições de todos os membros da equipa.
     const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
@@ -136,26 +136,26 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem enviar mensagens.');
     if (!pushConfigurado) throw new HttpError(503, 'Notificações push não estão configuradas no servidor.');
 
     const titulo = String(req.body?.titulo || '').trim();
     const mensagem = String(req.body?.mensagem || '').trim();
-    if (!titulo) throw new HttpError(400, 'Indica o título.');
-    if (!mensagem) throw new HttpError(400, 'Indica a mensagem.');
+    if (!titulo) throw new HttpError(400, 'Indique o título.');
+    if (!mensagem) throw new HttpError(400, 'Indique a mensagem.');
 
     // Confirma que o destinatário é membro da equipa.
     const { userId } = req.params;
     const destRole = await getRole(team.id, userId);
-    if (!destRole) throw new HttpError(404, 'Jogador não é membro desta equipa.');
+    if (!destRole) throw new HttpError(404, 'Jogador não é membro deste time.');
 
     const { data: subs } = await supabase
       .from('push_subscriptions')
       .select('id, endpoint, p256dh, auth')
       .eq('user_id', userId);
-    if (!subs?.length) throw new HttpError(404, 'Este jogador não tem notificações activas.');
+    if (!subs?.length) throw new HttpError(404, 'Este jogador não tem notificações ativas.');
 
     const body = JSON.stringify({
       title: titulo.slice(0, 60),

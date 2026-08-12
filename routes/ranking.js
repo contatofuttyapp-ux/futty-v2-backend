@@ -147,7 +147,7 @@ router.get(
     const ranking = await buildRanking(team.id, req.user.id);
 
     const jogador = ranking.find((r) => r.user_id === req.params.userId);
-    if (!jogador) throw new HttpError(404, 'Jogador não encontrado nesta equipa.');
+    if (!jogador) throw new HttpError(404, 'Jogador não encontrado neste time.');
 
     // Posição entre quem tem nota (>= MIN_VOTOS votos)
     const comNota = ranking.filter((r) => r.nota != null);
@@ -400,8 +400,8 @@ router.post(
     const paraUserId = req.body?.para_user_id;
     const nota = Number(req.body?.nota);
     if (!paraUserId) throw new HttpError(400, 'Voto inválido.');
-    if (paraUserId === req.user.id) throw new HttpError(400, 'Não podes votar em ti próprio.');
-    if (!notaValida(nota)) throw new HttpError(400, 'A nota tem de ser entre 0.5 e 5 (incrementos de 0.5).');
+    if (paraUserId === req.user.id) throw new HttpError(400, 'Não pode votar em você mesmo.');
+    if (!notaValida(nota)) throw new HttpError(400, 'A nota deve ser entre 0.5 e 5 (incrementos de 0.5).');
 
     // O votado tem de ser membro da equipa (visível no ranking).
     const { data: alvo } = await supabase
@@ -410,7 +410,7 @@ router.post(
       .eq('team_id', team.id)
       .eq('user_id', paraUserId)
       .maybeSingle();
-    if (!alvo) throw new HttpError(400, 'Esse jogador não é membro desta equipa.');
+    if (!alvo) throw new HttpError(400, 'Esse jogador não é membro deste time.');
 
     await ensureUserRow(req.user);
 

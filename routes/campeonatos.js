@@ -41,7 +41,7 @@ async function computeSelos(uid, teamIds) {
   {
     for (const teamId of teamIds) {
       const { data: team } = await supabase.from('teams').select('nome').eq('id', teamId).maybeSingle(); // eslint-disable-line no-await-in-loop
-      const equipaNome = team?.nome || 'Equipa';
+      const equipaNome = team?.nome || 'Time';
 
       // --- campeonato (pódio) ---
       const camps = await store.listar(teamId); // eslint-disable-line no-await-in-loop
@@ -148,14 +148,14 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só o admin da equipa cria campeonatos.');
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin do time cria campeonatos.');
 
     const gameId = String(req.body?.game_id || '');
     if (!gameId) throw new HttpError(400, 'game_id em falta.');
     const formato = req.body?.formato === 'mata' ? 'mata' : 'pontos';
 
     const { data: game } = await supabase.from('games').select('id, team_id, data, times_resultado').eq('id', gameId).maybeSingle();
-    if (!game || game.team_id !== team.id) throw new HttpError(404, 'Jogo não encontrado nesta equipa.');
+    if (!game || game.team_id !== team.id) throw new HttpError(404, 'Jogo não encontrado neste time.');
     const timesSorteio = game.times_resultado?.times || [];
     if (timesSorteio.length < MIN_TIMES) {
       throw new HttpError(400, `Este jogo não tem times sorteados suficientes (mínimo ${MIN_TIMES}).`);
@@ -187,18 +187,18 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só o admin da equipa cria campeonatos.');
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin do time cria campeonatos.');
 
     const b = req.body || {};
     const nome = String(b.nome || '').trim();
-    if (!nome) throw new HttpError(400, 'Dá um nome ao campeonato.');
+    if (!nome) throw new HttpError(400, 'Dê um nome ao campeonato.');
     const formato = b.formato === 'mata' ? 'mata' : 'pontos';
     const modo = b.modo === 'sorteio' ? 'sorteio' : 'manual';
 
     let opts;
     if (modo === 'sorteio') {
       const numTimes = Math.floor(Number(b.num_times) || 0);
-      if (numTimes < MIN_TIMES || numTimes > MAX_TIMES) throw new HttpError(400, `Escolhe entre ${MIN_TIMES} e ${MAX_TIMES} times.`);
+      if (numTimes < MIN_TIMES || numTimes > MAX_TIMES) throw new HttpError(400, `Escolha entre ${MIN_TIMES} e ${MAX_TIMES} times.`);
       // plantel = membros da equipa + convidados sem app (só nome; zero users).
       const { data: membros } = await supabase
         .from('team_members')
@@ -303,7 +303,7 @@ router.delete(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só o admin apaga campeonatos.');
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin exclui campeonatos.');
     await store.apagar(team.id, req.params.id);
     res.json({ ok: true });
   })
@@ -315,7 +315,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, nome, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
     res.json({ campeonato: enriquecer(camp), equipa: { nome: team.nome, slug: team.slug } });

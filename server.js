@@ -89,9 +89,12 @@ app.use(cors(corsOptions));
 app.set('trust proxy', 1);
 
 // Rate limiting geral: protege todas as rotas /api de abuso.
+// DEV (31-jul): fora de produção o tecto sobe para 2000 — numa tarde de teste o
+// dono + o Claude + o hot-reload estouravam os 200 e o app "morria" por 15 min.
+// Em produção (NODE_ENV=production) os 200 continuam valendo.
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 200,
+  max: process.env.NODE_ENV === 'production' ? 200 : 2000,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados pedidos. Tenta mais tarde.' },

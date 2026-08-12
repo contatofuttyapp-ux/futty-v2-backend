@@ -62,7 +62,7 @@ router.patch(
     const suspenso = req.body?.suspenso === true;
     // Salvaguarda: a Super não se suspende a si própria (evita auto-trancar-se fora).
     if (suspenso && req.params.id === req.user.id) {
-      throw new HttpError(400, 'Não podes suspender a tua própria conta.');
+      throw new HttpError(400, 'Você não pode suspender a sua própria conta.');
     }
     await plataforma.definirUser(req.params.id, suspenso);
     res.json({ id: req.params.id, suspenso });
@@ -87,7 +87,7 @@ router.patch(
       .select('id, nome, email, plan, is_super_admin, created_at')
       .single();
     if (error) throw new HttpError(500, error.message);
-    if (!data) throw new HttpError(404, 'Utilizador não encontrado.');
+    if (!data) throw new HttpError(404, 'Usuário não encontrado.');
 
     res.json({ user: data });
   })
@@ -162,7 +162,7 @@ router.delete(
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
     if (req.body?.confirmar !== 'APAGAR') {
-      throw new HttpError(400, 'Confirmação inválida. Envia { confirmar: "APAGAR" }.');
+      throw new HttpError(400, 'Confirmação inválida. Envie { confirmar: "APAGAR" }.');
     }
     const { error } = await supabase.from('teams').delete().eq('id', req.params.id);
     if (error) throw new HttpError(500, error.message);

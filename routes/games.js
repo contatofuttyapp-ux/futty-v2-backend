@@ -34,13 +34,13 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime, historico } = req.body || {};
-    if (!teamSlug || !data) throw new HttpError(400, 'Equipa e data são obrigatórias.');
+    if (!teamSlug || !data) throw new HttpError(400, 'Time e data são obrigatórios.');
 
     const porTime = parseInt(jogadoresPorTime, 10);
-    if (!porTime || porTime < 1) throw new HttpError(400, 'Indica quantos jogadores por time.');
+    if (!porTime || porTime < 1) throw new HttpError(400, 'Indique quantos jogadores por time.');
 
     const team = await getTeamBySlug(teamSlug, 'id, slug, nome');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
@@ -85,10 +85,10 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug, nome, cor');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
     const { data: games, error } = await supabase
       .from('games')
@@ -198,7 +198,7 @@ router.get(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
 
     const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
     const { data: gp } = await supabase
       .from('game_players')
@@ -354,7 +354,7 @@ router.post(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
     // só quem tem papel na equipa (membro/admin) pode declarar a partilha
     const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Sem permissão para partilhar este sorteio.');
+    if (!role) throw new HttpError(403, 'Sem permissão para compartilhar este sorteio.');
     const { error } = await supabase
       .from('share_declarations')
       .upsert({ game_id: game.id, user_id: req.user.id }, { onConflict: 'game_id,user_id' });
@@ -380,7 +380,7 @@ router.patch(
     const patch = { resultado_nivel: nivel, time_vencedor: null, placar_a: null, placar_b: null };
 
     if (nivel >= 1) {
-      if (!['A', 'B', 'empate'].includes(b.time_vencedor)) throw new HttpError(400, 'Indica quem venceu.');
+      if (!['A', 'B', 'empate'].includes(b.time_vencedor)) throw new HttpError(400, 'Indique quem venceu.');
       patch.time_vencedor = b.time_vencedor;
     }
     if (nivel >= 2) {
@@ -461,7 +461,7 @@ router.post(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
 
     const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
     await ensureUserRow(req.user);
 
@@ -533,10 +533,10 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir os times.');
 
     const times = Array.isArray(req.body?.times) ? req.body.times : null;
-    if (!times || !times.length) throw new HttpError(400, 'Indica os times.');
+    if (!times || !times.length) throw new HttpError(400, 'Indique os times.');
     const reservas = Array.isArray(req.body?.reservas) ? req.body.reservas : [];
     for (const t of times) {
-      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) throw new HttpError(400, 'Cada time tem de ter pelo menos 1 jogador.');
+      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) throw new HttpError(400, 'Cada time deve ter pelo menos 1 jogador.');
     }
     const todos = [...times.flatMap((t) => t.jogadores || []), ...reservas];
     const ids = todos.map((j) => j.user_id).filter(Boolean);
@@ -546,7 +546,7 @@ router.post(
     const { data: gp } = await supabase.from('game_players').select('user_id').eq('game_id', game.id).eq('confirmado', true);
     const confirmados = new Set((gp || []).map((p) => p.user_id));
     for (const id of ids) {
-      if (!confirmados.has(id)) throw new HttpError(400, 'Marca as presenças antes: todos os jogadores com conta têm de estar confirmados.');
+      if (!confirmados.has(id)) throw new HttpError(400, 'Marque as presenças antes: todos os jogadores com conta devem estar confirmados.');
     }
 
     const nomear = (t, i) => ({
@@ -594,7 +594,7 @@ router.post(
     const pptBody = Number(jogadoresPorTime);
     if (Number.isInteger(pptBody) && pptBody >= 1) porTime = pptBody;
     if (!porTime || porTime < 1) {
-      throw new HttpError(400, 'Define os jogadores por time antes de sortear.');
+      throw new HttpError(400, 'Defina os jogadores por time antes de sortear.');
     }
 
     const usarSubset = Array.isArray(jogadoresIds) && jogadoresIds.length > 0;
@@ -607,7 +607,7 @@ router.post(
         .in('user_id', jogadoresIds);
       const validos = new Set((membros || []).map((m) => m.user_id));
       if (jogadoresIds.some((uid) => !validos.has(uid))) {
-        throw new HttpError(400, 'Alguns jogadores indicados não pertencem à equipa.');
+        throw new HttpError(400, 'Alguns jogadores indicados não pertencem ao time.');
       }
     }
 
@@ -664,7 +664,7 @@ router.post(
       throw new HttpError(400, );
     }
     if (Math.floor(totalParticipantes / porTime) > 4) {
-      throw new HttpError(400, 'Máximo de 4 times por sorteio — sobe os jogadores por time.');
+      throw new HttpError(400, 'Máximo de 4 times por sorteio — aumente os jogadores por time.');
     }
 
     // Sorteio: lógica completa em utils/sorteio.js (goleiros/cabeças 1 por time,
@@ -748,7 +748,7 @@ router.patch(
     // Cada time tem pelo menos 1 jogador.
     for (const t of tr.times) {
       if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) {
-        throw new HttpError(400, 'Cada time tem de ter pelo menos 1 jogador.');
+        throw new HttpError(400, 'Cada time deve ter pelo menos 1 jogador.');
       }
     }
 
@@ -765,7 +765,7 @@ router.patch(
       .eq('confirmado', true);
     const confirmados = new Set((gp || []).map((p) => p.user_id));
     for (const id of ids) {
-      if (!confirmados.has(id)) throw new HttpError(400, 'Todos os jogadores têm de estar confirmados no jogo.');
+      if (!confirmados.has(id)) throw new HttpError(400, 'Todos os jogadores devem estar confirmados no jogo.');
     }
 
     const { data: updated, error } = await supabase
@@ -797,7 +797,7 @@ router.patch(
 
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar o jogo.');
-    if (game.sorteio_realizado) throw new HttpError(400, 'Não podes editar um jogo já sorteado.');
+    if (game.sorteio_realizado) throw new HttpError(400, 'Não pode editar um jogo já sorteado.');
 
     const b = req.body || {};
     const patch = {};
@@ -841,10 +841,10 @@ router.delete(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
 
     const role = await getRole(game.teams.id, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só admins podem apagar jogos.');
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem excluir jogos.');
 
     if (!game.data || new Date(game.data).getTime() <= Date.now()) {
-      throw new HttpError(400, 'Só podes apagar jogos futuros.');
+      throw new HttpError(400, 'Só pode excluir jogos futuros.');
     }
 
     const { count } = await supabase
@@ -853,7 +853,7 @@ router.delete(
       .eq('game_id', game.id)
       .eq('confirmado', true);
     if ((count || 0) > 0) {
-      throw new HttpError(409, 'Este jogo já tem jogadores confirmados. Cancela-o em vez de o apagar.');
+      throw new HttpError(409, 'Este jogo já tem jogadores confirmados. Cancele-o em vez de excluí-lo.');
     }
 
     const { error } = await supabase.from('games').delete().eq('id', game.id);
@@ -877,7 +877,7 @@ router.post(
 
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem cancelar jogos.');
-    if (game.status === 'terminado') throw new HttpError(400, 'Não podes cancelar um jogo terminado.');
+    if (game.status === 'terminado') throw new HttpError(400, 'Não pode cancelar um jogo terminado.');
 
     const motivo = String(req.body?.motivo || '').trim().slice(0, 300) || null;
 
@@ -941,7 +941,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug, nome');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
@@ -955,7 +955,7 @@ router.post(
     const minutos = Number(m[2]);
     if (horas > 23 || minutos > 59) throw new HttpError(400, 'Hora inválida.');
     const n = Number(semanas);
-    if (![4, 8, 12].includes(n)) throw new HttpError(400, 'Semanas tem de ser 4, 8 ou 12.');
+    if (![4, 8, 12].includes(n)) throw new HttpError(400, 'Semanas deve ser 4, 8 ou 12.');
 
     // Próximas N datas para o dia da semana escolhido (a partir de hoje).
     const datas = [];

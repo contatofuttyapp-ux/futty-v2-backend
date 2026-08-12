@@ -29,7 +29,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar campeonatos.');
 
@@ -40,11 +40,11 @@ router.post(
       .eq('team_id', team.id)
       .eq('estado', 'ativo')
       .maybeSingle();
-    if (existente) throw new HttpError(400, 'Já existe um campeonato activo. Termina-o antes de criar outro.');
+    if (existente) throw new HttpError(400, 'Já existe um campeonato ativo. Termine-o antes de criar outro.');
 
     const b = req.body || {};
     const nome = String(b.nome || '').trim();
-    if (!nome) throw new HttpError(400, 'Indica o nome do campeonato.');
+    if (!nome) throw new HttpError(400, 'Indique o nome do campeonato.');
     const nj = Number(b.num_jornadas);
     const numJornadas = Number.isInteger(nj) && nj > 0 ? nj : 8;
 
@@ -68,9 +68,9 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
     // Devolve o mais recente (ativo ou terminado).
     const { data: campeonato } = await supabase
@@ -101,7 +101,7 @@ router.post(
     if (camp.estado !== 'ativo') throw new HttpError(400, 'O campeonato já terminou.');
 
     const b = req.body || {};
-    if (!['A', 'B', 'empate'].includes(b.vencedor)) throw new HttpError(400, 'Indica o vencedor da jornada.');
+    if (!['A', 'B', 'empate'].includes(b.vencedor)) throw new HttpError(400, 'Indique o vencedor da jornada.');
     const pa = Number(b.placar_a);
     const pb = Number(b.placar_b);
     const placarA = Number.isInteger(pa) && pa >= 0 ? pa : null;

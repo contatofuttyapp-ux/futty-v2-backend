@@ -25,7 +25,7 @@ const uploadAvatarMw = multer({
   limits: { fileSize: MAX_AVATAR },
   fileFilter: (req, file, cb) => {
     if (AVATAR_MIME[file.mimetype]) cb(null, true);
-    else cb(new HttpError(400, 'Só são aceites imagens JPEG, PNG ou WebP.'));
+    else cb(new HttpError(400, 'Só são aceitas imagens JPEG, PNG ou WebP.'));
   },
 }).single('avatar');
 
@@ -734,7 +734,7 @@ router.post(
         let corpo = err.body;
         if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
         if (corpo?.detail?.some((d) => d.type === 'file_download_error')) {
-          throw new HttpError(422, 'A tua foto não pôde ser processada. Tenta enviar uma foto nova.', 'FOTO_INVALIDA');
+          throw new HttpError(422, 'Sua foto não pôde ser processada. Tente enviar uma foto nova.', 'FOTO_INVALIDA');
         }
         throw err;
       }

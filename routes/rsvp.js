@@ -71,7 +71,7 @@ async function jogoComoMembro(req) {
   const game = await loadGame(req.params.gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
   const role = await getRole(game.teams.id, req.user.id);
-  if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+  if (!role) throw new HttpError(403, 'Não é membro deste time.');
   return game;
 }
 
@@ -84,7 +84,7 @@ router.post(
     const { prazo } = req.body || {};
     const prazoData = prazo ? new Date(prazo) : null;
     if (!prazoData || Number.isNaN(prazoData.getTime())) throw new HttpError(400, 'Prazo inválido.');
-    if (prazoData.getTime() <= Date.now()) throw new HttpError(400, 'O prazo tem de ser no futuro.');
+    if (prazoData.getTime() <= Date.now()) throw new HttpError(400, 'O prazo deve ser no futuro.');
 
     const { data: updated, error } = await supabase
       .from('games')
