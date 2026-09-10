@@ -13,6 +13,16 @@ const router = express.Router();
 const round1 = (n) => Math.round(n * 10) / 10;
 const NOMES_TIMES = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
 
+// Estado efetivo do jogo (achado 9): "em_curso" só quando a hora do jogo já
+// chegou e ainda não há resultado — nunca por causa do sorteio ter sido feito
+// cedo. Calculado a cada leitura, não depende de um write acertar a hora certa.
+function statusEfetivoJogo(game) {
+  if (game.cancelado || game.status === 'cancelado') return 'cancelado';
+  if ((game.resultado_nivel || 0) > 0) return 'terminado';
+  const comecou = !!game.data && new Date(game.data).getTime() <= Date.now();
+  return comecou ? 'em_curso' : 'agendado';
+}
+
 /** Data curta PT (ex.: "12/06 · 20:30") para o corpo das notificações. */
 function dataCurtaPT(iso) {
   try {
@@ -92,7 +102,7 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, created_at')
+      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
@@ -112,6 +122,7 @@ router.get(
 
     const lista = (games || []).map((g) => ({
       ...g,
+      status: statusEfetivoJogo(g),
       cancelado: !!g.cancelado || g.status === 'cancelado',
       confirmados: counts[g.id] || 0,
     }));
@@ -144,7 +155,7 @@ router.get(
     // Jogos dessas equipas (data ASC)
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, team_id, data, local, status, sorteio_realizado')
+      .select('id, team_id, data, local, status, sorteio_realizado, cancelado')
       .in('team_id', teamIds)
       .order('data', { ascending: true });
     if (error) throw new HttpError(500, error.message);
@@ -167,7 +178,8 @@ router.get(
     const now = Date.now();
     const list = (games || []).map((g) => {
       const past = g.data && new Date(g.data).getTime() < now;
-      const finished = g.status === 'terminado' || g.status === 'cancelado' || past;
+      const cancelado = !!g.cancelado || g.status === 'cancelado';
+      const finished = g.status === 'terminado' || cancelado || past;
       const status = finished ? 'finished' : g.sorteio_realizado ? 'drawn' : 'scheduled';
       const team = teamById[g.team_id] || {};
       return {
@@ -177,6 +189,7 @@ router.get(
         location: g.local || null,
         confirmed_count: counts[g.id] || 0,
         status,
+        cancelado,
         user_status: myStatus[g.id] ?? null,
         team_id: g.team_id,
         team_name: team.nome || null,
@@ -254,12 +267,13 @@ router.get(
         id: game.id,
         data: game.data,
         local: game.local,
-        status: game.status,
+        status: statusEfetivoJogo(game),
         num_times: game.num_times,
         jogadores_por_time: game.jogadores_por_time,
         max_jogadores: game.max_jogadores ?? null,
         sorteio_realizado: game.sorteio_realizado,
         times_resultado: game.times_resultado,
+        historico: !!game.historico,
         // Cancelamento.
         cancelado: !!game.cancelado || game.status === 'cancelado',
         motivo_cancelamento: game.motivo_cancelamento || null,
@@ -374,6 +388,13 @@ router.patch(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir o resultado.');
+
+    // Achado 9: sem resultado antes do jogo acontecer — exceto jogo histórico/
+    // retroativo (criado como "Já aconteceu"), que não tem essa trava.
+    const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
+    if (!jaComecou && !game.historico) {
+      throw new HttpError(400, 'O resultado só pode ser registrado depois do início do jogo.');
+    }
 
     const b = req.body || {};
     const nivel = Number(b.nivel);
@@ -568,9 +589,14 @@ router.post(
       reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
     };
 
+    // Achado 9: status só vira "em_curso" se a hora do jogo já passou — sorteio
+    // feito com antecedência (ou times definidos à mão) não adianta o estado.
+    const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
+    const patchStatus = jaComecou && game.status !== 'cancelado' ? { status: 'em_curso' } : {};
+
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ times_resultado: tr, num_times: tr.times.length, sorteio_realizado: true, status: 'em_curso' })
+      .update({ times_resultado: tr, num_times: tr.times.length, sorteio_realizado: true, ...patchStatus })
       .eq('id', game.id)
       .select('id, times_resultado, num_times, sorteio_realizado, status')
       .single();
@@ -703,9 +729,15 @@ router.post(
       reservas: sorteio.reservas,
     };
 
+    // Achado 9: status só vira "em_curso" se a hora do jogo já passou — sorteio
+    // feito com antecedência não adianta o estado (fica "agendado" + chip de
+    // times sorteados no frontend).
+    const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
+    const patchStatus = jaComecou && game.status !== 'cancelado' ? { status: 'em_curso' } : {};
+
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ jogadores_por_time: porTime, num_times: sorteio.numTimes, sorteio_realizado: true, times_resultado: resultado, status: 'em_curso' })
+      .update({ jogadores_por_time: porTime, num_times: sorteio.numTimes, sorteio_realizado: true, times_resultado: resultado, ...patchStatus })
       .eq('id', game.id)
       .select()
       .single();

@@ -190,11 +190,13 @@ router.get(
     // Jogos da equipa (com campos de resultado) + participações do jogador.
     const { data: teamGames } = await supabase
       .from('games')
-      .select('id, data, status, times_resultado, campeao_time_index, artilheiro_user_id, destaque_user_id, rodada_user_id')
+      .select('id, data, status, cancelado, times_resultado, campeao_time_index, artilheiro_user_id, destaque_user_id, rodada_user_id')
       .eq('team_id', team.id);
     const games = teamGames || [];
     const gameIds = games.map((g) => g.id);
 
+    const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
+    const agora = Date.now();
     const partSet = new Set();
     let jogosConfirmados = 0;
     if (gameIds.length) {
@@ -205,7 +207,12 @@ router.get(
         .in('game_id', gameIds);
       for (const p of parts || []) {
         partSet.add(p.game_id);
-        if (p.confirmado) jogosConfirmados += 1;
+        // Achado 10: só conta jogos já ENCERRADOS — presença num jogo futuro não
+        // infla a estatística "jogos".
+        const g = gameById[p.game_id];
+        const cancelado = !!g?.cancelado || g?.status === 'cancelado';
+        const encerrado = !!g && !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
+        if (p.confirmado && encerrado) jogosConfirmados += 1;
       }
     }
 
@@ -364,22 +371,53 @@ router.get(
       .from('teams')
       .select('id, slug, nome, revotar_pedido_em')
       .in('id', teamIds);
-    const { data: membros } = await supabase.from('team_members').select('team_id, user_id').in('team_id', teamIds);
     const { data: votos } = await supabase
       .from('votes')
       .select('team_id, para_user_id, updated_at')
       .eq('de_user_id', uid)
       .in('team_id', teamIds);
 
+    // Achado 21: só pede avaliação de quem o usuário REALMENTE jogou junto — jogos
+    // já ENCERRADOS em que ambos estiveram confirmados. "Todo mundo do time" incluía
+    // gente que ele nunca viu em campo (ou o próprio usuário sem jogo nenhum ainda).
+    const { data: jogosDasEquipas } = await supabase
+      .from('games')
+      .select('id, team_id, data, status, cancelado')
+      .in('team_id', teamIds);
+    const agora = Date.now();
+    const teamIdByGame = {};
+    const encerradoIds = [];
+    for (const g of jogosDasEquipas || []) {
+      teamIdByGame[g.id] = g.team_id;
+      const cancelado = !!g.cancelado || g.status === 'cancelado';
+      const encerrado = !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
+      if (encerrado) encerradoIds.push(g.id);
+    }
+    const { data: minhasPresencas } = encerradoIds.length
+      ? await supabase.from('game_players').select('game_id').eq('user_id', uid).eq('confirmado', true).in('game_id', encerradoIds)
+      : { data: [] };
+    const meusGameIds = [...new Set((minhasPresencas || []).map((p) => p.game_id))];
+    const { data: colegasPresencas } = meusGameIds.length
+      ? await supabase.from('game_players').select('game_id, user_id').eq('confirmado', true).in('game_id', meusGameIds)
+      : { data: [] };
+    const colegasPorTeam = {}; // team_id -> Set(user_id) de quem jogou junto
+    for (const p of colegasPresencas || []) {
+      if (p.user_id === uid) continue;
+      const tid = teamIdByGame[p.game_id];
+      if (!tid) continue;
+      (colegasPorTeam[tid] = colegasPorTeam[tid] || new Set()).add(p.user_id);
+    }
+
     const pendentes = [];
     for (const t of teams || []) {
-      const total = (membros || []).filter((m) => m.team_id === t.id && m.user_id !== uid).length;
-      const meus = (votos || []).filter((v) => v.team_id === t.id);
+      const elegiveis = colegasPorTeam[t.id] || new Set();
+      const total = elegiveis.size;
+      const meus = (votos || []).filter((v) => v.team_id === t.id && elegiveis.has(v.para_user_id));
       const votados = new Set(meus.map((v) => v.para_user_id)).size;
       const faltam = Math.max(0, total - votados);
       const maxUpdated = meus.reduce((mx, v) => Math.max(mx, v.updated_at ? new Date(v.updated_at).getTime() : 0), 0);
       const pedidoEm = t.revotar_pedido_em ? new Date(t.revotar_pedido_em).getTime() : 0;
-      const pedido_revotacao = pedidoEm > 0 && pedidoEm > maxUpdated;
+      const pedido_revotacao = total > 0 && pedidoEm > 0 && pedidoEm > maxUpdated;
       if (total > 0 && (faltam > 0 || pedido_revotacao)) {
         pendentes.push({ slug: t.slug, nome: t.nome, faltam, pedido_revotacao });
       }

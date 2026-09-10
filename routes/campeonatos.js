@@ -86,11 +86,19 @@ async function computeSelos(uid, teamIds) {
       } catch { /* ranking indisponível — ignora */ }
     }
   }
+  // Achado 12: mesmo tipo + mesmo time só uma vez (ex.: "RANKING 1º" duplicado).
+  // `id` já é único por time (rank:<teamId>) ou por campeonato (camp:<campId>).
+  const vistos = new Set();
+  const semDuplicados = selos.filter((s) => {
+    if (vistos.has(s.id)) return false;
+    vistos.add(s.id);
+    return true;
+  });
   // ordena: prioridade (campeonato antes de ranking), depois ativos, depois recência.
-  selos.sort((a, b) => (a.prioridade - b.prioridade)
+  semDuplicados.sort((a, b) => (a.prioridade - b.prioridade)
     || ((b.ativa ? 1 : 0) - (a.ativa ? 1 : 0))
     || String(b.terminado_em || '').localeCompare(String(a.terminado_em || '')));
-  return selos;
+  return semDuplicados;
 }
 
 /** GET /api/me/selos — selos do próprio (todas as equipas). */

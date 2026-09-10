@@ -107,12 +107,20 @@ router.get(
     } catch { avatarGenerico = null; }
 
     // Stats agregadas (todas as equipas):
-    // jogos = presenças confirmadas; gols = soma; nota = média dos votos recebidos.
-    const { count: jogos } = await supabase
+    // jogos = presenças confirmadas EM JOGOS JÁ ENCERRADOS (achado 10 — confirmar
+    // presença num jogo futuro não pode inflar a estatística); gols = soma; nota =
+    // média dos votos recebidos.
+    const { data: jogosRows } = await supabase
       .from('game_players')
-      .select('id', { count: 'exact', head: true })
+      .select('games ( data, status, cancelado )')
       .eq('user_id', userId)
       .eq('confirmado', true);
+    const agora = Date.now();
+    const jogos = (jogosRows || []).filter((r) => {
+      const g = r.games;
+      if (!g || g.cancelado || g.status === 'cancelado') return false;
+      return g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora);
+    }).length;
 
     // RANKING VIVO: os golos vêm da FONTE (gols_jogadores), não da coluna legado de
     // team_members — bate com o número do ranking para o mesmo jogador (uma só verdade).
