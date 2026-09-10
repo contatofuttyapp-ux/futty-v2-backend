@@ -10,20 +10,23 @@ const tf = require('@tensorflow/tfjs');
 const nsfw = require('nsfwjs');
 
 const B = path.join(__dirname, '..', 'public');
+// SEGURANCA-REVISAO-10SET.md secção 2/3 (10-set): fotos-jogos saiu de public/
+// (não era mais servida sem login) e vive agora fora dos repos.
+const FOTOS_PRIVADAS = path.join(__dirname, '..', '..', '..', 'FOTOS-PRIVADAS');
 
 // ── Reais da casa (legítimas — celebração/abraço/campeão/jogo) ──
 const REAIS = [
-  ['jogo — grupo em campo', 'fotos-jogos/03.05.2026.jpeg'],
-  ['jogo — grupo em campo', 'fotos-jogos/05.04.2026.jpeg'],
-  ['jogo — grupo em campo', 'fotos-jogos/12.04.2026.jpeg'],
-  ['jogo — grupo em campo', 'fotos-jogos/23.04.2026.jpeg'],
-  ['jogo — grupo em campo', 'fotos-jogos/26.04.2026.jpeg'],
-  ['campeão — celebração colada', 'uploads/champ_1.png'],
-  ['campeão — celebração colada', 'uploads/champ_2.png'],
-  ['campeão — celebração colada', 'uploads/champ_3.png'],
-  ['campeão — celebração colada', 'uploads/champ_4.png'],
-  ['campeão — celebração colada', 'uploads/champ_5.png'],
-  ['campeão — celebração colada', 'uploads/champ_6.png'],
+  ['jogo — grupo em campo', path.join(FOTOS_PRIVADAS, 'fotos-jogos', '03.05.2026.jpeg')],
+  ['jogo — grupo em campo', path.join(FOTOS_PRIVADAS, 'fotos-jogos', '05.04.2026.jpeg')],
+  ['jogo — grupo em campo', path.join(FOTOS_PRIVADAS, 'fotos-jogos', '12.04.2026.jpeg')],
+  ['jogo — grupo em campo', path.join(FOTOS_PRIVADAS, 'fotos-jogos', '23.04.2026.jpeg')],
+  ['jogo — grupo em campo', path.join(FOTOS_PRIVADAS, 'fotos-jogos', '26.04.2026.jpeg')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_1.png')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_2.png')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_3.png')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_4.png')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_5.png')],
+  ['campeão — celebração colada', path.join(B, 'uploads', 'champ_6.png')],
 ];
 
 // ── Proxies sintéticos (NÃO fotorrealistas — stress direcional dos extremos) ──
@@ -58,7 +61,7 @@ async function tensor(input) {
     } finally { img.dispose(); }
   }
 
-  for (const [rot, rel] of REAIS) { const p = path.join(B, rel); if (fs.existsSync(p)) await medir(rot, p); }
+  for (const [rot, p] of REAIS) { if (fs.existsSync(p)) await medir(rot, p); }
   for (const [rot, buf] of await proxies()) await medir(rot, buf);
 
   // Tabela

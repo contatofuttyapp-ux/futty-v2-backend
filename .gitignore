@@ -13,6 +13,15 @@ data/
 public/avatares/
 public/fotos-jogos/
 
+# Fotos reais de pessoas usadas em teste/calibração (SEGURANCA-REVISAO-10SET.md
+# secção 2/3, 10-set) — movidas para C:\Users\phfer\Desktop\FUT\FOTOS-PRIVADAS,
+# fora dos dois repos. Linhas aqui são cinto e suspensórios: se alguém recriar
+# a pasta localmente para rodar scripts/calibrar-nsfw.js ou spike-nsfw.js, não
+# entra no próximo commit.
+public/fotos-teste/
+public/fotos-teste-4/
+public/fotos-treino/
+
 # Logs
 *.log
 npm-debug.log*

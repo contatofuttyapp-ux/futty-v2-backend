@@ -84,6 +84,13 @@ function montarTimes(jogadores) {
   const uid = (email) => byEmail[email].user_id;
 
   // 3) Config dos 3 jogos. (Motta não existe → fallback Kimzera; Dudu = Eduardo.)
+  // AVISO (SEGURANCA-REVISAO-10SET.md secção 2/3, 10-set): as *_foto_url abaixo
+  // apontam para /public/fotos-jogos/..., que deixou de ser servido pelo
+  // backend (a pasta saiu de public/ e mudou para
+  // C:\Users\phfer\Desktop\FUT\FOTOS-PRIVADAS, fora dos repos — fotos reais de
+  // pessoas não ficam mais públicas sem login). Rodar este script agora insere
+  // URLs que dão 404. Antes de rodar de novo: trocar por URLs reais do
+  // Storage do Supabase ou deixar null.
   const JOGOS = [
     {
       local: 'Domingueira 03/05',

@@ -125,11 +125,15 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 // Avatares migrados da V1 (avatar_url relativo, ex.: /public/avatares/verde/gui.png)
 app.use('/public/avatares', express.static(path.join(__dirname, 'public', 'avatares')));
 
-// Logos das equipas (carregados pelos admins).
-app.use('/public/logos', express.static(path.join(__dirname, 'public', 'logos')));
-
-// Conteúdo público geral (fotos de jogos/campeão, etc.): /public/fotos-jogos/...
-app.use('/public', express.static(path.join(__dirname, 'public')));
+// SEGURANCA-REVISAO-10SET.md secção 2/3 (10-set): removido o mount genérico
+// `app.use('/public', express.static(...))` que servia a pasta public/ inteira
+// sem login — era isso que expunha fotos-teste/fotos-teste-4/fotos-treino/
+// fotos-jogos (fotos reais de pessoas, algumas de menores) a qualquer um com
+// o URL. Removido também `/public/logos`: os logos de equipa já vão para o
+// Storage privado do Supabase (routes/teams.js, POST /:slug/logo), a pasta
+// public/logos nunca chegou a existir em disco. Só sobem os dois mounts
+// acima — avatares (V1 migrada) e uploads (fotos de campeão) — que é tudo o
+// que o frontend de facto usa da pasta public/.
 
 // Health check — confirma o servidor e a ligação ao Supabase.
 app.get('/health', async (req, res) => {
