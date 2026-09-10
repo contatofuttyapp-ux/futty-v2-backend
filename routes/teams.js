@@ -18,6 +18,16 @@ const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
 const CONVITE_DIAS = 7;
 
+// Escapa um valor para uso dentro da string de filtro do .or() do PostgREST.
+// Vírgula separa condições, parênteses agrupam, ponto separa
+// coluna.operador.valor — um valor com qualquer um deles precisa vir entre
+// aspas duplas (sintaxe suportada pelo PostgREST) para ser lido como valor
+// literal em vez de sintaxe de filtro.
+function valorFiltroOr(valor) {
+  if (/[,.()]/.test(valor)) return `"${valor.replace(/"/g, '\\"')}"`;
+  return valor;
+}
+
 // Upload do logo da equipa (em memória; gravado no bucket privado "avatars").
 const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 const uploadLogo = multer({
@@ -137,7 +147,16 @@ router.get(
       .select('id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng')
       .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
     // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
-    if (q) query = query.or(`nome.ilike.%${q}%,localizacao.ilike.%${q}%`);
+    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
+    // string de filtro do .or() — vírgula separa condições, parênteses
+    // agrupam, ponto separa coluna.operador.valor no PostgREST; um q com esses
+    // caracteres conseguia adicionar/alterar condições do filtro. O PostgREST
+    // suporta valores com esses caracteres se o valor inteiro vier entre aspas
+    // duplas — é o que valorFiltroOr faz quando encontra algum deles.
+    if (q) {
+      const padrao = valorFiltroOr(`%${q}%`);
+      query = query.or(`nome.ilike.${padrao},localizacao.ilike.${padrao}`);
+    }
     if (loc) query = query.ilike('localizacao', `%${loc}%`);
 
     const { data: teamsRaw, error } = await query;
