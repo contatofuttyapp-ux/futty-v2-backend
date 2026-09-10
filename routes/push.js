@@ -8,6 +8,7 @@ const { requireAuth } = require('../middleware/auth');
 const { pushAdminLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getTeamBySlug, getRole } = require('../utils/db');
+const { endpointPushValido } = require('../utils/validarUrl');
 
 const router = express.Router();
 
@@ -26,6 +27,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const { endpoint, keys } = req.body || {};
     if (!endpoint || !keys?.p256dh || !keys?.auth) throw new HttpError(400, 'Subscrição inválida.');
+    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): sem isto o servidor fazia
+    // POST (webpush.sendNotification) para qualquer endpoint que mandassem —
+    // só aceita hosts de serviços de push conhecidos.
+    if (!endpointPushValido(endpoint)) throw new HttpError(400, 'Endpoint de subscrição não reconhecido.');
 
     await ensureUserRow(req.user);
     const { error } = await supabase.from('push_subscriptions').upsert(

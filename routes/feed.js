@@ -11,6 +11,7 @@ const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame }
 const { enviarNotificacao } = require('./push');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { removerFicheirosPorUrl } = require('../utils/storage');
+const { urlDeMidiaValida } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 
 const router = express.Router();
@@ -337,6 +338,12 @@ router.post(
     if (!texto && mediaList.length === 0) throw new HttpError(400, 'O post precisa de texto ou média.');
     if (texto.length > 2000) throw new HttpError(400, 'Máximo 2000 caracteres.');
     if (mediaList.length > 4) throw new HttpError(400, 'Máximo 4 anexos por post.');
+    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): só aceita URLs https do
+    // Storage do Supabase ou do proxy do próprio backend (/api/media/) —
+    // impede que o campo vire um redirect/SSRF para qualquer host.
+    if (mediaList.some((m) => !urlDeMidiaValida(m.url, req))) {
+      throw new HttpError(400, 'URL de mídia inválida.');
+    }
 
     // Permissão: admin OU pode_postar
     const { data: membership } = await supabase
@@ -514,7 +521,12 @@ router.patch(
         patch.campeao_time_index = idx;
       }
     }
-    if ('campeao_foto_url' in b) patch.campeao_foto_url = b.campeao_foto_url || null;
+    if ('campeao_foto_url' in b) {
+      if (b.campeao_foto_url && !urlDeMidiaValida(b.campeao_foto_url, req)) {
+        throw new HttpError(400, 'URL de mídia inválida.');
+      }
+      patch.campeao_foto_url = b.campeao_foto_url || null;
+    }
     if ('artilheiro_user_id' in b) patch.artilheiro_user_id = b.artilheiro_user_id || null;
     if ('artilheiro_gols' in b) {
       if (b.artilheiro_gols === null || b.artilheiro_gols === '') patch.artilheiro_gols = null;
@@ -531,7 +543,12 @@ router.patch(
       patch.destaque_titulo = titulo || null;
     }
     if ('rodada_user_id' in b) patch.rodada_user_id = b.rodada_user_id || null;
-    if ('rodada_foto_url' in b) patch.rodada_foto_url = b.rodada_foto_url || null;
+    if ('rodada_foto_url' in b) {
+      if (b.rodada_foto_url && !urlDeMidiaValida(b.rodada_foto_url, req)) {
+        throw new HttpError(400, 'URL de mídia inválida.');
+      }
+      patch.rodada_foto_url = b.rodada_foto_url || null;
+    }
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
