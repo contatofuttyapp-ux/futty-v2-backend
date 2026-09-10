@@ -5,6 +5,8 @@
 // serve o ficheiro do bucket privado. Segredo = server-only (nunca no cliente).
 const crypto = require('crypto');
 
+// O fallback para SUPABASE_SERVICE_KEY/'dev-only' só é alcançável em dev —
+// server.js recusa arrancar em produção sem MEDIA_TOKEN_SECRET definido.
 const SEGREDO = process.env.MEDIA_TOKEN_SECRET || process.env.SUPABASE_SERVICE_KEY || 'dev-only';
 const TTL_PADRAO = 7 * 24 * 3600; // 7 dias — o URL no DOM não expira à vista (mata o tradeoff da 1h)
 

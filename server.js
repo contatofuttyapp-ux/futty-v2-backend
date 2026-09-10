@@ -2,6 +2,19 @@
 // Setup do servidor: middleware, ficheiros estáticos, rotas e tratamento de erros.
 require('dotenv').config();
 
+// SEGURANCA-REVISAO-10SET.md secção 3 (10-set): o token do proxy de imagem
+// (utils/mediaToken.js) caía para a SUPABASE_SERVICE_KEY como segredo de
+// assinatura quando MEDIA_TOKEN_SECRET faltava — reaproveitar um segredo que
+// já abre o banco inteiro para outra coisa. Falha alto e cedo em produção em
+// vez de arrancar silenciosamente inseguro.
+if (process.env.NODE_ENV === 'production' && !process.env.MEDIA_TOKEN_SECRET) {
+  throw new Error(
+    '[Futty] MEDIA_TOKEN_SECRET em falta. Gera 32 bytes aleatórios ' +
+    '(ex.: `node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"` ' +
+    'ou `openssl rand -hex 32`) e define a variável no Render antes de arrancar em produção.'
+  );
+}
+
 // Error tracking — inicializar logo após o dotenv (DSN/NODE_ENV já carregados) e
 // antes dos restantes requires, para o Sentry instrumentar http/express. Só
 // ativo em produção (SENTRY_DSN definido).
