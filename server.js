@@ -112,6 +112,14 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Demasiados pedidos. Tenta mais tarde.' },
+  // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): /api/media/:token é o proxy
+  // de imagem — um feed com muitas fotos faz várias chamadas de uma vez e
+  // esgotava os 200/15min do limiter geral por IP. Tem o próprio limiter,
+  // mais largo (routes/media.js), então sai da conta daqui para não somar dois
+  // tectos apertados. NB: dentro de app.use('/api', ...) o Express já tira o
+  // prefixo /api de req.path (confirmado com um teste rápido), por isso o
+  // check é /media, não /api/media.
+  skip: (req) => req.path.startsWith('/media'),
 });
 app.use('/api', apiLimiter);
 
