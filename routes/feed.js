@@ -235,12 +235,12 @@ router.get(
     }
     const userMap = {};
     if (userIds.size) {
-      const { data: us } = await supabase.from('users').select('id, nome, email, avatar_url').in('id', [...userIds]);
+      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', [...userIds]);
       for (const u of us || []) userMap[u.id] = u;
     }
     const nomeOf = (id) => {
       const u = userMap[id];
-      return u ? u.nome || u.email : null;
+      return u ? u.nome_jogador || u.nome || 'Jogador' : null;
     };
     const avatarOf = (id) => userMap[id]?.avatar_url || null;
     const comentariosDe = (slot) => ({
@@ -384,7 +384,7 @@ router.post(
         id: post.id,
         team_id: post.team_id,
         author_id: post.author_id,
-        author_nome: author?.nome || author?.email || null,
+        author_nome: author?.nome_jogador || author?.nome || 'Jogador',
         author_avatar_url: author?.avatar_url || null,
         body: post.body,
         media: savedMedia,
@@ -426,7 +426,7 @@ router.post(
         id: post.id,
         team_id: post.team_id,
         author_id: post.author_id,
-        author_nome: author?.nome || author?.email || null,
+        author_nome: author?.nome_jogador || author?.nome || 'Jogador',
         author_avatar_url: author?.avatar_url || null,
         body: post.body,
         tipo: 'anuncio',
@@ -546,8 +546,8 @@ router.patch(
     const premioIds = [updated.artilheiro_user_id, updated.destaque_user_id, updated.rodada_user_id].filter(Boolean);
     const nomes = {};
     if (premioIds.length) {
-      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', premioIds);
-      for (const u of us || []) nomes[u.id] = u.nome || u.email;
+      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador, email').in('id', premioIds);
+      for (const u of us || []) nomes[u.id] = u.nome_jogador || u.nome || 'Jogador';
     }
     res.json({
       game: {
@@ -711,7 +711,7 @@ router.get(
     const userIds = [...new Set(visiveis.map((c) => c.author_id).filter(Boolean))];
     const userMap = {};
     if (userIds.length) {
-      const { data: us } = await supabase.from('users').select('id, nome, email, avatar_url').in('id', userIds);
+      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', userIds);
       for (const u of us || []) userMap[u.id] = u;
     }
 
@@ -725,7 +725,7 @@ router.get(
         id: c.id,
         body: c.body,
         author_id: c.author_id,
-        author_nome: u ? u.nome || u.email : null,
+        author_nome: u ? u.nome_jogador || u.nome || 'Jogador' : null,
         author_avatar_url: u?.avatar_url || null,
         reply_to: c.reply_to,
         mentioned_user_ids: c.mentioned_user_ids || [],
@@ -814,7 +814,7 @@ router.post(
         id: c.id,
         body: c.body,
         author_id: c.author_id,
-        author_nome: author?.nome || author?.email || null,
+        author_nome: author?.nome_jogador || author?.nome || 'Jogador',
         author_avatar_url: author?.avatar_url || null,
         reply_to: c.reply_to,
         mentioned_user_ids: c.mentioned_user_ids || [],
@@ -930,8 +930,8 @@ router.get(
     const reporterIds = [...new Set(visiveis.map((d) => d.reporter_id).filter(Boolean))];
     const repMap = {};
     if (reporterIds.length) {
-      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', reporterIds);
-      for (const u of us || []) repMap[u.id] = u.nome || u.email;
+      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador, email').in('id', reporterIds);
+      for (const u of us || []) repMap[u.id] = u.nome_jogador || u.nome || 'Jogador';
     }
 
     // Conteúdo denunciado (texto do comentário/post).

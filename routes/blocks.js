@@ -57,13 +57,13 @@ router.get(
     const ids = (rows || []).map((r) => r.blocked_id);
     let userMap = {};
     if (ids.length) {
-      const { data: users } = await supabase.from('users').select('id, nome, email, avatar_url').in('id', ids);
+      const { data: users } = await supabase.from('users').select('id, nome, nome_jogador, avatar_url').in('id', ids);
       userMap = Object.fromEntries((users || []).map((u) => [u.id, u]));
     }
     res.json({
       bloqueados: (rows || []).map((r) => ({
         id: r.blocked_id,
-        nome: userMap[r.blocked_id]?.nome || userMap[r.blocked_id]?.email || 'Jogador',
+        nome: userMap[r.blocked_id]?.nome_jogador || userMap[r.blocked_id]?.nome || 'Jogador',
         avatar_url: userMap[r.blocked_id]?.avatar_url || null,
         bloqueado_em: r.created_at,
       })),

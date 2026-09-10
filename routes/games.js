@@ -202,7 +202,7 @@ router.get(
 
     const { data: gp } = await supabase
       .from('game_players')
-      .select('confirmado, goleiro, cabeca_chave, users ( id, nome, email )')
+      .select('confirmado, goleiro, cabeca_chave, users ( id, nome, nome_jogador, email, avatar_url, avatar_generico )')
       .eq('game_id', game.id);
 
     // Inactivos da equipa: preservados no histórico mas fora do sorteio.
@@ -220,7 +220,9 @@ router.get(
       .filter((p) => p.users && !inativos.has(p.users.id))
       .map((p) => ({
         user_id: p.users.id,
-        nome: p.users.nome || p.users.email,
+        nome: p.users.nome_jogador || p.users.nome || 'Jogador',
+        avatar_url: p.users.avatar_url || null,
+        avatar_generico: p.users.avatar_generico || null,
         confirmado: p.confirmado,
         goleiro: p.goleiro,
         cabeca_chave: p.cabeca_chave,
@@ -613,7 +615,7 @@ router.post(
 
     let gpQuery = supabase
       .from('game_players')
-      .select('goleiro, cabeca_chave, users ( id, nome, email, avatar_url )')
+      .select('goleiro, cabeca_chave, users ( id, nome, nome_jogador, email, avatar_url )')
       .eq('game_id', game.id)
       .eq('confirmado', true);
     if (usarSubset) gpQuery = gpQuery.in('user_id', jogadoresIds);
@@ -634,7 +636,7 @@ router.post(
     const ratings = await computeRatings(game.teams.id, userIds);
     const toPlayer = (p) => ({
       user_id: p.users.id,
-      nome: p.users.nome || p.users.email,
+      nome: p.users.nome_jogador || p.users.nome || 'Jogador',
       avatar_url: p.users.avatar_url || null,
       rating: round1(ratings[p.users.id] ?? RATING_DEFAULT),
       goleiro: p.goleiro,

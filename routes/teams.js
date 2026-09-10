@@ -270,16 +270,19 @@ router.get(
 
     const { data: rawMembers, error } = await supabase
       .from('team_members')
-      .select('role, created_at, posicao, users ( id, nome, email, avatar_url )')
+      .select('role, created_at, posicao, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
       .eq('team_id', team.id)
       .order('created_at', { ascending: true });
     if (error) throw new HttpError(500, error.message);
 
+    // E-mail não sai aqui: página pública do time, visível a qualquer membro.
+    // Quem precisa de e-mail é o admin (Admin → Membros) ou o próprio (Perfil).
     const members = (rawMembers || []).map((m) => ({
       id: m.users?.id,
       nome: m.users?.nome,
-      email: m.users?.email,
+      nome_jogador: m.users?.nome_jogador || null,
       avatar_url: m.users?.avatar_url,
+      avatar_generico: m.users?.avatar_generico || null,
       role: m.role,
       posicao: m.posicao || null,
       created_at: m.created_at,
@@ -401,11 +404,11 @@ router.get(
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os membros em detalhe.');
 
     const { data, error } = await supabase
       .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, email, plan )')
+      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
       .eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
 
@@ -471,6 +474,7 @@ router.get(
         nome: m.users?.nome || null,
         nome_jogador: m.users?.nome_jogador || null,
         avatar_url: m.users?.avatar_url || null,
+        avatar_generico: m.users?.avatar_generico || null,
         email: m.users?.email || null,
         gols: golsMap[uid] || 0,
         artilharia: artilhariaMap[uid] || 0,
@@ -721,7 +725,7 @@ router.get(
       .single();
     const { data: inviter } = await supabase
       .from('users')
-      .select('nome, email')
+      .select('nome, nome_jogador')
       .eq('id', convite.criado_por)
       .maybeSingle();
 
@@ -740,7 +744,7 @@ router.get(
       motivo,
       autenticado: !!req.user,
       jaMembro,
-      convidadoPor: inviter?.nome || inviter?.email || null,
+      convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
       expires_at: convite.expires_at,
       team: team ? { nome: team.nome, slug: team.slug, cor: team.cor } : null,
     });
@@ -1018,8 +1022,8 @@ router.get(
     const ids = [...new Set((convites || []).map((c) => c.criado_por).filter(Boolean))];
     const nomeMap = {};
     if (ids.length) {
-      const { data: us } = await supabase.from('users').select('id, nome, email').in('id', ids);
-      for (const u of us || []) nomeMap[u.id] = u.nome || u.email;
+      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador').in('id', ids);
+      for (const u of us || []) nomeMap[u.id] = u.nome_jogador || u.nome || 'Jogador';
     }
 
     const lista = (convites || []).map((c) => ({

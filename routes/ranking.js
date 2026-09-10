@@ -99,7 +99,7 @@ async function buildRanking(teamId, meUserId) {
     return {
       user_id: u.id,
       sou_eu: meUserId != null && u.id === meUserId,
-      nome: u.nome || u.email,
+      nome: u.nome || 'Jogador',
       nome_jogador: u.nome_jogador || null,
       avatar_url: u.avatar_url || null,
       foto_url: u.foto_url || null,

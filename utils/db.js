@@ -31,7 +31,7 @@ async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, c
 }
 
 /** Procura um utilizador pelo id. Devolve null se não existir. */
-async function getUserById(id, columns = 'id, nome, email, avatar_url') {
+async function getUserById(id, columns = 'id, nome, nome_jogador, email, avatar_url, avatar_generico') {
   const { data } = await supabase.from('users').select(columns).eq('id', id).maybeSingle();
   return data || null;
 }

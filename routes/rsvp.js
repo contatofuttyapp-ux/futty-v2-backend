@@ -260,7 +260,7 @@ router.get(
     // Membros da equipa.
     const { data: membros } = await supabase
       .from('team_members')
-      .select('users ( id, nome, nome_jogador, avatar_url )')
+      .select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
       .eq('team_id', game.teams.id);
     const users = (membros || []).map((m) => m.users).filter(Boolean);
 
