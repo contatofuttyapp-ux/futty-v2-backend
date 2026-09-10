@@ -601,7 +601,7 @@ router.post(
       return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true });
     }
 
-    // Quota por plano (com reset mensal). free: 3, pro: 50, elite: 100.
+    // Quota por plano (com reset mensal). free: 2, pro: 50, elite: 100.
     const limite = LIMITES_IA[plano] ?? LIMITES_IA.free;
     const hoje = new Date();
     const hojeISO = hoje.toISOString().slice(0, 10);
