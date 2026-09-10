@@ -65,8 +65,10 @@ const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], gradi
 // Limites de gerações de avatar IA por plano.
 const LIMITES_IA = { free: 2, pro: 50, elite: 100 };
 // Colunas de perfil devolvidas ao frontend.
+// mostrar_rosto_publico (migração 040) e avatar_generico (migração 044) confirmadas
+// presentes em produção (10-set) — juntas aqui em vez de 2 consultas extra por /api/me.
 const PERFIL_COLS =
-  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo';
+  'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 
 // Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
 // menos 18 anos. (Não dá para usar coluna gerada STORED — ver migração 034.)
@@ -88,30 +90,19 @@ router.get(
     const userId = req.user.id;
     await ensureUserRow(req.user);
 
-    // Achado 3/23 (lentidão): as 7 leituras abaixo são todas independentes entre si
-    // (só precisam da linha em users já garantida acima) — corriam uma a seguir à
+    // Achado 3/23 (lentidão): estas leituras são todas independentes entre si (só
+    // precisam da linha em users já garantida acima) — corriam uma a seguir à
     // outra, cada round-trip ao Supabase a somar à seguinte. Em paralelo.
+    // mostrar_rosto_publico/avatar_generico já vêm dentro de PERFIL_COLS (10-set:
+    // confirmadas presentes em produção — deixaram de ser 2 consultas à parte).
     const [
       perfil,
-      mostrarRostoPublico,
-      avatarGenerico,
       jogosRows,
       gols,
       voteRows,
       slotRows,
     ] = await Promise.all([
       getUserById(userId, PERFIL_COLS),
-      // Consentimento de rosto público (Opção B). Leitura DEFENSIVA: se a coluna
-      // ainda não existir (DDL 040 por correr), não parte o /api/me — default TRUE.
-      getUserById(userId, 'mostrar_rosto_publico')
-        .then((cons) => (cons && typeof cons.mostrar_rosto_publico === 'boolean' ? cons.mostrar_rosto_publico : true))
-        .catch(() => true),
-      // Avatar genérico escolhido (migração 044). Leitura DEFENSIVA: se a coluna
-      // ainda não existir (DDL por correr), não parte o /api/me — default null
-      // (rodízio por id, comportamento actual).
-      getUserById(userId, 'avatar_generico')
-        .then((ag) => (ag && AVATARES_GENERICOS.includes(ag.avatar_generico) ? ag.avatar_generico : null))
-        .catch(() => null),
       // jogos = presenças confirmadas EM JOGOS JÁ ENCERRADOS (achado 10 — confirmar
       // presença num jogo futuro não pode inflar a estatística).
       supabase
@@ -161,9 +152,9 @@ router.get(
         is_super_admin: perfil?.is_super_admin || false,
         birthdate: perfil?.birthdate || null,
         is_adult: calcIsAdult(perfil?.birthdate),
-        mostrar_rosto_publico: mostrarRostoPublico,
+        mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
         kit_ativo: perfil?.kit_ativo || 'dark-gold',
-        avatar_generico: avatarGenerico,
+        avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
         // P1-1 — flag do onboarding dia-1 no user_metadata do Auth (sem DDL).
         // FALSE → qualquer entrada autenticada reencaminha 1x para /onboarding
         // (resistente ao caminho de entrada: confirmação de email noutro
