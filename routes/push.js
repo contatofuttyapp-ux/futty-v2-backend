@@ -5,6 +5,7 @@
 const express = require('express');
 const webpush = require('web-push');
 const { requireAuth } = require('../middleware/auth');
+const { pushAdminLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getTeamBySlug, getRole } = require('../utils/db');
 
@@ -71,6 +72,7 @@ router.get('/vapid-public-key', (req, res) => {
 router.post(
   '/equipas/:slug/broadcast',
   requireAuth,
+  pushAdminLimiter,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
@@ -134,6 +136,7 @@ router.post(
 router.post(
   '/equipas/:slug/membros/:userId/mensagem',
   requireAuth,
+  pushAdminLimiter,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
     if (!team) throw new HttpError(404, 'Time não encontrado.');

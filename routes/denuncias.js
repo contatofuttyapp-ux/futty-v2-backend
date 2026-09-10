@@ -3,6 +3,7 @@
 // OU fila do admin → decisão do admin → desfecho. Dono só vê agregados.
 const express = require('express');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
+const { denunciaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug } = require('../utils/db');
 const { removerFicheirosPorUrl } = require('../utils/storage');
@@ -67,6 +68,7 @@ async function removerConteudo(caso, urls) {
 router.post(
   '/api/denuncias',
   requireAuth,
+  denunciaLimiter,
   asyncHandler(async (req, res) => {
     const { target_type: targetType, target_id: targetId, categoria, descricao } = req.body || {};
     if (!targetId) throw new HttpError(400, 'Alvo em falta.');

@@ -5,6 +5,7 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
+const { denunciaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
@@ -870,6 +871,7 @@ router.delete(
 router.post(
   '/api/feed/denuncias',
   requireAuth,
+  denunciaLimiter,
   asyncHandler(async (req, res) => {
     const { target_type: targetType, target_id: targetId, motivo, descricao } = req.body || {};
     if (!['comentario', 'post'].includes(targetType)) throw new HttpError(400, 'target_type inválido.');

@@ -3,6 +3,7 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
+const { conviteLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
 const { agregadosDaEquipa } = require('../utils/agregados');
@@ -683,6 +684,7 @@ router.patch(
 router.post(
   '/api/teams/:slug/convite',
   requireAuth,
+  conviteLimiter,
   asyncHandler(async (req, res) => {
     const { team } = await requireTeamMember(req.params.slug, req.user.id);
 
