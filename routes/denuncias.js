@@ -75,6 +75,15 @@ router.post(
     if (!store.CATEGORIAS.includes(categoria)) throw new HttpError(400, 'Categoria inválida.');
 
     const { teamId, tipo, conteudo, urls } = await resolverAlvo(targetType, targetId);
+    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): sem isto qualquer
+    // utilizador logado denunciava conteúdo de um time onde nunca esteve
+    // (bastava adivinhar/enumerar um UUID). targetType 'perfil' não tem
+    // teamId (denúncia de perfil não é presa a nenhum time) — só se aplica
+    // quando o alvo pertence a um time. Mesmo padrão já usado em
+    // feed.js (POST /api/feed/denuncias).
+    if (teamId && !(await getRole(teamId, req.user.id))) {
+      throw new HttpError(403, 'Você não é membro deste time.');
+    }
     const agora = agoraISO();
 
     // Anti-abuso: limite diário (menor é imune).

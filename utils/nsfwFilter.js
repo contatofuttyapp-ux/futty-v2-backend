@@ -105,4 +105,28 @@ async function filtroNSFW(req, res, next) {
   }
 }
 
-module.exports = { filtroNSFW, carregarModelo, classificar, LIMIAR, MSG };
+/**
+ * Variante FAIL-CLOSED do filtro (SEGURANCA-REVISAO-10SET.md secção 3) —
+ * usada só no logo de equipa: ao contrário do avatar (foto pessoal, o próprio
+ * dono é quem mais se protege escolhendo bem), o logo é visível a qualquer
+ * visitante do time sem precisar de sessão. Um erro técnico na análise
+ * BLOQUEIA o upload em vez de deixar passar.
+ */
+async function filtroNSFWFailClosed(req, res, next) {
+  try {
+    const file = req.file;
+    if (!file || !file.buffer) return next();
+    if (!IMAGENS.has(file.mimetype)) return next(); // vídeo/gif: fora do âmbito
+    const r = await classificar(file.buffer);
+    if (r.explicito > LIMIAR) {
+      console.warn('[nsfw] BLOQUEADO (logo)', { user: req.user?.id, explicito: r.explicito.toFixed(2) });
+      return next(new HttpError(403, MSG));
+    }
+    return next();
+  } catch (e) {
+    console.error('[nsfw] erro na análise do logo — BLOQUEIA (fail-closed):', e.message);
+    return next(new HttpError(503, 'Não foi possível validar essa imagem agora. Tenta de novo em instantes.'));
+  }
+}
+
+module.exports = { filtroNSFW, filtroNSFWFailClosed, carregarModelo, classificar, LIMIAR, MSG };

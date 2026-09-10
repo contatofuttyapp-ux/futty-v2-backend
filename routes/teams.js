@@ -7,7 +7,8 @@ const { conviteLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
 const { agregadosDaEquipa } = require('../utils/agregados');
-const { filtroNSFW } = require('../utils/nsfwFilter');
+const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
+const { verificarImagemReal } = require('../utils/imagemReal');
 const { geocodar } = require('../utils/geocode');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
@@ -390,7 +391,14 @@ router.post(
   '/api/teams/:slug/logo',
   requireAuth,
   logoMiddleware,
-  filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (moderação)
+  // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): antes só checava o
+  // mimetype declarado pelo multer; agora confirma que decodifica como
+  // imagem de verdade (mesmo princípio do avatar, utils/olheiroEntrada.js).
+  verificarImagemReal,
+  // Fail-CLOSED aqui (diferente do avatar): o logo é visível a qualquer
+  // visitante do time sem sessão, então um erro técnico na análise bloqueia
+  // em vez de deixar passar.
+  filtroNSFWFailClosed,
   asyncHandler(async (req, res) => {
     const team = await getTeamBySlug(req.params.slug, 'id, slug');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
