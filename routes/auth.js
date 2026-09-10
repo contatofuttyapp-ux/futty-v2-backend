@@ -704,9 +704,11 @@ router.post(
     const qualidadeIA = 'low';
 
     // Edição do input pré-processado → cromo Panini Futty via gpt-image-1.5/edit.
+    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): não logar inputUrl — é um URL
+    // ASSINADO (createSignedUrl, 600s) da foto privada do utilizador; quem lesse os
+    // logs do servidor conseguia descarregá-la enquanto o token não expirasse.
     console.log('[avatar-ai] a chamar fal com:', {
       modelo: 'fal-ai/gpt-image-1.5/edit',
-      image_url: inputUrl,
       kit: kitId,
       prompt_length: promptFutty(kitId).length,
       quality: qualidadeIA,
@@ -728,13 +730,10 @@ router.post(
           logs: true,
         });
       } catch (err) {
-        console.error('[avatar-ai] erro completo:', {
-          message: err.message,
-          status: err.status,
-          body: JSON.stringify(err.body),
-          response: err.response,
-          stack: err.stack?.split('\n').slice(0, 3),
-        });
+        // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
+        // inteira do fal (body/response, que pode incluir o inputUrl assinado
+        // enviado no pedido) — fica só o código de erro e a mensagem curta.
+        console.error('[avatar-ai] erro fal:', { status: err.status, message: err.message });
         // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (ficheiro
         // corrompido ou inacessível) — causa acionável (fotografia, não instabilidade
         // do serviço). Código próprio para o frontend distinguir sem depender do texto.
