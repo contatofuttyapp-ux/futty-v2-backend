@@ -87,34 +87,48 @@ router.get(
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
     await ensureUserRow(req.user);
-    const perfil = await getUserById(userId, PERFIL_COLS);
 
-    // Consentimento de rosto público (Opção B). Leitura DEFENSIVA e separada: se a
-    // coluna ainda não existir (DDL 040 por correr), não parte o /api/me — default TRUE.
-    let mostrarRostoPublico = true;
-    try {
-      const cons = await getUserById(userId, 'mostrar_rosto_publico');
-      if (cons && typeof cons.mostrar_rosto_publico === 'boolean') mostrarRostoPublico = cons.mostrar_rosto_publico;
-    } catch { mostrarRostoPublico = true; }
+    // Achado 3/23 (lentidão): as 7 leituras abaixo são todas independentes entre si
+    // (só precisam da linha em users já garantida acima) — corriam uma a seguir à
+    // outra, cada round-trip ao Supabase a somar à seguinte. Em paralelo.
+    const [
+      perfil,
+      mostrarRostoPublico,
+      avatarGenerico,
+      jogosRows,
+      gols,
+      voteRows,
+      slotRows,
+    ] = await Promise.all([
+      getUserById(userId, PERFIL_COLS),
+      // Consentimento de rosto público (Opção B). Leitura DEFENSIVA: se a coluna
+      // ainda não existir (DDL 040 por correr), não parte o /api/me — default TRUE.
+      getUserById(userId, 'mostrar_rosto_publico')
+        .then((cons) => (cons && typeof cons.mostrar_rosto_publico === 'boolean' ? cons.mostrar_rosto_publico : true))
+        .catch(() => true),
+      // Avatar genérico escolhido (migração 044). Leitura DEFENSIVA: se a coluna
+      // ainda não existir (DDL por correr), não parte o /api/me — default null
+      // (rodízio por id, comportamento actual).
+      getUserById(userId, 'avatar_generico')
+        .then((ag) => (ag && AVATARES_GENERICOS.includes(ag.avatar_generico) ? ag.avatar_generico : null))
+        .catch(() => null),
+      // jogos = presenças confirmadas EM JOGOS JÁ ENCERRADOS (achado 10 — confirmar
+      // presença num jogo futuro não pode inflar a estatística).
+      supabase
+        .from('game_players')
+        .select('games ( data, status, cancelado )')
+        .eq('user_id', userId)
+        .eq('confirmado', true)
+        .then((r) => r.data),
+      // RANKING VIVO: os golos vêm da FONTE (gols_jogadores), não da coluna legado
+      // de team_members — bate com o número do ranking (uma só verdade).
+      golosDoJogador(userId),
+      // Nota exibida (1-10 com boost) — mín. 3 votos, como no ranking.
+      supabase.from('votes').select('nota').eq('para_user_id', userId).then((r) => r.data),
+      // Slots de kit já gerados por este utilizador (array de kit_id).
+      supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
+    ]);
 
-    // Avatar genérico escolhido (migração 044). Leitura DEFENSIVA e separada: se a
-    // coluna ainda não existir (DDL por correr), não parte o /api/me — default null
-    // (rodízio por id, comportamento actual).
-    let avatarGenerico = null;
-    try {
-      const ag = await getUserById(userId, 'avatar_generico');
-      if (ag && AVATARES_GENERICOS.includes(ag.avatar_generico)) avatarGenerico = ag.avatar_generico;
-    } catch { avatarGenerico = null; }
-
-    // Stats agregadas (todas as equipas):
-    // jogos = presenças confirmadas EM JOGOS JÁ ENCERRADOS (achado 10 — confirmar
-    // presença num jogo futuro não pode inflar a estatística); gols = soma; nota =
-    // média dos votos recebidos.
-    const { data: jogosRows } = await supabase
-      .from('game_players')
-      .select('games ( data, status, cancelado )')
-      .eq('user_id', userId)
-      .eq('confirmado', true);
     const agora = Date.now();
     const jogos = (jogosRows || []).filter((r) => {
       const g = r.games;
@@ -122,18 +136,10 @@ router.get(
       return g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora);
     }).length;
 
-    // RANKING VIVO: os golos vêm da FONTE (gols_jogadores), não da coluna legado de
-    // team_members — bate com o número do ranking para o mesmo jogador (uma só verdade).
-    const gols = await golosDoJogador(userId);
-
-    // Nota exibida (1-10 com boost) — mín. 3 votos, como no ranking.
-    const { data: voteRows } = await supabase.from('votes').select('nota').eq('para_user_id', userId);
     const totalVotos = voteRows ? voteRows.length : 0;
     const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;
     const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
 
-    // Slots de kit já gerados por este utilizador (array de kit_id).
-    const { data: slotRows } = await supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId);
     const slots = (slotRows || []).map((r) => r.kit_id);
 
     res.json({

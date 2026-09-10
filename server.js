@@ -23,6 +23,7 @@ const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
 const { carregarModelo } = require('./utils/nsfwFilter');
 const { mediaUrls } = require('./middleware/mediaUrls');
+const { tempoPorRota } = require('./middleware/tempo');
 const { privatizarBuckets } = require('./utils/storage');
 const { HttpError } = require('./utils/http');
 
@@ -116,6 +117,7 @@ app.use('/api/me/avatar', strictLimiter); // cobre também /api/me/avatar/ai
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
+app.use(tempoPorRota);
 
 // Ficheiros estáticos (fotos de campeão, etc.) em /uploads
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));

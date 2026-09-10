@@ -213,19 +213,28 @@ router.get(
     const role = await getRole(game.teams.id, req.user.id);
     if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-    const { data: gp } = await supabase
-      .from('game_players')
-      .select('confirmado, goleiro, cabeca_chave, users ( id, nome, nome_jogador, email, avatar_url, avatar_generico )')
-      .eq('game_id', game.id);
+    // Achado 3/23: estas 4 leituras não dependem umas das outras (só de game.id/
+    // game.teams.id, já conhecidos) — corriam em série, uma round-trip a seguir à
+    // outra. Em paralelo.
+    const [gpResult, inativosResult, golsResult, votosResult] = await Promise.all([
+      supabase
+        .from('game_players')
+        .select('confirmado, goleiro, cabeca_chave, users ( id, nome, nome_jogador, email, avatar_url, avatar_generico )')
+        .eq('game_id', game.id),
+      // Inactivos da equipa: preservados no histórico mas fora do sorteio.
+      supabase.from('team_members').select('user_id').eq('team_id', game.teams.id).eq('ativo', false),
+      // Gols por jogador (só relevante no nível 3 do resultado).
+      game.resultado_nivel === 3
+        ? supabase.from('gols_jogadores').select('user_id, time, gols, users ( id, nome )').eq('game_id', game.id)
+        : Promise.resolve({ data: [] }),
+      supabase.from('votes').select('id', { count: 'exact', head: true }).eq('game_id', game.id).eq('de_user_id', req.user.id),
+    ]);
+    const gp = gpResult.data;
+    const inativos = new Set((inativosResult.data || []).map((m) => m.user_id));
+    const gols = (golsResult.data || []).map((g) => ({ user_id: g.user_id, time: g.time, gols: g.gols || 0, nome: g.users?.nome || null }));
+    const votosCount = votosResult.count;
 
-    // Inactivos da equipa: preservados no histórico mas fora do sorteio.
-    const { data: inativosRows } = await supabase
-      .from('team_members')
-      .select('user_id')
-      .eq('team_id', game.teams.id)
-      .eq('ativo', false);
-    const inativos = new Set((inativosRows || []).map((m) => m.user_id));
-
+    // computeRatings precisa dos userIds vindos de gp — este fica sequencial.
     const userIds = (gp || []).map((p) => p.users?.id).filter(Boolean);
     const ratings = await computeRatings(game.teams.id, userIds);
 
@@ -243,22 +252,6 @@ router.get(
       }));
 
     const meu = players.find((p) => p.user_id === req.user.id) || null;
-
-    // Gols por jogador (só relevante no nível 3 do resultado).
-    let gols = [];
-    if (game.resultado_nivel === 3) {
-      const { data: golsRows } = await supabase
-        .from('gols_jogadores')
-        .select('user_id, time, gols, users ( id, nome )')
-        .eq('game_id', game.id);
-      gols = (golsRows || []).map((g) => ({ user_id: g.user_id, time: g.time, gols: g.gols || 0, nome: g.users?.nome || null }));
-    }
-
-    const { count: votosCount } = await supabase
-      .from('votes')
-      .select('id', { count: 'exact', head: true })
-      .eq('game_id', game.id)
-      .eq('de_user_id', req.user.id);
 
     const team = game.teams;
     res.json({

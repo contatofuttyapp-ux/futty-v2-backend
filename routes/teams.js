@@ -265,14 +265,17 @@ router.get(
     );
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
-    const role = await getRole(team.id, req.user.id);
+    // Achado 3/23: role e membros só dependem do team.id, não um do outro — em
+    // paralelo em vez de dois round-trips seguidos ao Supabase.
+    const [role, { data: rawMembers, error }] = await Promise.all([
+      getRole(team.id, req.user.id),
+      supabase
+        .from('team_members')
+        .select('role, created_at, posicao, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
+        .eq('team_id', team.id)
+        .order('created_at', { ascending: true }),
+    ]);
     if (!role) throw new HttpError(403, 'Você não é membro deste time.');
-
-    const { data: rawMembers, error } = await supabase
-      .from('team_members')
-      .select('role, created_at, posicao, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
-      .eq('team_id', team.id)
-      .order('created_at', { ascending: true });
     if (error) throw new HttpError(500, error.message);
 
     // E-mail não sai aqui: página pública do time, visível a qualquer membro.
@@ -406,19 +409,27 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os membros em detalhe.');
 
-    const { data, error } = await supabase
-      .from('team_members')
-      .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
-      .eq('team_id', team.id);
+    // Achado 3/23: estas 4 leituras só dependem de team.id, nenhuma do resultado
+    // das outras — corriam em série. Em paralelo; só a busca de presenças (que
+    // precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
+    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados] = await Promise.all([
+      supabase
+        .from('team_members')
+        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
+        .eq('team_id', team.id),
+      // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
+      // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
+      supabase.from('votes').select('para_user_id, nota').eq('team_id', team.id),
+      // Últimos 5 jogos da equipa (mais recente → mais antigo) para o histórico
+      // de presenças. Um jogador esteve presente se tem game_players.confirmado.
+      supabase.from('games').select('id, data, created_at').eq('team_id', team.id).order('created_at', { ascending: false }).limit(5),
+      // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
+      agregadosDaEquipa(team.id),
+    ]);
     if (error) throw new HttpError(500, error.message);
+    const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = agregados;
 
-    // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
-    // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
     const MIN_VOTOS = 3;
-    const { data: votos } = await supabase
-      .from('votes')
-      .select('para_user_id, nota')
-      .eq('team_id', team.id);
     const votosAgg = {}; // user_id -> { sum, count }
     for (const v of votos || []) {
       const a = (votosAgg[v.para_user_id] = votosAgg[v.para_user_id] || { sum: 0, count: 0 });
@@ -426,14 +437,6 @@ router.get(
       a.count += 1;
     }
 
-    // Últimos 5 jogos da equipa (mais recente → mais antigo) para o histórico
-    // de presenças. Um jogador esteve presente se tem game_players.confirmado.
-    const { data: ultimosJogos } = await supabase
-      .from('games')
-      .select('id, data, created_at')
-      .eq('team_id', team.id)
-      .order('created_at', { ascending: false })
-      .limit(5);
     const jogos = ultimosJogos || [];
     const presentesPorJogo = {}; // game_id -> Set(user_id confirmados)
     if (jogos.length) {
@@ -446,9 +449,6 @@ router.get(
         (presentesPorJogo[gp.game_id] = presentesPorJogo[gp.game_id] || new Set()).add(gp.user_id);
       }
     }
-
-    // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
-    const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = await agregadosDaEquipa(team.id);
 
     const membros = (data || []).map((m) => {
       const uid = m.users?.id;
