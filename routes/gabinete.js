@@ -10,11 +10,30 @@ const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
+const pkg = require('../package.json');
 
 const router = express.Router();
 
 const DIA = 86400000;
 const inicioDiaUTC = (d) => { const x = new Date(d); x.setUTCHours(0, 0, 0, 0); return x; };
+
+// Custo por geração de figurinha IA — mesma constante de utils/antiAbusoIA.js
+// (não importada de lá para não puxar routes/push.js, que essa dependência
+// arrasta consigo — o resumo é só leitura).
+const CUSTO_GERACAO_CENTS = 1.7;
+const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
+
+// Rate limiters ativos — manifesto estático, sincronizado à mão com server.js
+// (apiLimiter/strictLimiter) e media.js/limiters.js (não há API pública do
+// express-rate-limit para ler a config de volta de uma instância já criada).
+const RATE_LIMITS_ATIVOS = [
+  { rota: 'global · toda /api (exceto /api/media)', limite: process.env.NODE_ENV === 'production' ? '200/15min por IP' : '2000/15min por IP (dev)' },
+  { rota: 'GET /api/media/:token', limite: '600/15min por IP' },
+  { rota: 'POST /api/me/avatar[/ai]', limite: '20/15min por IP' },
+  { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
+  { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
+  { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por utilizador (partilhado)' },
+];
 
 // Série CUMULATIVA por semana (últimas 8): quantos existiam até ao fim de cada semana.
 function cumulativoSemanal(datas, nSemanas = 8) {
@@ -150,6 +169,127 @@ router.get(
       if (c.estado === 'ativa' && c.imp > 0 && c.cli === 0) alertas.push(`"${c.nome}" sem cliques`);
     });
     res.json({ campanhas, toggles: store.toggles || {}, alertas });
+  })
+);
+
+// Lê uma chave de app_config (JSON em texto). Fail-soft: tabela pode não
+// existir ainda em ambientes antigos, ou a chave nunca ter sido gravada.
+async function lerAppConfig(chave) {
+  try {
+    const { data } = await supabase.from('app_config').select('valor').eq('chave', chave).maybeSingle();
+    if (!data?.valor) return null;
+    try { return JSON.parse(data.valor); } catch { return null; }
+  } catch {
+    return null;
+  }
+}
+
+// Soma geracoes/custo_cents de gasto_ia_diario entre duas datas ISO (inclusive).
+async function somaGastoIA(desdeISO, ateISO) {
+  try {
+    const { data } = await supabase.from('gasto_ia_diario').select('geracoes, custo_cents').gte('dia', desdeISO).lte('dia', ateISO);
+    return (data || []).reduce((acc, l) => ({ qtd: acc.qtd + (l.geracoes || 0), custo_cents: acc.custo_cents + (l.custo_cents || 0) }), { qtd: 0, custo_cents: 0 });
+  } catch {
+    return { qtd: 0, custo_cents: 0 };
+  }
+}
+
+/**
+ * GET /api/super/gabinete/resumo — payload único para as 5 abas do Gabinete 2.0
+ * (SPEC em PAINEL-E-CUSTOS.md secção 6). Cobre Visão geral, Dinheiro, Segurança
+ * e Registros & prazos. A aba Pessoas & times NÃO vem aqui — continua a usar
+ * /api/super/users, /api/super/teams e /api/super/denuncias/fila (paginação e
+ * ações próprias; empacotar isso num payload só faria a página recarregar tudo
+ * a cada suspensão/decisão).
+ */
+router.get(
+  '/api/super/gabinete/resumo',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const agora = new Date();
+    const hoje = inicioDiaUTC(agora);
+    const hojeISO = hoje.toISOString();
+    const seteDiasISO = new Date(hoje.getTime() - 7 * DIA).toISOString();
+    const hojeDia = hojeISO.slice(0, 10);
+    const primeiroDiaMes = `${hojeDia.slice(0, 7)}-01`;
+
+    const [usersRes, gamesRes, teamsRes, gastoHoje, gastoMes, iaFreeze, ultimoBackup, op] = await Promise.all([
+      supabase.from('users').select('created_at'),
+      supabase.from('games').select('created_at').gte('created_at', seteDiasISO),
+      supabase.from('teams').select('id'),
+      somaGastoIA(hojeDia, hojeDia),
+      somaGastoIA(primeiroDiaMes, hojeDia),
+      lerAppConfig('ia_freeze'),
+      lerAppConfig('ultimo_backup'),
+      gabineteStore.ler(),
+    ]);
+    const users = usersRes.data || [];
+    const teams = teamsRes.data || [];
+
+    // Denúncias abertas — mesmo agregado do /api/super/gabinete (zero conteúdo).
+    let denunciasAbertas = 0;
+    try {
+      const ids = teams.map((t) => t.id); ids.push('_sem');
+      const listas = await Promise.all(ids.map((t) => denunciaStore.listarEquipa(t)));
+      denunciasAbertas = listas.flat().filter((c) => !c.resolvido_em).length;
+    } catch { denunciasAbertas = 0; }
+
+    // Banco trancado — chama a função da migração 050. Se ainda não existir
+    // (PGRST202/undefined function), devolve "a_confirmar" em vez de arriscar
+    // um verde/vermelho errado.
+    let bancoTrancado = { estado: 'a_confirmar', tabelas_sem_rls: null, policies_users: null };
+    try {
+      const { data, error } = await supabase.rpc('gabinete_rls_status');
+      if (!error && data) {
+        const semRls = data.tabelas_sem_rls || [];
+        const okPolicies = (data.policies_users || 0) === 0;
+        bancoTrancado = {
+          estado: semRls.length === 0 && okPolicies ? 'verde' : 'vermelho',
+          tabelas_sem_rls: semRls,
+          policies_users: data.policies_users ?? 0,
+        };
+      }
+    } catch { /* função ainda não existe — fica "a_confirmar" */ }
+
+    const custosVencidos = (op.custos_fixos || []).filter((c) => !c.pago && c.proxima_data && c.proxima_data < hojeDia);
+
+    const precisaDeVoce = [];
+    if (denunciasAbertas > 0) precisaDeVoce.push({ tipo: 'denuncia', texto: `${denunciasAbertas} denúncia${denunciasAbertas > 1 ? 's' : ''} aberta${denunciasAbertas > 1 ? 's' : ''} para revisar` });
+    if (custosVencidos.length) precisaDeVoce.push({ tipo: 'custo', texto: `${custosVencidos.length} custo${custosVencidos.length > 1 ? 's' : ''} fixo${custosVencidos.length > 1 ? 's' : ''} com data vencida` });
+    if (iaFreeze) precisaDeVoce.push({ tipo: 'freeze', texto: `IA travada sozinha: ${iaFreeze.motivo || 'atividade suspeita'}` });
+
+    res.json({
+      visao_geral: {
+        usuarios_novos_hoje: users.filter((u) => u.created_at >= hojeISO).length,
+        usuarios_novos_7d: users.filter((u) => u.created_at >= seteDiasISO).length,
+        jogos_criados_7d: (gamesRes.data || []).length,
+        figurinhas_hoje: { qtd: gastoHoje.qtd, custo_usd: Number((gastoHoje.custo_cents / 100).toFixed(2)) },
+        figurinhas_mes: { qtd: gastoMes.qtd, custo_usd: Number((gastoMes.custo_cents / 100).toFixed(2)) },
+        denuncias_abertas: denunciasAbertas,
+        ia: { freeze: !!iaFreeze, motivo: iaFreeze?.motivo || null },
+        servidor: { versao: pkg.version, uptime_s: Math.round(process.uptime()) },
+      },
+      precisa_de_voce: precisaDeVoce,
+      dinheiro: {
+        custos_fixos: op.custos_fixos || [],
+        ia_mes: {
+          gasto_usd: Number((gastoMes.custo_cents / 100).toFixed(2)),
+          teto_diario_usd: Number((TETO_DIARIO_CENTS / 100).toFixed(2)),
+          gasto_hoje_usd: Number((gastoHoje.custo_cents / 100).toFixed(2)),
+          custo_por_geracao_usd: CUSTO_GERACAO_CENTS / 100,
+          freeze: !!iaFreeze,
+        },
+      },
+      seguranca: {
+        banco_trancado: bancoTrancado,
+        ultimo_backup: ultimoBackup,
+        proximo_backup: 'segunda-feira 09:00',
+        rate_limit: RATE_LIMITS_ATIVOS,
+        kill_switch_ia: { freeze: !!iaFreeze, motivo: iaFreeze?.motivo || null, desde: iaFreeze?.desde || null },
+        manual: op.seguranca_manual || gabineteStore.SEED.seguranca_manual,
+      },
+      registros: op.registros || [],
+    });
   })
 );
 
