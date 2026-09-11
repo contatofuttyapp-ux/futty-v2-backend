@@ -45,6 +45,11 @@ const SEED = {
     bloqueado: ['🇺🇸 EUA', 'USD', '+ resto por ativar no IAP das lojas'],
   },
   campanhas: [],
+  // Interruptor geral (Gabinete 2.0, aba Anúncios): desligado corta TODA a
+  // publicidade, independente dos interruptores por página abaixo. Default
+  // ligado — quem decide página a página são os toggles por página, que
+  // continuam default OFF.
+  ads_ativo: true,
   // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
   toggles: { inicio: false, sorteio: false, p: false },
   // Proteção de dados (LGPD/compliance) — editável à mão. Default tudo por tratar/publicar.
@@ -74,6 +79,7 @@ async function gravar(obj) {
     seguranca_manual: obj?.seguranca_manual && typeof obj.seguranca_manual === 'object' ? obj.seguranca_manual : SEED.seguranca_manual,
     cobertura: obj?.cobertura && typeof obj.cobertura === 'object' ? obj.cobertura : SEED.cobertura,
     campanhas: Array.isArray(obj?.campanhas) ? obj.campanhas : [],
+    ads_ativo: typeof obj?.ads_ativo === 'boolean' ? obj.ads_ativo : SEED.ads_ativo,
     toggles: obj?.toggles && typeof obj.toggles === 'object' ? obj.toggles : SEED.toggles,
     protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
   };

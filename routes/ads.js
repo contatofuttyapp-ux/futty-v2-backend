@@ -1,6 +1,8 @@
 // Futty v2.0 — Serving REAL de publicidade + medição. As campanhas vivem no gabineteStore
 // (operacao.json), geridas no Gabinete. LEIS SELADAS respeitadas:
 //  · filtro etário FAIL-CLOSED: sem classificação = '18+'; menor/anónimo só recebe 'livre';
+//  · interruptor geral (Gabinete 2.0, aba Anúncios) — desligado corta tudo,
+//    independente dos toggles por página;
 //  · toggle por página (default OFF) — página desligada = nenhum anúncio;
 //  · rótulo "PUBLICIDADE" é do frontend.
 const express = require('express');
@@ -32,6 +34,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const pagina = String(req.query.pagina || '').trim();
     const store = await gabineteStore.ler();
+    if (store.ads_ativo === false) return res.json({ ad: null }); // interruptor geral OFF
     if (!store.toggles || store.toggles[pagina] !== true) return res.json({ ad: null }); // página OFF
 
     let adulto = false;
