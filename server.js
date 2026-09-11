@@ -226,18 +226,25 @@ app.use((err, req, res, next) => {
   res.status(status).json(corpo);
 });
 
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
-  console.log(`[Futty] Health check: http://localhost:${port}/health`);
-  // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
-  ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
-  ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
-  ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
-  // Tijolo 1: pré-carrega o modelo NSFW uma vez (não bloqueia; falha aberta).
-  carregarModelo();
-  // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
-  privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
-});
+// SEGURANCA-REVISAO-10SET.md secção 3 (10-set): só arranca sozinho quando
+// corrido diretamente (`node server.js`, produção/dev normal) — não quando
+// outro módulo faz require('./server') (backend/tests/permissoes.test.js,
+// que sobe o app na sua própria porta livre via app.listen(0)). Sem isto os
+// testes colidiam com um dev server já a correr em 3001 (EADDRINUSE).
+if (require.main === module) {
+  const port = process.env.PORT || 3001;
+  app.listen(port, () => {
+    console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
+    console.log(`[Futty] Health check: http://localhost:${port}/health`);
+    // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
+    ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
+    ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
+    ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
+    // Tijolo 1: pré-carrega o modelo NSFW uma vez (não bloqueia; falha aberta).
+    carregarModelo();
+    // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
+    privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
+  });
+}
 
 module.exports = { app, supabase };
