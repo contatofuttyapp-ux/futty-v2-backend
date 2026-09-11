@@ -1,30 +1,45 @@
 // Futty v2.0 — Gabinete: store JSON dos dados editáveis à mão pelo dono (Operação +
 // Publicidade). Mesmo padrão dos campeonatos/denúncias (Storage privado, sem DDL).
 // Vive no bucket privado "denuncias" (owner-only) sob `_gabinete/operacao.json` — zero
-// PII, só dinheiro/infra/registos. Seed = os valores documentados na SPEC-GABINETE
+// PII, só dinheiro/infra/registos. Seed = os valores reais de PAINEL-E-CUSTOS.md
 // (editáveis; NÃO são medições — são estimativas do dono a ajustar à mão).
+//
+// Gabinete 2.0 (11-set): custos_fixos e registros ganharam schema novo (campos
+// explícitos da aba Dinheiro/Registros do painel de 5 abas). custos/registos
+// (schema antigo) saem — a página velha de 16 secções que os lia foi substituída.
+// cobertura/protecao_dados/toggles continuam a existir (a Gabinete.jsx só deixa
+// de MOSTRAR essas secções atrás da flag MOSTRAR_AVANCADO — o dado não morre).
+const { randomUUID } = require('crypto');
 const { supabase } = require('./db');
 
 const BUCKET = 'denuncias';
 const CAMINHO = '_gabinete/operacao.json';
 
 const SEED = {
-  custos: [
-    { nome: 'Railway', desc: 'servidor backend', valor: 5, ciclo: 'mês', renova: '', estado: 'ativo' },
-    { nome: 'Supabase', desc: 'BD · auth · storage', valor: 0, ciclo: 'mês', renova: '', estado: 'free' },
-    { nome: 'Vercel', desc: 'frontend', valor: 0, ciclo: 'mês', renova: '', estado: 'free' },
-    { nome: 'fal.ai', desc: 'avatares IA', valor: 12, ciclo: 'uso', renova: 'contínuo', estado: 'uso' },
-    { nome: 'Anthropic API', desc: 'triagem de denúncias', valor: 4, ciclo: 'uso', renova: 'contínuo', estado: 'uso' },
-    { nome: 'Domínio futty.app', desc: 'Namecheap', valor: 14, ciclo: 'ano', renova: '', estado: 'ativo' },
-    { nome: 'Apple Developer', desc: 'App Store (futuro)', valor: 99, ciclo: 'ano', renova: '', estado: 'ativo' },
-    { nome: 'Google Play', desc: 'conta única (futuro)', valor: 25, ciclo: 'ano', renova: '', estado: 'ativo' },
+  // Aba Dinheiro > Custos fixos. Valores reais de hoje (PAINEL-E-CUSTOS.md §1):
+  // tudo em plano grátis, R$0/mês fixo — só a IA custa, e essa vive à parte
+  // em "IA do mês" (gasto_ia_diario), não aqui.
+  custos_fixos: [
+    { id: 'supabase', nome: 'Supabase', valor: 0, moeda: 'BRL', periodicidade: 'mês', proxima_data: '', pago: true, nota: 'Plano Free — banco, login, fotos' },
+    { id: 'render', nome: 'Render', valor: 0, moeda: 'BRL', periodicidade: 'mês', proxima_data: '', pago: true, nota: 'Plano Free — backend' },
+    { id: 'vercel', nome: 'Vercel', valor: 0, moeda: 'BRL', periodicidade: 'mês', proxima_data: '', pago: true, nota: 'Plano Hobby — telas' },
+    { id: 'github', nome: 'GitHub', valor: 0, moeda: 'BRL', periodicidade: 'mês', proxima_data: '', pago: true, nota: 'Free' },
+    { id: 'sentry', nome: 'Sentry', valor: 0, moeda: 'BRL', periodicidade: 'mês', proxima_data: '', pago: true, nota: 'Free' },
   ],
-  registos: [
-    { nome: 'Domínio futty.app', tipo: 'Registrar · Namecheap', renova: '', dias: null },
-    { nome: 'Marca "FUTTY" (INPI)', tipo: 'classe 9 · a depositar', renova: '', dias: null },
-    { nome: 'Janela de prioridade (Paris)', tipo: '6 meses após depósito INPI', renova: '', dias: null },
-    { nome: 'Política de privacidade', tipo: 'por publicar (LGPD / lojas)', renova: '', dias: null },
+  // Aba Registros & prazos. Seed real de PAINEL-E-CUSTOS.md §2 e §5/6.
+  registros: [
+    { id: 'inpi', nome: 'Marca FUTTY (INPI)', numero: '944951872', estado: 'aguardando publicação na RPI', data: '2026-08-25', nota: 'protocolada' },
+    { id: 'paris', nome: 'Convenção de Paris — prazo de prioridade', numero: '-', estado: 'a depositar fora do Brasil', data: '2027-02-25', nota: 'janela de 6 meses da prioridade de 25/08/2026 (Portugal ~€127 ou EUIPO €850)' },
+    { id: 'dominio-com', nome: 'Domínio futtyapp.com', numero: '-', estado: 'ativo', data: '2027-08-25', nota: '~US$11 · Porkbun' },
+    { id: 'dominio-com-br', nome: 'Domínio futtyapp.com.br', numero: '-', estado: 'ativo', data: '2027-08-24', nota: 'R$40 · Registro.br' },
+    { id: 'termos-privacidade', nome: 'Termos e Privacidade', numero: 'v1', estado: 'publicada (revisão jurídica pendente)', data: '2026-07-28', nota: 'ver /termos e /privacidade' },
   ],
+  // Aba Segurança — checklist manual (os itens automáticos vêm do resumo, não daqui).
+  seguranca_manual: {
+    testes_permissao: { data: '', resultado: '' },
+    npm_audit: { data: '', falhas: null },
+    ultima_auditoria: { data: '', link: '' },
+  },
   cobertura: {
     vende: ['🇵🇹 Portugal', '🇧🇷 Brasil', 'EUR', 'BRL'],
     bloqueado: ['🇺🇸 EUA', 'USD', '+ resto por ativar no IAP das lojas'],
@@ -54,8 +69,9 @@ async function ler() {
 
 async function gravar(obj) {
   const limpo = {
-    custos: Array.isArray(obj?.custos) ? obj.custos : SEED.custos,
-    registos: Array.isArray(obj?.registos) ? obj.registos : SEED.registos,
+    custos_fixos: Array.isArray(obj?.custos_fixos) ? obj.custos_fixos : SEED.custos_fixos,
+    registros: Array.isArray(obj?.registros) ? obj.registros : SEED.registros,
+    seguranca_manual: obj?.seguranca_manual && typeof obj.seguranca_manual === 'object' ? obj.seguranca_manual : SEED.seguranca_manual,
     cobertura: obj?.cobertura && typeof obj.cobertura === 'object' ? obj.cobertura : SEED.cobertura,
     campanhas: Array.isArray(obj?.campanhas) ? obj.campanhas : [],
     toggles: obj?.toggles && typeof obj.toggles === 'object' ? obj.toggles : SEED.toggles,
@@ -65,4 +81,9 @@ async function gravar(obj) {
   return limpo;
 }
 
-module.exports = { ler, gravar, SEED };
+/** Gera um id curto para uma nova linha de custo/registro (o form do painel não manda um). */
+function novoId() {
+  return randomUUID().slice(0, 8);
+}
+
+module.exports = { ler, gravar, SEED, novoId };

@@ -87,6 +87,19 @@ async function main() {
   if (falhas.length) {
     console.log(`[backup] falharam: ${falhas.join(', ')}`);
     process.exitCode = 1;
+    return; // corrida com falhas — não regista como "último backup" bem-sucedido
+  }
+
+  // Gabinete 2.0 (11-set): o semáforo "último backup" da aba Segurança lê daqui.
+  // Só grava quando a corrida foi 100% OK (return acima corta o caminho de falha).
+  try {
+    await supabase.from('app_config').upsert({
+      chave: 'ultimo_backup',
+      valor: JSON.stringify({ data: hojeISO(), tabelas: tabelasOk, linhas: totalLinhas }),
+      updated_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    console.error(`[backup] aviso: não consegui gravar 'ultimo_backup' em app_config — ${e.message}`);
   }
 }
 
