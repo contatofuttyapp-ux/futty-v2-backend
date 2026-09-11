@@ -33,3 +33,9 @@ npm-debug.log*
 
 # Spike NSFW — imagens de benchmark nunca entram no git
 scripts/_bench/
+
+# Backup semanal do banco (scripts/backup-banco.js, SEGURANCA-REVISAO-10SET.md
+# secção 4) — vive em C:\Users\phfer\Desktop\FUT\BACKUPS, fora deste repo (que
+# nem é filho dele). Linha aqui é só cinto e suspensórios, para o caso de
+# alguém um dia apontar o destino para dentro do repo por engano.
+BACKUPS/
