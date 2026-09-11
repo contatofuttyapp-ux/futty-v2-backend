@@ -123,6 +123,15 @@ test('token de quem nao e membro -> 403 nas rotas sensiveis', async () => {
   }
 });
 
+// ─── Gabinete 2.0: GET /api/super/gabinete/resumo ───────────────────────────
+test('GET /api/super/gabinete/resumo -> 401 sem token, 403 com utilizador comum', async () => {
+  const semToken = await pedir('GET', '/api/super/gabinete/resumo');
+  assert.equal(semToken.status, 401, `sem token devia dar 401, deu ${semToken.status}`);
+
+  const comUmComum = await pedir('GET', '/api/super/gabinete/resumo', { token: accessToken });
+  assert.equal(comUmComum.status, 403, `com utilizador comum devia dar 403, deu ${comUmComum.status}`);
+});
+
 // ─── 3. Rotas públicas → nunca 401 ──────────────────────────────────────────
 test('rotas publicas -> nunca 401', async () => {
   const casos = [
