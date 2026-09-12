@@ -3,8 +3,13 @@
 // pré-lançamento, a base inteira (menos essas contas) é considerada teste.
 //
 // Uso:
-//   node scripts/limpar-usuarios-teste.js                 → SIMULAÇÃO (default). Não altera nada.
-//   node scripts/limpar-usuarios-teste.js --apagar --confirmo  → apaga de verdade. As DUAS flags juntas.
+//   node scripts/limpar-usuarios-teste.js                       → SIMULAÇÃO (default). Não altera nada.
+//   node scripts/limpar-usuarios-teste.js --apagar --confirmo   → apaga de verdade. As DUAS flags juntas.
+//   ... --times-tambem (soma às duas acima, ou sozinha na simulação) → além
+//       dos usuários de teste, apaga TAMBÉM todos os times que sobrariam —
+//       inclusive os criados pelas contas MANTER — com o Storage (logos) e
+//       os dependentes por cascade. As contas MANTER em si (perfil, e-mail,
+//       figurinha, fotos) NUNCA são tocadas — só os times deixam de existir.
 //
 // Requer backend/.env com SUPABASE_URL e SUPABASE_SERVICE_KEY (reaproveita
 // utils/db.js, mesmo cliente service_role que o resto do backend usa).
@@ -69,12 +74,18 @@ async function selecionarEmLotes(tabela, coluna, select, ids) {
   return todos;
 }
 
-/** DELETE em lotes de `coluna IN ids`. Devolve o nº de linhas apagadas (via .select('id') no delete). */
+/**
+ * DELETE em lotes de `coluna IN ids`. Devolve o nº de linhas apagadas — via
+ * .select(coluna) no delete (RETURNING), não .select('id'): nem toda tabela
+ * tem uma coluna `id` (achado 14-set: user_avatar_slots não tem — RETURNING
+ * id nessa tabela falha a query inteira, incluindo o DELETE. `coluna` é
+ * sempre segura porque é a mesma que acabámos de filtrar com .in()).
+ */
 async function apagarEmLotes(tabela, coluna, ids) {
   let total = 0;
   for (const lote of lotes(ids, TAMANHO_LOTE)) {
     if (!lote.length) continue;
-    const { data, error } = await supabase.from(tabela).delete().in(coluna, lote).select('id');
+    const { data, error } = await supabase.from(tabela).delete().in(coluna, lote).select(coluna);
     if (error) throw new Error(`${tabela}: ${error.message}`);
     total += (data || []).length;
   }
@@ -112,7 +123,7 @@ function contarPorChave(linhas, chave) {
  * (só imprime) quanto pela execução real (imprime E apaga com os mesmos
  * dados, sem re-consultar depois).
  */
-async function montarPlano() {
+async function montarPlano({ timesTambem = false } = {}) {
   const todosAuth = await listarTodosAuthUsers();
   const porEmail = new Map(todosAuth.map((u) => [u.email?.toLowerCase(), u]));
 
@@ -135,14 +146,18 @@ async function montarPlano() {
   const apagarIds = aApagar.map((u) => u.id);
 
   // Times: todos (para reportar tanto os que saem quanto os que ficam).
+  // --times-tambem: TODOS os times vão embora (mesmo os das contas MANTER) —
+  // "times que ficam" fica vazio de propósito.
   const { data: todosTeams, error: teamsErr } = await supabase.from('teams').select('id, nome, slug, criado_por, logo_url');
   if (teamsErr) throw new Error(`teams: ${teamsErr.message}`);
-  const timesApagar = (todosTeams || []).filter((t) => apagarIds.includes(t.criado_por));
-  const timesFicam = (todosTeams || []).filter((t) => !apagarIds.includes(t.criado_por));
+  const timesApagar = timesTambem ? (todosTeams || []) : (todosTeams || []).filter((t) => apagarIds.includes(t.criado_por));
+  const timesFicam = timesTambem ? [] : (todosTeams || []).filter((t) => !apagarIds.includes(t.criado_por));
   const timesApagarIds = timesApagar.map((t) => t.id);
 
-  // Aviso de segurança (item 7): alguma conta MANTER é MEMBRO (não dono) de
-  // um time que vai ser apagado? A participação dela nesse time some junto.
+  // Aviso de segurança (item 7 do pedido original): alguma conta MANTER é
+  // MEMBRO (não dono) de um time que vai ser apagado? A participação dela
+  // nesse time some junto — mensagem genérica de propósito (com
+  // --times-tambem o time pode até ter sido criado por outra conta MANTER).
   const avisos = [];
   if (timesApagarIds.length && manterIds.size) {
     const membrosDeTimesApagar = await selecionarEmLotes('team_members', 'team_id', 'team_id, user_id', timesApagarIds);
@@ -150,7 +165,7 @@ async function montarPlano() {
     for (const m of membrosDeTimesApagar) {
       if (manterIds.has(m.user_id)) {
         const time = timesApagar.find((t) => t.id === m.team_id);
-        avisos.push(`conta MANTER ${idParaEmail.get(m.user_id) || m.user_id} é membro do time "${time?.nome || m.team_id}" (criado por um usuário a apagar) — a participação dela nesse time some junto.`);
+        avisos.push(`conta MANTER ${idParaEmail.get(m.user_id) || m.user_id} é membro do time "${time?.nome || m.team_id}", que vai ser apagado — a participação dela nesse time some junto.`);
       }
     }
   }
@@ -203,15 +218,23 @@ async function montarPlano() {
   for (const c of championRows) addUrl(c.user_id, c.url);
   for (const m of feedMediaRows) addUrl(feedPostsPorId.get(m.post_id), m.url);
   for (const a of anexosRows) addUrl(comentariosPorId.get(a.comentario_id), a.url);
-  // Logos dos times que vão ser apagados — não é "do usuário" mas some junto com o time dele.
+  // Logos dos times que vão ser apagados — conta no relatório do dono, só
+  // quando o dono é um usuário a apagar (urlsPorUser só tem chaves para
+  // apagarIds). Times de contas MANTER (--times-tambem) não entram aqui —
+  // não têm "dono a apagar" — mas entram no total global de Storage abaixo.
   for (const t of timesApagar) addUrl(t.criado_por, t.logo_url);
 
+  // Lista final, DEDUPLICADA (Set), de tudo o que sai de verdade do Storage —
+  // junta as URLs por usuário acima com os logos de TODOS os times a apagar
+  // (inclusive os sem dono a apagar, ex.: times de contas MANTER).
+  const todasUrls = new Set();
+  for (const [, urls] of urlsPorUser) urls.forEach((u) => todasUrls.add(u));
+  for (const t of timesApagar) if (t.logo_url) todasUrls.add(t.logo_url);
+
   const urlsPorBucket = { avatars: [], resenha: [] };
-  for (const [, urls] of urlsPorUser) {
-    for (const url of urls) {
-      const p = parseUrlPublico(url);
-      if (p) urlsPorBucket[p.bucket].push(url);
-    }
+  for (const url of todasUrls) {
+    const p = parseUrlPublico(url);
+    if (p) urlsPorBucket[p.bucket].push(url);
   }
   // Ficheiro temporário determinístico (routes/auth.js: tmp/${userId}-pad.jpg,
   // gerado durante a geração de avatar IA) — não vem de nenhuma linha da BD,
@@ -230,12 +253,14 @@ async function montarPlano() {
   }));
 
   return {
+    timesTambem,
     manterIds,
     manterEmails: MANTER_EMAILS,
     superAdminsCount: (superAdmins || []).length,
     usuarios,
     apagarIds,
     timesApagar,
+    timesApagarIds,
     timesFicam,
     avisos,
     urlsPorBucket,
@@ -247,6 +272,9 @@ function imprimirRelatorio(plano, { execucaoReal }) {
   const titulo = execucaoReal ? 'EXECUÇÃO' : 'SIMULAÇÃO (dry-run — nada foi alterado)';
   console.log(`\n[limpar] ${titulo}`);
   console.log(`[limpar] mantidos: ${plano.manterEmails.join(', ')} + ${plano.superAdminsCount} super-admin(s)`);
+  if (plano.timesTambem) {
+    console.log('[limpar] --times-tambem ATIVO: TODOS os times serão apagados, inclusive os das contas MANTER (perfil/e-mail/figurinha delas continuam intactos — só os times deixam de existir).');
+  }
 
   if (plano.avisos.length) {
     console.log('\n[limpar] ⚠ AVISOS:');
@@ -298,8 +326,11 @@ function rodarBackup() {
 }
 
 async function executarApagar(plano) {
-  if (!plano.usuarios.length) {
-    console.log('[limpar] nada a apagar — a base já só tem as contas mantidas.');
+  // Com --times-tambem pode não sobrar nenhum usuário a apagar (2ª corrida)
+  // mas ainda haver times de contas MANTER para limpar — só sai cedo se as
+  // DUAS listas estiverem vazias.
+  if (!plano.usuarios.length && !plano.timesApagarIds.length) {
+    console.log('[limpar] nada a apagar — a base já só tem as contas mantidas (e os times delas, se --times-tambem não estiver ativo).');
     return;
   }
 
@@ -330,8 +361,10 @@ async function executarApagar(plano) {
     console.warn(`[limpar] aviso: não consegui limpar user_avatar_slots (tabela pode não existir) — ${e.message}`);
   }
 
-  // 4) teams criados pelos usuários a apagar — cascade cuida do resto (ver cabeçalho).
-  const timesApagados = await apagarEmLotes('teams', 'criado_por', plano.apagarIds);
+  // 4) times a apagar (por id — cobre tanto os criados pelos usuários a
+  // apagar quanto, com --times-tambem, os das contas MANTER) — cascade cuida
+  // do resto (ver cabeçalho).
+  const timesApagados = await apagarEmLotes('teams', 'id', plano.timesApagarIds);
   console.log(`[limpar] teams: ${timesApagados} time(s) apagado(s) (cascade: membros, jogos, votos, posts, convites, campeonatos...).`);
 
   // 5) auth.admin.deleteUser — 1 por 1 (a API não aceita lote); cascade final
@@ -355,7 +388,7 @@ async function executarApagar(plano) {
   }
 
   console.log('\n[limpar] estado final — a relistar o que sobrou...');
-  const planoFinal = await montarPlano();
+  const planoFinal = await montarPlano({ timesTambem: plano.timesTambem });
   console.log(`[limpar] restam ${planoFinal.usuarios.length} usuário(s) fora da lista MANTER (esperado: só as falhas acima, se houver).`);
   console.log(`[limpar] times que ficam agora: ${planoFinal.timesFicam.length}.`);
 }
@@ -364,6 +397,7 @@ async function main() {
   const args = process.argv.slice(2);
   const querApagar = args.includes('--apagar');
   const confirmou = args.includes('--confirmo');
+  const timesTambem = args.includes('--times-tambem');
   if (querApagar !== confirmou) {
     console.error('[limpar] Para apagar de verdade use as DUAS flags juntas: --apagar --confirmo');
     console.error('[limpar] Sem flags, o script só simula (dry-run) e não altera nada.');
@@ -371,7 +405,7 @@ async function main() {
   }
   const execucaoReal = querApagar && confirmou;
 
-  const plano = await montarPlano();
+  const plano = await montarPlano({ timesTambem });
   imprimirRelatorio(plano, { execucaoReal });
 
   if (execucaoReal) {
