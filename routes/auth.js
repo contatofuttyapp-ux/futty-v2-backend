@@ -672,8 +672,19 @@ router.post(
         // do serviço). Código próprio para o frontend distinguir sem depender do texto.
         let corpo = err.body;
         if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
-        if (corpo?.detail?.some((d) => d.type === 'file_download_error')) {
+        // Bug corrigido (14-set): em 401/403 a fal devolve `detail` como STRING
+        // ("Forbidden"), não array — .some() nessa string derrubava com
+        // TypeError e escondia a causa real. Só chama .some() se for array.
+        if (Array.isArray(corpo?.detail) && corpo.detail.some((d) => d.type === 'file_download_error')) {
           throw new HttpError(422, 'Sua foto não pôde ser processada. Tente enviar uma foto nova.', 'FOTO_INVALIDA');
+        }
+        // Chave inválida, conta sem permissão ou sem crédito na fal — falha do
+        // MOTOR, não da foto do utilizador (não sugerir "tente outra foto").
+        // ALERTA no log: precisa de ação humana (chave/plano fal), não é
+        // instabilidade passageira.
+        if ([401, 403, 402].includes(err.status)) {
+          console.error('[avatar-ai] ALERTA: fal recusou', { status: err.status });
+          throw new HttpError(503, 'A geração de figurinha está indisponível agora. Tente de novo mais tarde.', 'IA_INDISPONIVEL');
         }
         throw err;
       }

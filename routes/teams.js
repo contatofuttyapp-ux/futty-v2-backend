@@ -52,11 +52,23 @@ router.post(
   '/api/teams',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { nome, cor, publica, localizacao, descricao } = req.body || {};
+    const { nome, cor, publica, localizacao, descricao, cidade } = req.body || {};
     if (!nome || !nome.trim()) throw new HttpError(400, 'O nome do time é obrigatório.');
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
+
+    // GEO (14-set, mesma regra do PATCH /api/teams/:slug): guarda o nome da
+    // CIDADE (texto) + geocodifica (Nominatim) → geo_lat/geo_lng ARREDONDADOS
+    // no servidor (a morada exacta nunca entra). Se a geocodificação falhar,
+    // guarda só o texto e segue — nunca bloqueia a criação do time por isso.
+    const cidadeFinal = cidade ? String(cidade).trim().slice(0, 100) : null;
+    let geoLat = null;
+    let geoLng = null;
+    if (cidadeFinal) {
+      const g = await geocodar(cidadeFinal);
+      if (g) { geoLat = g.lat; geoLng = g.lng; }
+    }
 
     await ensureUserRow(req.user);
 
@@ -65,7 +77,7 @@ router.post(
     let lastError = null;
     for (let attempt = 0; attempt < 3 && !team; attempt += 1) {
       const slug = slugify(nome);
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('teams')
         .insert({
           nome: nome.trim(),
@@ -75,9 +87,29 @@ router.post(
           publica: !!publica,
           localizacao: localizacaoFinal,
           descricao: descricaoFinal,
+          cidade: cidadeFinal,
+          geo_lat: geoLat,
+          geo_lng: geoLng,
         })
         .select()
         .single();
+      // Resiliência: se as colunas geo ainda não existirem, repete sem elas
+      // (mesmo fallback do PATCH /api/teams/:slug).
+      if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
+        ({ data, error } = await supabase
+          .from('teams')
+          .insert({
+            nome: nome.trim(),
+            slug,
+            cor: corFinal,
+            criado_por: req.user.id,
+            publica: !!publica,
+            localizacao: localizacaoFinal,
+            descricao: descricaoFinal,
+          })
+          .select()
+          .single());
+      }
       if (!error) team = data;
       else if (error.code === '23505') lastError = error; // slug duplicado -> tenta de novo
       else throw new HttpError(500, error.message);
