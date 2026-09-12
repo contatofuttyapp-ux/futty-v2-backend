@@ -3,6 +3,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
+const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
@@ -134,71 +135,13 @@ router.get(
  * GET /api/games/my-invites — todos os jogos das equipas do utilizador.
  * Registado ANTES de /api/games/:id para não colidir com o param :id.
  */
+// Lógica em services/inicio.js#obterConvites — a MESMA função que GET /api/inicio
+// usa, para o JSON nunca divergir entre as duas rotas.
 router.get(
   '/api/games/my-invites',
   requireAuth,
   asyncHandler(async (req, res) => {
-    // Equipas do utilizador
-    const { data: memberships } = await supabase
-      .from('team_members')
-      .select('team_id, ausente_proximo, teams ( id, nome, slug )')
-      .eq('user_id', req.user.id);
-    const teamById = {};
-    const ausenteByTeam = {};
-    for (const m of memberships || []) {
-      if (m.teams) teamById[m.team_id] = m.teams;
-      ausenteByTeam[m.team_id] = !!m.ausente_proximo;
-    }
-    const teamIds = Object.keys(teamById);
-    if (!teamIds.length) return res.json({ games: [] });
-
-    // Jogos dessas equipas (data ASC)
-    const { data: games, error } = await supabase
-      .from('games')
-      .select('id, team_id, data, local, status, sorteio_realizado, cancelado')
-      .in('team_id', teamIds)
-      .order('data', { ascending: true });
-    if (error) throw new HttpError(500, error.message);
-
-    // Confirmados + o meu estado por jogo
-    const ids = (games || []).map((g) => g.id);
-    const counts = {};
-    const myStatus = {};
-    if (ids.length) {
-      const { data: gp } = await supabase
-        .from('game_players')
-        .select('game_id, user_id, confirmado')
-        .in('game_id', ids);
-      for (const row of gp || []) {
-        if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
-        if (row.user_id === req.user.id) myStatus[row.game_id] = row.confirmado ? 'going' : 'not_going';
-      }
-    }
-
-    const now = Date.now();
-    const list = (games || []).map((g) => {
-      const past = g.data && new Date(g.data).getTime() < now;
-      const cancelado = !!g.cancelado || g.status === 'cancelado';
-      const finished = g.status === 'terminado' || cancelado || past;
-      const status = finished ? 'finished' : g.sorteio_realizado ? 'drawn' : 'scheduled';
-      const team = teamById[g.team_id] || {};
-      return {
-        id: g.id,
-        name: g.local || 'Jogo',
-        date: g.data,
-        location: g.local || null,
-        confirmed_count: counts[g.id] || 0,
-        status,
-        cancelado,
-        user_status: myStatus[g.id] ?? null,
-        team_id: g.team_id,
-        team_name: team.nome || null,
-        team_slug: team.slug || null,
-        ausente_proximo: ausenteByTeam[g.team_id] || false,
-      };
-    });
-
-    res.json({ games: list });
+    res.json(await obterConvites(req.user.id));
   })
 );
 

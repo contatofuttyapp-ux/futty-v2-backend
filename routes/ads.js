@@ -5,27 +5,15 @@
 //    independente dos toggles por página;
 //  · toggle por página (default OFF) — página desligada = nenhum anúncio;
 //  · rótulo "PUBLICIDADE" é do frontend.
+// Lógica em services/inicio.js#obterAd — a MESMA função que GET /api/inicio usa,
+// para o JSON nunca divergir entre as duas rotas.
 const express = require('express');
 const { optionalAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/http');
-const { supabase } = require('../utils/db');
-const gabineteStore = require('../utils/gabineteStore');
+const { obterAd } = require('../services/inicio');
 const adsStore = require('../utils/adsStore');
-const { ehAdulto } = require('../utils/rostoPublico');
 
 const router = express.Router();
-
-const hojeStr = () => new Date().toISOString().slice(0, 10);
-function ativa(c, hoje) {
-  if (c.estado !== 'ativa') return false;
-  if (c.inicio && c.inicio > hoje) return false;
-  if (c.fim && c.fim < hoje) return false;
-  return true;
-}
-// FAIL-CLOSED: sem cls → tratado como 18+ (só adulto autenticado vê).
-function podeVer(c, adulto) {
-  return (c.cls || '18+') === 'livre' ? true : adulto === true;
-}
 
 /** GET /api/ads?pagina=inicio|sorteio|p — devolve o anúncio a mostrar (ou {ad:null}). */
 router.get(
@@ -33,28 +21,7 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const pagina = String(req.query.pagina || '').trim();
-    const store = await gabineteStore.ler();
-    if (store.ads_ativo === false) return res.json({ ad: null }); // interruptor geral OFF
-    if (!store.toggles || store.toggles[pagina] !== true) return res.json({ ad: null }); // página OFF
-
-    let adulto = false;
-    if (req.user) {
-      const { data: u } = await supabase.from('users').select('birthdate').eq('id', req.user.id).maybeSingle();
-      adulto = ehAdulto(u && u.birthdate);
-    }
-    const hoje = hojeStr();
-    const elegiveis = (store.campanhas || []).filter(
-      (c) => Array.isArray(c.paginas) && c.paginas.includes(pagina) && ativa(c, hoje) && podeVer(c, adulto),
-    );
-    if (!elegiveis.length) return res.json({ ad: null });
-    // rotação simples sem cookies (por minuto)
-    const c = elegiveis[Math.floor(Date.now() / 60000) % elegiveis.length];
-    res.json({
-      ad: {
-        id: c.id, anunciante: c.anunciante || '', imagem_url: c.imagem_url || null,
-        texto: c.texto || c.nome || '', sub: c.sub || c.anunciante || '', cta: c.cta || 'Ver', link: c.link || null,
-      },
-    });
+    res.json(await obterAd(pagina, req.user?.id));
   }),
 );
 

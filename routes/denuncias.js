@@ -6,6 +6,7 @@ const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { denunciaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug } = require('../utils/db');
+const { obterDesfechosDenuncias } = require('../services/inicio');
 const { removerFicheirosPorUrl } = require('../utils/storage');
 const { triar } = require('../utils/triagem');
 const store = require('../utils/denunciaStore');
@@ -190,20 +191,17 @@ router.post(
   })
 );
 
-/** GET /api/denuncias/meus-desfechos — nº de denúncias MINHAS já analisadas (sem
- *  veredicto). Alimenta a notificação discreta no Início. */
+/**
+ * GET /api/denuncias/meus-desfechos — nº de denúncias MINHAS já analisadas (sem
+ * veredicto). Alimenta a notificação discreta no Início. Lógica em
+ * services/inicio.js#obterDesfechosDenuncias — a MESMA função que GET
+ * /api/inicio usa, para o JSON nunca divergir entre as duas rotas.
+ */
 router.get(
   '/api/denuncias/meus-desfechos',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: membros } = await supabase.from('team_members').select('team_id').eq('user_id', req.user.id);
-    const teamIds = (membros || []).map((m) => m.team_id);
-    let n = 0;
-    for (const tid of teamIds) {
-      const casos = await store.listarEquipa(tid);
-      n += casos.filter((c) => c.reporter_id === req.user.id && c.resolvido_em).length;
-    }
-    res.json({ total: n }); // só a contagem — nunca o veredicto
+    res.json(await obterDesfechosDenuncias(req.user.id));
   })
 );
 

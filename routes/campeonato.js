@@ -4,6 +4,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole } = require('../utils/db');
+const { obterCampeonato } = require('../services/inicio');
 
 const router = express.Router();
 
@@ -62,33 +63,16 @@ router.post(
   })
 );
 
-/** GET /api/equipas/:slug/campeonato — campeonato activo da equipa + jornadas. */
+/**
+ * GET /api/equipas/:slug/campeonato — campeonato activo da equipa + jornadas.
+ * Lógica em services/inicio.js#obterCampeonato — a MESMA função que GET
+ * /api/inicio usa, para o JSON nunca divergir entre as duas rotas.
+ */
 router.get(
   '/api/equipas/:slug/campeonato',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Time não encontrado.');
-    const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não é membro deste time.');
-
-    // Devolve o mais recente (ativo ou terminado).
-    const { data: campeonato } = await supabase
-      .from('campeonatos')
-      .select('*')
-      .eq('team_id', team.id)
-      .order('criado_em', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (!campeonato) return res.json({ campeonato: null });
-
-    const { data: jornadas } = await supabase
-      .from('campeonato_jornadas')
-      .select('*')
-      .eq('campeonato_id', campeonato.id)
-      .order('numero', { ascending: true });
-
-    res.json({ campeonato, jornadas: jornadas || [] });
+    res.json(await obterCampeonato(req.params.slug, req.user.id));
   })
 );
 

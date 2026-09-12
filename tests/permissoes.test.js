@@ -132,6 +132,12 @@ test('GET /api/super/gabinete/resumo -> 401 sem token, 403 com utilizador comum'
   assert.equal(comUmComum.status, 403, `com utilizador comum devia dar 403, deu ${comUmComum.status}`);
 });
 
+// ─── GET /api/inicio (agregado da tela Início, 11-set) ──────────────────────
+test('GET /api/inicio -> 401 sem token', async () => {
+  const semToken = await pedir('GET', '/api/inicio');
+  assert.equal(semToken.status, 401, `sem token devia dar 401, deu ${semToken.status}`);
+});
+
 // ─── 3. Rotas públicas → nunca 401 ──────────────────────────────────────────
 test('rotas publicas -> nunca 401', async () => {
   const casos = [

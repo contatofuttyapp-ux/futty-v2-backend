@@ -7,8 +7,7 @@ const fal = require('@fal-ai/serverless-client');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
-const { golosDoJogador } = require('../utils/agregados');
-const { notaParaExibir } = require('../utils/helpers');
+const { obterMe } = require('../services/inicio');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
@@ -70,104 +69,17 @@ const LIMITES_IA = { free: 2, pro: 50, elite: 100 };
 const PERFIL_COLS =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 
-// Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
-// menos 18 anos. (Não dá para usar coluna gerada STORED — ver migração 034.)
-function calcIsAdult(birthdate) {
-  if (!birthdate) return false;
-  const hoje = new Date();
-  const limite = new Date(Date.UTC(hoje.getUTCFullYear() - 18, hoje.getUTCMonth(), hoje.getUTCDate()));
-  return new Date(birthdate) <= limite;
-}
-
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
  * Garante também a linha em public.users (caso o trigger não tenha corrido).
+ * Lógica em services/inicio.js#obterMe — a MESMA função que GET /api/inicio usa,
+ * para o JSON nunca divergir entre as duas rotas.
  */
 router.get(
   '/api/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const userId = req.user.id;
-    await ensureUserRow(req.user);
-
-    // Achado 3/23 (lentidão): estas leituras são todas independentes entre si (só
-    // precisam da linha em users já garantida acima) — corriam uma a seguir à
-    // outra, cada round-trip ao Supabase a somar à seguinte. Em paralelo.
-    // mostrar_rosto_publico/avatar_generico já vêm dentro de PERFIL_COLS (10-set:
-    // confirmadas presentes em produção — deixaram de ser 2 consultas à parte).
-    const [
-      perfil,
-      jogosRows,
-      gols,
-      voteRows,
-      slotRows,
-    ] = await Promise.all([
-      getUserById(userId, PERFIL_COLS),
-      // jogos = presenças confirmadas EM JOGOS JÁ ENCERRADOS (achado 10 — confirmar
-      // presença num jogo futuro não pode inflar a estatística).
-      supabase
-        .from('game_players')
-        .select('games ( data, status, cancelado )')
-        .eq('user_id', userId)
-        .eq('confirmado', true)
-        .then((r) => r.data),
-      // RANKING VIVO: os golos vêm da FONTE (gols_jogadores), não da coluna legado
-      // de team_members — bate com o número do ranking (uma só verdade).
-      golosDoJogador(userId),
-      // Nota exibida (1-10 com boost) — mín. 3 votos, como no ranking.
-      supabase.from('votes').select('nota').eq('para_user_id', userId).then((r) => r.data),
-      // Slots de kit já gerados por este utilizador (array de kit_id).
-      supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
-    ]);
-
-    const agora = Date.now();
-    const jogos = (jogosRows || []).filter((r) => {
-      const g = r.games;
-      if (!g || g.cancelado || g.status === 'cancelado') return false;
-      return g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora);
-    }).length;
-
-    const totalVotos = voteRows ? voteRows.length : 0;
-    const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;
-    const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
-
-    const slots = (slotRows || []).map((r) => r.kit_id);
-
-    res.json({
-      user: {
-        id: userId,
-        email: req.user.email,
-        nome: perfil?.nome || null,
-        avatar_url: perfil?.avatar_url || null,
-        foto_url: perfil?.foto_url || null,
-        nome_jogador: perfil?.nome_jogador || null,
-        cor_preferida: perfil?.cor_preferida || null,
-        telefone: perfil?.telefone || null,
-        avatar_ia_creditos: perfil?.avatar_ia_creditos ?? 3,
-        cor_frame: perfil?.cor_frame || 'dourado',
-        fundo_figurinha: perfil?.fundo_figurinha || 'estadio',
-        plan: perfil?.plan || 'free',
-        avatar_ia_mes: perfil?.avatar_ia_mes ?? 0,
-        avatar_ia_reset: perfil?.avatar_ia_reset || null,
-        is_super_admin: perfil?.is_super_admin || false,
-        birthdate: perfil?.birthdate || null,
-        is_adult: calcIsAdult(perfil?.birthdate),
-        mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
-        kit_ativo: perfil?.kit_ativo || 'dark-gold',
-        avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
-        // P1-1 — flag do onboarding dia-1 no user_metadata do Auth (sem DDL).
-        // FALSE → qualquer entrada autenticada reencaminha 1x para /onboarding
-        // (resistente ao caminho de entrada: confirmação de email noutro
-        // dispositivo, login fresco, deep-link). Contas antigas foram semeadas
-        // TRUE pelo script backfill-onboarding.js.
-        onboarding_completo: req.user.user_metadata?.onboarding_completo === true,
-        // Tour de boas-vindas (E8): o "já vi" vive no user (Auth metadata, sem DDL) —
-        // assim não reaparece noutro dispositivo nem quando o localStorage é limpo.
-        tour_inicio_visto: req.user.user_metadata?.tour_inicio_visto === true,
-      },
-      slots,
-      stats: { nota, jogos: jogos || 0, gols },
-    });
+    res.json(await obterMe(req.user));
   })
 );
 

@@ -6,6 +6,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { conviteLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
+const { obterTeams, obterPedidos } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
 const { verificarImagemReal } = require('../utils/imagemReal');
@@ -97,36 +98,13 @@ router.post(
 );
 
 /** GET /api/teams — lista as equipas de que o utilizador é membro. */
+// Lógica em services/inicio.js#obterTeams — a MESMA função que GET /api/inicio
+// usa, para o JSON nunca divergir entre as duas rotas.
 router.get(
   '/api/teams',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data, error } = await supabase
-      .from('team_members')
-      .select('role, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade )')
-      .eq('user_id', req.user.id)
-      .order('created_at', { ascending: true });
-    if (error) throw new HttpError(500, error.message);
-
-    const teams = (data || [])
-      .filter((row) => row.teams)
-      .map((row) => ({ ...row.teams, role: row.role }));
-
-    // P2-6: pedidos de entrada pendentes por equipa (só onde sou admin) → badge
-    // no chip do Início, para não apodrecerem por dias sem entrar no hub.
-    const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
-    if (adminIds.length) {
-      const { data: peds } = await supabase
-        .from('team_join_requests')
-        .select('team_id')
-        .in('team_id', adminIds)
-        .eq('status', 'pending');
-      const contagem = {};
-      for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
-      for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
-    }
-
-    res.json({ teams });
+    res.json(await obterTeams(req.user.id));
   })
 );
 
@@ -920,21 +898,7 @@ router.get(
   '/api/me/pedidos',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data, error } = await supabase
-      .from('team_join_requests')
-      .select('id, status, updated_at, teams ( id, nome, slug, cor, logo_url )')
-      .eq('user_id', req.user.id)
-      .in('status', ['approved', 'rejected', 'pending'])
-      .order('updated_at', { ascending: false });
-    if (error) throw new HttpError(500, error.message);
-    res.json({
-      pedidos: (data || []).map((p) => ({
-        id: p.id,
-        status: p.status,
-        updated_at: p.updated_at,
-        team: p.teams ? { id: p.teams.id, nome: p.teams.nome, slug: p.teams.slug, cor: p.teams.cor, logo_url: p.teams.logo_url } : null,
-      })),
-    });
+    res.json(await obterPedidos(req.user.id));
   })
 );
 

@@ -5,6 +5,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, loadGame } = require('../utils/db');
+const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
@@ -250,61 +251,16 @@ router.post(
   })
 );
 
-/** GET /api/jogos/:gameId/rsvp — estado + listas (confirmados/recusados/pendentes). */
+/**
+ * GET /api/jogos/:gameId/rsvp — estado + listas (confirmados/recusados/pendentes).
+ * Lógica em services/inicio.js#obterRsvp — a MESMA função que GET /api/inicio
+ * usa, para o JSON nunca divergir entre as duas rotas.
+ */
 router.get(
   '/api/jogos/:gameId/rsvp',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const game = await jogoComoMembro(req);
-
-    // Membros da equipa.
-    const { data: membros } = await supabase
-      .from('team_members')
-      .select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
-      .eq('team_id', game.teams.id);
-    const users = (membros || []).map((m) => m.users).filter(Boolean);
-
-    // Respostas já dadas.
-    const { data: respostas } = await supabase
-      .from('rsvp_respostas')
-      .select('user_id, status')
-      .eq('game_id', game.id);
-    const statusPorUser = {};
-    (respostas || []).forEach((r) => {
-      statusPorUser[r.user_id] = r.status;
-    });
-
-    const confirmados = users.filter((u) => statusPorUser[u.id] === 'confirmado');
-    const max = game.max_jogadores ?? null;
-    const lugaresDisponiveis = max != null ? Math.max(0, max - confirmados.length) : null;
-
-    // Lista de espera (ordenada por posição).
-    const userById = {};
-    for (const u of users) userById[u.id] = u;
-    const { data: filaRows } = await supabase
-      .from('rsvp_espera')
-      .select('user_id, posicao')
-      .eq('game_id', game.id)
-      .order('posicao', { ascending: true });
-    const espera = (filaRows || []).map((r) => {
-      const u = userById[r.user_id] || {};
-      return { user_id: r.user_id, nome: u.nome_jogador || u.nome || null, avatar_url: u.avatar_url || null, posicao: r.posicao };
-    });
-    const minhaEspera = (filaRows || []).find((r) => r.user_id === req.user.id);
-
-    res.json({
-      rsvp_aberto: game.rsvp_aberto || false,
-      rsvp_prazo: game.rsvp_prazo || null,
-      rsvp_fechado: game.rsvp_fechado || false,
-      max_jogadores: max,
-      lugares_disponiveis: lugaresDisponiveis,
-      cheio: max != null && confirmados.length >= max,
-      confirmados,
-      recusados: users.filter((u) => statusPorUser[u.id] === 'recusado'),
-      pendentes: users.filter((u) => !statusPorUser[u.id]),
-      espera,
-      minha_posicao_espera: minhaEspera ? minhaEspera.posicao : null,
-    });
+    res.json(await obterRsvp(req.params.gameId, req.user.id));
   })
 );
 

@@ -5,6 +5,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
+const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
@@ -327,28 +328,13 @@ router.get(
  * GET /api/teams/:slug/votacao-status — progresso de votação do utilizador.
  * { total, votados, faltam, pedido_revotacao }
  */
+// Lógica em services/inicio.js#obterVotacaoStatus — a MESMA função que GET
+// /api/inicio usa, para o JSON nunca divergir entre as duas rotas.
 router.get(
   '/api/teams/:slug/votacao-status',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { team } = await requireTeamMember(req.params.slug, req.user.id);
-
-    const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
-    const total = (membros || []).filter((m) => m.user_id !== req.user.id).length;
-
-    const { data: meus } = await supabase
-      .from('votes')
-      .select('para_user_id, updated_at')
-      .eq('team_id', team.id)
-      .eq('de_user_id', req.user.id);
-    const votados = new Set((meus || []).map((v) => v.para_user_id)).size;
-
-    const { data: teamRow } = await supabase.from('teams').select('revotar_pedido_em').eq('id', team.id).maybeSingle();
-    const pedidoEm = teamRow?.revotar_pedido_em ? new Date(teamRow.revotar_pedido_em).getTime() : 0;
-    const maxUpdated = (meus || []).reduce((mx, v) => Math.max(mx, v.updated_at ? new Date(v.updated_at).getTime() : 0), 0);
-    const pedido_revotacao = pedidoEm > 0 && pedidoEm > maxUpdated;
-
-    res.json({ total, votados, faltam: Math.max(0, total - votados), pedido_revotacao });
+    res.json(await obterVotacaoStatus(req.params.slug, req.user.id));
   })
 );
 
@@ -358,73 +344,13 @@ router.get(
  * a votação deixa de ser invisível fora do Ranking.
  * { pendentes: [{ slug, nome, faltam, pedido_revotacao }] } (só as com trabalho).
  */
+// Lógica em services/inicio.js#obterVotacoesPendentes — a MESMA função que GET
+// /api/inicio usa, para o JSON nunca divergir entre as duas rotas.
 router.get(
   '/api/me/votacoes-pendentes',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const uid = req.user.id;
-    const { data: minhas } = await supabase.from('team_members').select('team_id').eq('user_id', uid);
-    const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
-    if (!teamIds.length) return res.json({ pendentes: [] });
-
-    const { data: teams } = await supabase
-      .from('teams')
-      .select('id, slug, nome, revotar_pedido_em')
-      .in('id', teamIds);
-    const { data: votos } = await supabase
-      .from('votes')
-      .select('team_id, para_user_id, updated_at')
-      .eq('de_user_id', uid)
-      .in('team_id', teamIds);
-
-    // Achado 21: só pede avaliação de quem o usuário REALMENTE jogou junto — jogos
-    // já ENCERRADOS em que ambos estiveram confirmados. "Todo mundo do time" incluía
-    // gente que ele nunca viu em campo (ou o próprio usuário sem jogo nenhum ainda).
-    const { data: jogosDasEquipas } = await supabase
-      .from('games')
-      .select('id, team_id, data, status, cancelado')
-      .in('team_id', teamIds);
-    const agora = Date.now();
-    const teamIdByGame = {};
-    const encerradoIds = [];
-    for (const g of jogosDasEquipas || []) {
-      teamIdByGame[g.id] = g.team_id;
-      const cancelado = !!g.cancelado || g.status === 'cancelado';
-      const encerrado = !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-      if (encerrado) encerradoIds.push(g.id);
-    }
-    const { data: minhasPresencas } = encerradoIds.length
-      ? await supabase.from('game_players').select('game_id').eq('user_id', uid).eq('confirmado', true).in('game_id', encerradoIds)
-      : { data: [] };
-    const meusGameIds = [...new Set((minhasPresencas || []).map((p) => p.game_id))];
-    const { data: colegasPresencas } = meusGameIds.length
-      ? await supabase.from('game_players').select('game_id, user_id').eq('confirmado', true).in('game_id', meusGameIds)
-      : { data: [] };
-    const colegasPorTeam = {}; // team_id -> Set(user_id) de quem jogou junto
-    for (const p of colegasPresencas || []) {
-      if (p.user_id === uid) continue;
-      const tid = teamIdByGame[p.game_id];
-      if (!tid) continue;
-      (colegasPorTeam[tid] = colegasPorTeam[tid] || new Set()).add(p.user_id);
-    }
-
-    const pendentes = [];
-    for (const t of teams || []) {
-      const elegiveis = colegasPorTeam[t.id] || new Set();
-      const total = elegiveis.size;
-      const meus = (votos || []).filter((v) => v.team_id === t.id && elegiveis.has(v.para_user_id));
-      const votados = new Set(meus.map((v) => v.para_user_id)).size;
-      const faltam = Math.max(0, total - votados);
-      const maxUpdated = meus.reduce((mx, v) => Math.max(mx, v.updated_at ? new Date(v.updated_at).getTime() : 0), 0);
-      const pedidoEm = t.revotar_pedido_em ? new Date(t.revotar_pedido_em).getTime() : 0;
-      const pedido_revotacao = total > 0 && pedidoEm > 0 && pedidoEm > maxUpdated;
-      if (total > 0 && (faltam > 0 || pedido_revotacao)) {
-        pendentes.push({ slug: t.slug, nome: t.nome, faltam, pedido_revotacao });
-      }
-    }
-    // Mais urgente primeiro: pedido de revotação do admin, depois mais faltas.
-    pendentes.sort((a, b) => (b.pedido_revotacao - a.pedido_revotacao) || (b.faltam - a.faltam));
-    res.json({ pendentes });
+    res.json(await obterVotacoesPendentes(req.user.id));
   })
 );
 
