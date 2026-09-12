@@ -17,6 +17,11 @@ const BUCKET = 'denuncias';
 const CAMINHO = '_gabinete/operacao.json';
 
 const SEED = {
+  // Câmbio US$→€ (14-set): a fal cobra em dólar (gasto_ia_diario), mas o
+  // painel de Dinheiro passou a mostrar tudo em euros (custos já regravados
+  // em EUR) — este número converte o card "IA do mês" para o mesmo padrão.
+  // Editável à mão na aba Dinheiro; não há fonte automática de câmbio.
+  cambio_usd_eur: 0.86,
   // Aba Dinheiro > Custos fixos. Valores reais de hoje (PAINEL-E-CUSTOS.md §1):
   // tudo em plano grátis, R$0/mês fixo — só a IA custa, e essa vive à parte
   // em "IA do mês" (gasto_ia_diario), não aqui.
@@ -118,7 +123,13 @@ async function gravar(obj) {
   const acessos = Array.isArray(obj?.acessos) ? obj.acessos : SEED.acessos;
   validarAcessos(acessos); // lança HttpError(400) se algum `obs` parecer senha/chave
 
+  // cambio_usd_eur: número são entre 0.5 e 2 (paraquedas contra um dígito a
+  // mais/a menos escrito à mão) — fora disso, mantém o que já estava gravado.
+  const cambioNum = Number(obj?.cambio_usd_eur);
+  const cambio_usd_eur = Number.isFinite(cambioNum) && cambioNum >= 0.5 && cambioNum <= 2 ? cambioNum : SEED.cambio_usd_eur;
+
   const limpo = {
+    cambio_usd_eur,
     custos_fixos: Array.isArray(obj?.custos_fixos) ? obj.custos_fixos : SEED.custos_fixos,
     registros: Array.isArray(obj?.registros) ? obj.registros : SEED.registros,
     acessos,

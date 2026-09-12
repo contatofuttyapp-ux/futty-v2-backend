@@ -272,6 +272,7 @@ router.get(
       precisa_de_voce: precisaDeVoce,
       dinheiro: {
         custos_fixos: op.custos_fixos || [],
+        cambio_usd_eur: op.cambio_usd_eur ?? gabineteStore.SEED.cambio_usd_eur,
         ia_mes: {
           gasto_usd: Number((gastoMes.custo_cents / 100).toFixed(2)),
           teto_diario_usd: Number((TETO_DIARIO_CENTS / 100).toFixed(2)),
