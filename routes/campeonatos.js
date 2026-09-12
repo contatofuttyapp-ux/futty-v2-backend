@@ -37,14 +37,28 @@ const POS = { 1: '1º', 2: '2º', 3: '3º' };
  */
 async function computeSelos(uid, teamIds) {
   const agora = Date.now();
-  const selos = [];
-  {
-    for (const teamId of teamIds) {
-      const { data: team } = await supabase.from('teams').select('nome').eq('id', teamId).maybeSingle(); // eslint-disable-line no-await-in-loop
-      const equipaNome = team?.nome || 'Time';
+  if (!teamIds.length) return [];
+
+  // Velocidade 2 (12-set): era 1 query de nome POR equipa, dentro do loop
+  // sequencial abaixo — agora 1 query só, com .in(), para todas as equipas.
+  const { data: teamsData } = await supabase.from('teams').select('id, nome').in('id', teamIds);
+  const nomePorId = new Map((teamsData || []).map((t) => [t.id, t.nome]));
+
+  // Era um `for` sequencial (await dentro do loop, com no-await-in-loop
+  // desligado) — N equipas = N round-trips em SÉRIE ao motor em São Paulo
+  // (~240ms cada, de Lisboa). Agora todas as equipas correm em PARALELO —
+  // o tempo total passa a ser o da equipa mais lenta, não a soma de todas.
+  const porEquipa = await Promise.all(
+    teamIds.map(async (teamId) => {
+      const equipaNome = nomePorId.get(teamId) || 'Time';
+      const selosDaEquipa = [];
+
+      const [camps, rk] = await Promise.all([
+        store.listar(teamId),
+        buildRanking(teamId, uid).catch(() => null), // ranking indisponível — ignora
+      ]);
 
       // --- campeonato (pódio) ---
-      const camps = await store.listar(teamId); // eslint-disable-line no-await-in-loop
       for (const c of camps) {
         if (c.estado !== 'terminado') continue;
         const pod = store.podio(c);
@@ -52,7 +66,7 @@ async function computeSelos(uid, teamIds) {
         if (!meu) continue;
         const fim = c.terminado_em ? new Date(c.terminado_em).getTime() : new Date(c.criado_em).getTime();
         const dias = Math.floor((agora - fim) / 86400000);
-        selos.push({
+        selosDaEquipa.push({
           id: `camp:${c.id}`,
           fonte: 'campeonato',
           tier: meu.tier,
@@ -67,25 +81,25 @@ async function computeSelos(uid, teamIds) {
       }
 
       // --- ranking (posição atual, vivo) ---
-      try {
-        const rk = await buildRanking(teamId, uid); // eslint-disable-line no-await-in-loop
-        const eu = (rk || []).find((r) => r.sou_eu);
-        if (eu && eu.posicao >= 1 && eu.posicao <= 3) {
-          selos.push({
-            id: `rank:${teamId}`,
-            fonte: 'ranking',
-            tier: { 1: 'ouro', 2: 'prata', 3: 'bronze' }[eu.posicao],
-            label: `RANKING ${POS[eu.posicao]}`,
-            sub: equipaNome,
-            ativa: true,
-            vivo: true,
-            historico: false,
-            prioridade: 3,
-          });
-        }
-      } catch { /* ranking indisponível — ignora */ }
-    }
-  }
+      const eu = (rk || []).find((r) => r.sou_eu);
+      if (eu && eu.posicao >= 1 && eu.posicao <= 3) {
+        selosDaEquipa.push({
+          id: `rank:${teamId}`,
+          fonte: 'ranking',
+          tier: { 1: 'ouro', 2: 'prata', 3: 'bronze' }[eu.posicao],
+          label: `RANKING ${POS[eu.posicao]}`,
+          sub: equipaNome,
+          ativa: true,
+          vivo: true,
+          historico: false,
+          prioridade: 3,
+        });
+      }
+
+      return selosDaEquipa;
+    })
+  );
+  const selos = porEquipa.flat();
   // Achado 12: mesmo tipo + mesmo time só uma vez (ex.: "RANKING 1º" duplicado).
   // `id` já é único por time (rank:<teamId>) ou por campeonato (camp:<campId>).
   const vistos = new Set();

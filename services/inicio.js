@@ -301,11 +301,10 @@ async function obterVotacoesPendentes(userId) {
 async function obterDesfechosDenuncias(userId) {
   const { data: membros } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
   const teamIds = (membros || []).map((m) => m.team_id);
-  let n = 0;
-  for (const tid of teamIds) {
-    const casos = await denunciaStore.listarEquipa(tid);
-    n += casos.filter((c) => c.reporter_id === userId && c.resolvido_em).length;
-  }
+  // Velocidade 2 (12-set): era um `for` sequencial (1 download de Storage por
+  // equipa, em série) — agora todas as equipas em paralelo.
+  const porEquipa = await Promise.all(teamIds.map((tid) => denunciaStore.listarEquipa(tid)));
+  const n = porEquipa.reduce((total, casos) => total + casos.filter((c) => c.reporter_id === userId && c.resolvido_em).length, 0);
   return { total: n }; // só a contagem — nunca o veredicto
 }
 
