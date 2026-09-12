@@ -245,16 +245,15 @@ async function obterVotacoesPendentes(userId) {
   const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
   if (!teamIds.length) return { pendentes: [] };
 
-  const { data: teams } = await supabase.from('teams').select('id, slug, nome, revotar_pedido_em').in('id', teamIds);
-  const { data: votos } = await supabase
-    .from('votes')
-    .select('team_id, para_user_id, updated_at')
-    .eq('de_user_id', userId)
-    .in('team_id', teamIds);
-
-  // Só pede avaliação de quem o utilizador REALMENTE jogou junto — jogos já
-  // ENCERRADOS em que ambos estiveram confirmados.
-  const { data: jogosDasEquipas } = await supabase.from('games').select('id, team_id, data, status, cancelado').in('team_id', teamIds);
+  // As 3 consultas abaixo só dependem de teamIds — nenhuma depende do
+  // resultado das outras (13-set, "Velocidade 3": eram sequenciais).
+  const [{ data: teams }, { data: votos }, { data: jogosDasEquipas }] = await Promise.all([
+    supabase.from('teams').select('id, slug, nome, revotar_pedido_em').in('id', teamIds),
+    supabase.from('votes').select('team_id, para_user_id, updated_at').eq('de_user_id', userId).in('team_id', teamIds),
+    // Só pede avaliação de quem o utilizador REALMENTE jogou junto — jogos já
+    // ENCERRADOS em que ambos estiveram confirmados.
+    supabase.from('games').select('id, team_id, data, status, cancelado').in('team_id', teamIds),
+  ]);
   const agora = Date.now();
   const teamIdByGame = {};
   const encerradoIds = [];
@@ -312,13 +311,15 @@ async function obterDesfechosDenuncias(userId) {
 async function obterVotacaoStatus(slug, userId) {
   const { team } = await requireTeamMember(slug, userId);
 
-  const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
+  // Independentes entre si depois de `team` resolvido (13-set, "Velocidade
+  // 3": eram 3 awaits em série).
+  const [{ data: membros }, { data: meus }, { data: teamRow }] = await Promise.all([
+    supabase.from('team_members').select('user_id').eq('team_id', team.id),
+    supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId),
+    supabase.from('teams').select('revotar_pedido_em').eq('id', team.id).maybeSingle(),
+  ]);
   const total = (membros || []).filter((m) => m.user_id !== userId).length;
-
-  const { data: meus } = await supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId);
   const votados = new Set((meus || []).map((v) => v.para_user_id)).size;
-
-  const { data: teamRow } = await supabase.from('teams').select('revotar_pedido_em').eq('id', team.id).maybeSingle();
   const pedidoEm = teamRow?.revotar_pedido_em ? new Date(teamRow.revotar_pedido_em).getTime() : 0;
   const maxUpdated = (meus || []).reduce((mx, v) => Math.max(mx, v.updated_at ? new Date(v.updated_at).getTime() : 0), 0);
   const pedido_revotacao = pedidoEm > 0 && pedidoEm > maxUpdated;
@@ -330,16 +331,15 @@ async function obterVotacaoStatus(slug, userId) {
 async function obterCampeonato(slug, userId) {
   const team = await getTeamBySlug(slug, 'id, slug');
   if (!team) throw new HttpError(404, 'Time não encontrado.');
-  const role = await getRole(team.id, userId);
-  if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-  const { data: campeonato } = await supabase
-    .from('campeonatos')
-    .select('*')
-    .eq('team_id', team.id)
-    .order('criado_em', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+  // role e campeonato só dependem de team.id, não um do outro (13-set,
+  // "Velocidade 3": eram sequenciais). O acesso só é confirmado depois —
+  // se `role` vier vazio o resultado de campeonato é descartado a seguir.
+  const [role, { data: campeonato }] = await Promise.all([
+    getRole(team.id, userId),
+    supabase.from('campeonatos').select('*').eq('team_id', team.id).order('criado_em', { ascending: false }).limit(1).maybeSingle(),
+  ]);
+  if (!role) throw new HttpError(403, 'Não é membro deste time.');
   if (!campeonato) return { campeonato: null };
 
   const { data: jornadas } = await supabase
@@ -355,16 +355,20 @@ async function obterCampeonato(slug, userId) {
 async function obterRsvp(gameId, userId) {
   const game = await loadGame(gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
-  const role = await getRole(game.teams.id, userId);
+
+  // role, membros, respostas e filaRows só dependem de game/team já
+  // carregados — nenhum depende dos outros 3 (13-set, "Velocidade 3": eram 4
+  // awaits em série). O acesso só é confirmado depois — se `role` vier vazio
+  // o resto é descartado a seguir.
+  const [role, { data: membros }, { data: respostas }, { data: filaRows }] = await Promise.all([
+    getRole(game.teams.id, userId),
+    supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', game.teams.id),
+    supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', game.id),
+    supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', game.id).order('posicao', { ascending: true }),
+  ]);
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-  const { data: membros } = await supabase
-    .from('team_members')
-    .select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
-    .eq('team_id', game.teams.id);
   const users = (membros || []).map((m) => m.users).filter(Boolean);
-
-  const { data: respostas } = await supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', game.id);
   const statusPorUser = {};
   (respostas || []).forEach((r) => {
     statusPorUser[r.user_id] = r.status;
@@ -376,11 +380,6 @@ async function obterRsvp(gameId, userId) {
 
   const userById = {};
   for (const u of users) userById[u.id] = u;
-  const { data: filaRows } = await supabase
-    .from('rsvp_espera')
-    .select('user_id, posicao')
-    .eq('game_id', game.id)
-    .order('posicao', { ascending: true });
   const espera = (filaRows || []).map((r) => {
     const u = userById[r.user_id] || {};
     return { user_id: r.user_id, nome: u.nome_jogador || u.nome || null, avatar_url: u.avatar_url || null, posicao: r.posicao };

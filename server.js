@@ -96,6 +96,10 @@ const corsOptions = {
     const permitido = allowedOrigins.some((o) => (o instanceof RegExp ? o.test(origin) : o === origin));
     return callback(null, permitido);
   },
+  // Server-Timing (13-set, "Velocidade 3", middleware/tempo.js): por omissão
+  // o browser só lê headers "seguros" de um pedido cross-origin — sem isto o
+  // header ia na resposta mas o DevTools/fetch do frontend não o enxergava.
+  exposedHeaders: ['Server-Timing'],
 };
 app.use(cors(corsOptions));
 

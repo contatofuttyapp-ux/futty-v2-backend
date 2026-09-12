@@ -47,6 +47,17 @@ async function getRole(teamId, userId) {
   return data?.role || null;
 }
 
+// Memo em memória (13-set, "Velocidade 3"): ensureUserRow é chamado em TODO
+// /api/me (obterMe) — um upsert por pedido, mesmo quando a linha já existe há
+// muito. Chave inclui email/birthdate: se algum mudar (troca de email,
+// birthdate preenchida tardiamente) o próximo pedido volta a fazer upsert
+// mesmo dentro da janela — nunca "esquece" um dado novo por causa do cache.
+// TTL 10min, teto de 2000 chaves (LRU: remove a mais antiga ao ultrapassar —
+// mesma filosofia do cache de sessão em middleware/auth.js).
+const ENSURE_USER_TTL_MS = 10 * 60 * 1000;
+const ENSURE_USER_MAX = 2000;
+const ensureUserCache = new Map(); // `${id}:${email}:${birthdate}` -> expiraEm
+
 /** Garante que existe a linha em public.users (o trigger pode não ter corrido).
  * Persiste também a birthdate enviada no signUp (user_metadata) quando válida —
  * é a forma de capturar a data do registo, já que o registo é feito via Supabase
@@ -55,7 +66,18 @@ async function ensureUserRow(user) {
   const row = { id: user.id, email: user.email };
   const bd = user.user_metadata?.birthdate;
   if (typeof bd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(bd)) row.birthdate = bd;
+
+  const chave = `${row.id}:${row.email || ''}:${row.birthdate || ''}`;
+  const agora = Date.now();
+  const expiraEm = ensureUserCache.get(chave);
+  if (expiraEm && expiraEm > agora) return; // já garantido há menos de 10min
+
   await supabase.from('users').upsert(row, { onConflict: 'id' });
+
+  if (ensureUserCache.size >= ENSURE_USER_MAX) {
+    ensureUserCache.delete(ensureUserCache.keys().next().value); // remove a mais antiga
+  }
+  ensureUserCache.set(chave, agora + ENSURE_USER_TTL_MS);
 }
 
 /** Garante o bucket público "avatars" no Storage (idempotente). Corre no arranque. */

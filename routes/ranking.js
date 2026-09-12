@@ -25,19 +25,25 @@ function notaValida(n) {
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
 async function buildRanking(teamId, meUserId) {
-  // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
-  // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
-  // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
-  // destaque), mais abaixo. Zero drift, zero DDL, sempre verdadeiro.
-  const { data: membros } = await supabase
-    .from('team_members')
-    .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
-    .eq('team_id', teamId);
+  // Membros, votos e agregados só dependem de teamId — nenhum depende do
+  // resultado dos outros (13-set, "Velocidade 3": eram 3 awaits em série).
+  const [{ data: membros }, { data: votos }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds }] = await Promise.all([
+    // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
+    // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
+    // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
+    // destaque), mais abaixo. Zero drift, zero DDL, sempre verdadeiro.
+    supabase
+      .from('team_members')
+      .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
+      .eq('team_id', teamId),
+    // Votos da equipa (todos) — média + o meu voto por jogador.
+    supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
+    // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
+    agregadosDaEquipa(teamId),
+  ]);
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
 
-  // Votos da equipa (todos) — média + o meu voto por jogador.
-  const { data: votos } = await supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId);
   const agg = {};
   const minhaNota = {};
   for (const v of votos || []) {
@@ -46,9 +52,6 @@ async function buildRanking(teamId, meUserId) {
     agg[v.para_user_id].count += 1;
     if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = Number(v.nota);
   }
-
-  // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
-  const { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds } = await agregadosDaEquipa(teamId);
 
   // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
   // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
