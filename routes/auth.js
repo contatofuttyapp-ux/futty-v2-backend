@@ -7,7 +7,7 @@ const fal = require('@fal-ai/serverless-client');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
-const { obterMe } = require('../services/inicio');
+const { obterMe, marcarFigurinhaStatus } = require('../services/inicio');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
@@ -490,6 +490,11 @@ router.post(
     const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, created_at');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
 
+    // Origem (12-set): só para log — o Onboarding dispara isto em fire-and-forget
+    // logo após o upload da foto ('cadastro'); o resto do app chama sem origem.
+    // Nunca muda a geração nem a quota, só ajuda o Gabinete a distinguir no log.
+    const origem = req.body?.origem === 'cadastro' ? 'cadastro' : null;
+
     // --- KIT: validação (existe / activo / plano) ---
     const kitId = String(req.body?.kit || 'dark-gold');
     const kit = KITS_IA[kitId];
@@ -514,6 +519,10 @@ router.post(
         .update({ avatar_url: slot.avatar_url, kit_ativo: kitId })
         .eq('id', userId);
       if (vestirErr) throw new HttpError(500, vestirErr.message);
+      // Separado do update acima de propósito: figurinha_status vive numa coluna
+      // nova (migração 051) e nunca pode derrubar o essencial (avatar_url/kit_ativo)
+      // se ainda não tiver sido migrada.
+      marcarFigurinhaStatus(userId, 'pronta');
       console.log('[avatar-ai] slot reutilizado (sem geração, sem quota):', { userId, kitId });
       return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true });
     }
@@ -541,29 +550,40 @@ router.post(
       }
     }
 
-    // PACOTE ANTI-ABUSO DE CUSTO (11-ago) — três gates, só a partir daqui (uma
-    // geração real vai custar dinheiro; o slot-reuse acima nunca passa por aqui).
-    //
-    // 1. E-MAIL-GATE: contas Google confirmam e-mail no próprio login (passam
-    //    direto); contas email+senha precisam ter clicado no link de confirmação.
-    //    Só trava a GERAÇÃO — nunca cadastro, login ou navegação.
-    const provedor = req.user.app_metadata?.provider;
-    if (provedor !== 'google' && !req.user.email_confirmed_at) {
-      throw new HttpError(403, 'Confirme seu e-mail para gerar (enviamos o link).', 'EMAIL_NAO_CONFIRMADO');
-    }
-    // 2. TETO DIÁRIO — paraquedas com alerta, nunca teto de vidro: super-admin
-    //    (uso interno/testes) sempre passa; o resto pausa ao bater 100% do dia.
-    if (!perfil.is_super_admin) {
-      const teto = await verificarTeto();
-      if (teto.bloqueado) {
+    // Figurinha automática (12-set): marca 'gerando' AQUI — depois de kit/plano/
+    // slot-reuse/quota (validações de uso normal do endpoint, não específicas do
+    // cadastro), mas ANTES do e-mail-gate. Motivo: no fluxo do Onboarding (fire-
+    // and-forget logo após o upload), o e-mail-gate é o erro mais provável de
+    // todos — quase toda conta nova via email+senha ainda não confirmou o e-mail
+    // nesse instante — e o polling do Início precisa ver 'falhou' nesse caso, ou
+    // fica preso mostrando "criando..." para sempre. Try/catch amplo a partir
+    // daqui (não só ao redor da geração): qualquer gate reprovado também conta.
+    await marcarFigurinhaStatus(userId, 'gerando');
+
+    try {
+      // PACOTE ANTI-ABUSO DE CUSTO (11-ago) — três gates, só a partir daqui (uma
+      // geração real vai custar dinheiro; o slot-reuse acima nunca passa por aqui).
+      //
+      // 1. E-MAIL-GATE: contas Google confirmam e-mail no próprio login (passam
+      //    direto); contas email+senha precisam ter clicado no link de confirmação.
+      //    Só trava a GERAÇÃO — nunca cadastro, login ou navegação.
+      const provedor = req.user.app_metadata?.provider;
+      if (provedor !== 'google' && !req.user.email_confirmed_at) {
+        throw new HttpError(403, 'Confirme seu e-mail para gerar (enviamos o link).', 'EMAIL_NAO_CONFIRMADO');
+      }
+      // 2. TETO DIÁRIO — paraquedas com alerta, nunca teto de vidro: super-admin
+      //    (uso interno/testes) sempre passa; o resto pausa ao bater 100% do dia.
+      if (!perfil.is_super_admin) {
+        const teto = await verificarTeto();
+        if (teto.bloqueado) {
+          throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
+        }
+      }
+      // 3. AUTO-FREEZE — regra de ferro, só contas <48h (usuários reais não sentem).
+      const freeze = await verificarFreeze(perfil.created_at);
+      if (freeze.congelado) {
         throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
       }
-    }
-    // 3. AUTO-FREEZE — regra de ferro, só contas <48h (usuários reais não sentem).
-    const freeze = await verificarFreeze(perfil.created_at);
-    if (freeze.congelado) {
-      throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
-    }
 
     // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
     // continuação da faixa superior. A IA ancora ao enquadramento do input; dar-lhe
@@ -622,6 +642,7 @@ router.post(
     console.log('[avatar-ai] a chamar fal com:', {
       modelo: 'fal-ai/gpt-image-1.5/edit',
       kit: kitId,
+      origem,
       prompt_length: promptFutty(kitId).length,
       quality: qualidadeIA,
       image_size: '1024x1536',
@@ -805,6 +826,8 @@ router.post(
     }
     const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
+    // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
+    marcarFigurinhaStatus(userId, 'pronta');
 
     // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
     // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
@@ -812,6 +835,14 @@ router.post(
     registrarGeracao({ userId, ip: req.ip }).catch(() => {});
 
     res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false });
+    } catch (err) {
+      // Qualquer falha a partir do e-mail-gate (inclusive) até aqui → 'falhou',
+      // para o polling do Início parar de mostrar "criando..." e oferecer nova
+      // foto. Ver nota no início do try: o e-mail-gate é o caso mais provável
+      // no fluxo do cadastro.
+      await marcarFigurinhaStatus(userId, 'falhou');
+      throw err;
+    }
   })
 );
 

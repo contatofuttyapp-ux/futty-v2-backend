@@ -14,9 +14,46 @@ const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
-const PERFIL_COLS =
+const PERFIL_COLS_BASE =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
+// figurinha_status/_em (migração 051) — colunas novas; ver resiliência em
+// obterPerfilResiliente() abaixo (mesmo padrão de `historico` em games.js).
+const PERFIL_COLS = `${PERFIL_COLS_BASE}, figurinha_status, figurinha_status_em`;
 const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
+
+/**
+ * Lê o perfil com PERFIL_COLS (inclui figurinha_status/_em); se a migração 051
+ * ainda não tiver corrido em produção, repete sem essas 2 colunas — para o
+ * deploy do código nunca depender da ordem em que o Pedro corre a migração.
+ */
+async function obterPerfilResiliente(userId) {
+  const { data, error } = await supabase.from('users').select(PERFIL_COLS).eq('id', userId).maybeSingle();
+  if (!error) return data;
+  if (/figurinha_status/i.test(error.message || '')) {
+    const { data: semFigurinha } = await supabase.from('users').select(PERFIL_COLS_BASE).eq('id', userId).maybeSingle();
+    return semFigurinha;
+  }
+  return null;
+}
+
+/**
+ * Marca figurinha_status (best-effort, NUNCA lança) — usado por
+ * POST /api/me/avatar/ai. Separado de propósito de qualquer update que
+ * devolva erro ao chamador: se a migração 051 ainda não tiver corrido, isto
+ * falha em silêncio e a geração real do avatar continua intacta (o avatar_url/
+ * kit_ativo nunca viajam no mesmo UPDATE que estas 2 colunas novas).
+ */
+async function marcarFigurinhaStatus(userId, status) {
+  try {
+    const { error } = await supabase
+      .from('users')
+      .update({ figurinha_status: status, figurinha_status_em: new Date().toISOString() })
+      .eq('id', userId);
+    if (error) console.error('[figurinha-status] update falhou (migração 051 por correr?):', error.message);
+  } catch (e) {
+    console.error('[figurinha-status] update falhou:', e.message);
+  }
+}
 
 // Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
 // menos 18 anos.
@@ -27,13 +64,25 @@ function calcIsAdult(birthdate) {
   return new Date(birthdate) <= limite;
 }
 
+// Figurinha automática do cadastro (12-set): 'gerando' preso há mais de 3min
+// (POST /api/me/avatar/ai que nunca voltou a escrever — crash do processo,
+// timeout do fal, etc.) conta como 'falhou' na LEITURA — sem precisar de um
+// job à parte para limpar. Calculado a cada leitura, nunca persistido aqui.
+const FIGURINHA_GERANDO_TIMEOUT_MS = 3 * 60 * 1000;
+function calcFigurinhaStatus(status, statusEm) {
+  if (status === 'gerando' && statusEm && Date.now() - new Date(statusEm).getTime() > FIGURINHA_GERANDO_TIMEOUT_MS) {
+    return 'falhou';
+  }
+  return status || null;
+}
+
 /** Utilizador autenticado + stats agregadas. Garante a linha em public.users. */
 async function obterMe(user) {
   const userId = user.id;
   await ensureUserRow(user);
 
   const [perfil, jogosRows, gols, voteRows, slotRows] = await Promise.all([
-    getUserById(userId, PERFIL_COLS),
+    obterPerfilResiliente(userId),
     supabase
       .from('game_players')
       .select('games ( data, status, cancelado )')
@@ -80,6 +129,7 @@ async function obterMe(user) {
       mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
       kit_ativo: perfil?.kit_ativo || 'dark-gold',
       avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
+      figurinha_status: calcFigurinhaStatus(perfil?.figurinha_status, perfil?.figurinha_status_em),
       onboarding_completo: user.user_metadata?.onboarding_completo === true,
       tour_inicio_visto: user.user_metadata?.tour_inicio_visto === true,
     },
@@ -401,4 +451,5 @@ module.exports = {
   obterCampeonato,
   obterRsvp,
   obterAd,
+  marcarFigurinhaStatus,
 };
