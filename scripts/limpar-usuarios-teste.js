@@ -14,36 +14,22 @@
 // Requer backend/.env com SUPABASE_URL e SUPABASE_SERVICE_KEY (reaproveita
 // utils/db.js, mesmo cliente service_role que o resto do backend usa).
 //
-// ORDEM da deleção real (por isto, nunca a ordem inversa):
-//   1) Storage (avatars/resenha) dos usuários a apagar + logos dos times
-//      deles — nada disto cai por FK, é preciso apagar à mão (Tijolo 1B).
-//   2) geracao_ia_log — user_id SEM foreign key nenhuma (migração 046):
-//      apagar user não apaga isto sozinho, fica órfão para sempre se não
-//      limparmos à mão.
-//   3) user_avatar_slots — tabela sem migração commitada (criada à mão no
-//      Supabase; confirmado por grep + 049_trancar_banco.sql linha 63-65).
-//      Sem saber se tem FK com cascade, limpamos à mão por segurança —
-//      idempotente, não falha se a tabela nem existir.
-//   4) teams WHERE criado_por IN (...) — cascade cuida de team_members,
-//      games (e tudo dependente de game: game_players, votes.game_id,
-//      rsvp_respostas, gols_jogadores, rsvp_espera, share_declarations),
-//      feed_posts+feed_post_media, champion_photos, team_join_requests,
-//      convites, campeonatos+campeonato_jornadas. Tudo confirmado
-//      "ON DELETE CASCADE" em db/migrations/*.sql (auditoria 14-set).
-//   5) auth.admin.deleteUser(id) — cascade automático (001_schema.sql linha
-//      11: public.users.id REFERENCES auth.users(id) ON DELETE CASCADE)
-//      apaga a linha em public.users, que por sua vez cascade-apaga tudo o
-//      que ainda restava referenciando user_id diretamente (team_members
-//      como MEMBRO de outros times, votes, comentarios+comentario_anexos,
-//      denuncias, reacoes, rsvp*, push_subscriptions, user_blocks,
-//      convites.criado_por/usado_por — todos CASCADE ou SET NULL,
-//      confirmado por grep em db/migrations/).
+// ORDEM da deleção real de cada usuário: ver utils/apagarUsuario.js (14-set,
+// exclusão de conta) — times (sucessão de admin ou exclusão), Storage,
+// geracao_ia_log, user_avatar_slots, por fim auth.admin.deleteUser. A MESMA
+// função que a rota DELETE /api/me usa para a auto-exclusão do usuário, para
+// nunca haver duas versões da ordem de deleção a divergir com o tempo.
 //
-// Fazer o passo 4 (times) ANTES do passo 5 (usuário) é deliberado: dá
-// visibilidade e controlo (contamos exatamente quantos times saíram, com um
-// erro claro se algo bloquear) em vez de confiar cegamente numa cascade de
-// 2 níveis (teams.criado_por → users.id) escondida dentro do
-// auth.admin.deleteUser.
+// Achado 14-set (exclusão de conta): teams.criado_por tem ON DELETE CASCADE
+// — apagar cegamente todos os times CRIADOS pelos usuários a apagar (como
+// este script fazia antes) apagaria times com gente ativa que não está
+// sendo removida. Agora cada usuário passa por resolverTimes() dentro de
+// apagarUsuario(): time com outro admin ou outro membro → sobrevive
+// (sucessão do cargo, se preciso); time onde o usuário era o único membro →
+// apagado. --times-tambem continua a existir para o caso de querer mesmo
+// apagar TUDO (inclusive times de contas MANTER e os que acabaram de ganhar
+// um novo dono por sucessão) — roda como uma varredura FINAL, separada, já
+// que não é uma decisão por usuário.
 //
 // campeonatos_v2/campeonato_times/campeonato_confrontos (migração 039) ficam
 // DE FORA de propósito — mesma decisão de scripts/backup-banco.js: ainda não
@@ -52,6 +38,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { supabase } = require('../utils/db');
 const { removerFicheirosPorUrl, parseUrlPublico } = require('../utils/storage');
+const { apagarUsuario } = require('../utils/apagarUsuario');
 
 const MANTER_EMAILS = ['phferreiraborgesbackup@gmail.com', 'contatofuttyapp@gmail.com'].map((e) => e.toLowerCase());
 const TAMANHO_LOTE = 200; // PostgREST/.in() em lotes — mesmo espírito do TAMANHO_PAGINA de backup-banco.js
@@ -301,16 +288,16 @@ function imprimirRelatorio(plano, { execucaoReal }) {
   );
   console.log('\n[limpar] TOTAIS:');
   console.log(`  usuários: ${plano.usuarios.length}`);
-  console.log(`  times a apagar: ${plano.timesApagar.length}`);
-  console.log(`  times que ficam: ${plano.timesFicam.length}`);
+  console.log(`  times em risco (usuário é criador): ${plano.timesApagar.length}`);
+  console.log(`  times que ficam garantidos (nenhum usuário a apagar é o criador): ${plano.timesFicam.length}`);
   console.log(`  participações em times: ${totais.participacoes}`);
   console.log(`  jogos: ${totais.jogos}`);
   console.log(`  votos: ${totais.votos}`);
   console.log(`  fotos no Storage: ${totais.fotos + plano.caminhosTmp.length} (+ ${plano.caminhosTmp.length} arquivo(s) temporário(s) tentado(s), best-effort)`);
 
-  console.log(`\n[limpar] times que seriam apagados (${plano.timesApagar.length}):`);
+  console.log(`\n[limpar] times EM RISCO — ${plano.timesApagar.length}, mas só são apagados de verdade se o usuário a apagar for o ÚNICO membro; havendo outro admin ou membro, o time sobrevive por sucessão (ver utils/apagarUsuario.js):`);
   plano.timesApagar.forEach((t) => console.log(`  - ${t.nome} (${t.slug})`));
-  console.log(`\n[limpar] times que ficam (${plano.timesFicam.length}):`);
+  console.log(`\n[limpar] times que ficam garantidos (${plano.timesFicam.length}):`);
   plano.timesFicam.forEach((t) => console.log(`  - ${t.nome} (${t.slug})`));
   console.log('');
 }
@@ -325,63 +312,78 @@ function rodarBackup() {
   console.log('[limpar] backup OK.\n');
 }
 
+/** --times-tambem: varredura FINAL, depois de todos os usuários processados —
+ * apaga TODOS os times que ainda sobrarem (inclusive os das contas MANTER e
+ * os que acabaram de ganhar um novo dono por sucessão dentro de
+ * apagarUsuario()). Deliberadamente fora de apagarUsuario(): não é uma
+ * decisão por usuário, é "quero mesmo zerar todos os times". */
+async function apagarTodosOsTimesRestantes() {
+  const { data: restantes, error } = await supabase.from('teams').select('id, nome, slug, logo_url');
+  if (error) throw new Error(`teams: ${error.message}`);
+  if (!(restantes || []).length) return 0;
+
+  const urlsPorBucket = { avatars: [], resenha: [] };
+  for (const t of restantes) {
+    if (!t.logo_url) continue;
+    const p = parseUrlPublico(t.logo_url);
+    if (p) urlsPorBucket[p.bucket].push(t.logo_url);
+  }
+  for (const bucket of Object.keys(urlsPorBucket)) {
+    if (!urlsPorBucket[bucket].length) continue;
+    const r = await removerFicheirosPorUrl(bucket, urlsPorBucket[bucket]);
+    console.log(`  logos (${bucket}): ${r.removidos} removido(s)${r.erro ? ` (erro: ${r.erro})` : ''}`);
+  }
+  return apagarEmLotes('teams', 'id', restantes.map((t) => t.id));
+}
+
 async function executarApagar(plano) {
   // Com --times-tambem pode não sobrar nenhum usuário a apagar (2ª corrida)
   // mas ainda haver times de contas MANTER para limpar — só sai cedo se as
-  // DUAS listas estiverem vazias.
-  if (!plano.usuarios.length && !plano.timesApagarIds.length) {
+  // DUAS coisas estiverem vazias.
+  if (!plano.usuarios.length && !plano.timesTambem) {
     console.log('[limpar] nada a apagar — a base já só tem as contas mantidas (e os times delas, se --times-tambem não estiver ativo).');
     return;
   }
 
   rodarBackup(); // lança (execFileSync) se o exit code não for 0 — aborta aqui, antes de tocar em nada
 
-  // 1) Storage — best-effort, nunca aborta a limpeza por um ficheiro que falhe.
-  console.log('[limpar] a remover ficheiros no Storage...');
-  for (const bucket of Object.keys(plano.urlsPorBucket)) {
-    const urls = plano.urlsPorBucket[bucket];
-    if (!urls.length) continue;
-    const r = await removerFicheirosPorUrl(bucket, urls);
-    console.log(`  ${bucket}: ${r.removidos} removido(s)${r.erro ? ` (erro: ${r.erro})` : ''}`);
-  }
-  if (plano.caminhosTmp.length) {
-    const { error } = await supabase.storage.from('avatars').remove(plano.caminhosTmp);
-    if (error) console.warn(`  avatars/tmp: aviso (${error.message}) — segue, são ficheiros efêmeros`);
-  }
-
-  // 2) geracao_ia_log — sem FK nenhuma (migração 046), nunca cai por cascade.
-  const logsApagados = await apagarEmLotes('geracao_ia_log', 'user_id', plano.apagarIds);
-  console.log(`[limpar] geracao_ia_log: ${logsApagados} linha(s) apagada(s).`);
-
-  // 3) user_avatar_slots — schema desconhecido (sem migração); defensivo.
-  try {
-    const slotsApagados = await apagarEmLotes('user_avatar_slots', 'user_id', plano.apagarIds);
-    console.log(`[limpar] user_avatar_slots: ${slotsApagados} linha(s) apagada(s).`);
-  } catch (e) {
-    console.warn(`[limpar] aviso: não consegui limpar user_avatar_slots (tabela pode não existir) — ${e.message}`);
-  }
-
-  // 4) times a apagar (por id — cobre tanto os criados pelos usuários a
-  // apagar quanto, com --times-tambem, os das contas MANTER) — cascade cuida
-  // do resto (ver cabeçalho).
-  const timesApagados = await apagarEmLotes('teams', 'id', plano.timesApagarIds);
-  console.log(`[limpar] teams: ${timesApagados} time(s) apagado(s) (cascade: membros, jogos, votos, posts, convites, campeonatos...).`);
-
-  // 5) auth.admin.deleteUser — 1 por 1 (a API não aceita lote); cascade final
-  // (public.users e tudo o que ainda referenciava user_id diretamente).
+  // 1-5) por usuário, via utils/apagarUsuario.js — a MESMA lógica da rota
+  // DELETE /api/me (times por sucessão/exclusão, Storage, geracao_ia_log,
+  // user_avatar_slots, auth.admin.deleteUser). Sequencial (não em paralelo):
+  // dá visibilidade linha a linha e evita corrida entre usuários do mesmo
+  // time (um podendo virar sucessor do outro no meio do lote).
+  console.log(`[limpar] a apagar ${plano.usuarios.length} usuário(s) (utils/apagarUsuario.js)...`);
   let usuariosApagados = 0;
+  let fotosRemovidas = 0;
+  let timesApagadosPorUsuario = 0;
+  let timesTransferidos = 0;
   const falhas = [];
   for (const u of plano.usuarios) {
-    const { error } = await supabase.auth.admin.deleteUser(u.id);
-    if (error) {
-      falhas.push({ email: u.email, erro: error.message });
-      console.error(`[limpar] FALHOU ao apagar ${u.email}: ${error.message}`);
-    } else {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await apagarUsuario(u.id);
       usuariosApagados += 1;
+      fotosRemovidas += r.fotosRemovidas;
+      timesApagadosPorUsuario += r.timesApagados.length;
+      timesTransferidos += r.timesTransferidos.length;
+      console.log(`  - ${u.email}: OK (times apagados: ${r.timesApagados.length}, transferidos: ${r.timesTransferidos.length}, fotos removidas: ${r.fotosRemovidas})`);
+    } catch (e) {
+      falhas.push({ email: u.email, erro: e.message });
+      console.error(`[limpar] FALHOU ao apagar ${u.email}: ${e.message}`);
     }
   }
 
-  console.log(`\n[limpar] RESUMO: ${usuariosApagados}/${plano.usuarios.length} usuário(s) apagado(s), ${timesApagados} time(s) apagado(s).`);
+  let timesApagadosTambem = 0;
+  if (plano.timesTambem) {
+    console.log('[limpar] --times-tambem: a apagar todos os times restantes...');
+    timesApagadosTambem = await apagarTodosOsTimesRestantes();
+  }
+
+  console.log(`\n[limpar] RESUMO: ${usuariosApagados}/${plano.usuarios.length} usuário(s) apagado(s).`);
+  console.log(`[limpar]   times apagados (usuário era o único membro): ${timesApagadosPorUsuario}`);
+  console.log(`[limpar]   times transferidos (sucessão de admin): ${timesTransferidos}`);
+  console.log(`[limpar]   fotos/ficheiros removidos do Storage: ${fotosRemovidas}`);
+  if (plano.timesTambem) console.log(`[limpar]   --times-tambem: ${timesApagadosTambem} time(s) restante(s) apagado(s).`);
   if (falhas.length) {
     console.log(`[limpar] ${falhas.length} falha(s) — rode o script de novo para tentar essas contas outra vez (idempotente):`);
     falhas.forEach((f) => console.log(`  - ${f.email}: ${f.erro}`));

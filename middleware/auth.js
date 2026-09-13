@@ -108,4 +108,15 @@ async function requireSuperAdmin(req, res, next) {
   }
 }
 
-module.exports = { requireAuth, optionalAuth, requireSuperAdmin };
+/**
+ * Remove o token do pedido atual do cache de sessão — usado por DELETE /api/me
+ * (14-set): sem isto, a conta já excluída continuava "autenticada" nesse
+ * mesmo token por até SESSAO_CACHE_TTL_MS (60s), porque requireAuth nunca
+ * voltaria a validar contra o Supabase dentro dessa janela.
+ */
+function invalidarSessaoDoPedido(req) {
+  const token = bearerToken(req);
+  if (token) sessaoCache.delete(token);
+}
+
+module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido };

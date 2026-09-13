@@ -4,13 +4,15 @@ const express = require('express');
 const multer = require('multer');
 const sharp = require('sharp');
 const fal = require('@fal-ai/serverless-client');
-const { requireAuth } = require('../middleware/auth');
+const { requireAuth, invalidarSessaoDoPedido } = require('../middleware/auth');
+const { excluirContaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { obterMe, marcarFigurinhaStatus } = require('../services/inicio');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
+const { apagarUsuario } = require('../utils/apagarUsuario');
 
 // fal.ai — credenciais via FAL_KEY (.env).
 fal.config({ credentials: process.env.FAL_KEY });
@@ -176,6 +178,29 @@ router.patch(
     // coluna nova, leitura defensiva) — devolve o valor que acabou de gravar.
     const userOut = 'avatar_generico' in patch ? { ...updated, avatar_generico: patch.avatar_generico } : updated;
     res.json({ user: userOut });
+  })
+);
+
+/**
+ * DELETE /api/me — exclui a conta por completo (LGPD / exigência das lojas).
+ * Exige confirmação explícita no corpo: { confirmacao: 'EXCLUIR' }. A ordem de
+ * deleção (times, Storage, logs, conta) vive em utils/apagarUsuario.js — a
+ * MESMA lógica usada por scripts/limpar-usuarios-teste.js, para nunca haver
+ * duas versões dela a divergir com o tempo.
+ */
+router.delete(
+  '/api/me',
+  requireAuth,
+  excluirContaLimiter,
+  asyncHandler(async (req, res) => {
+    if (req.body?.confirmacao !== 'EXCLUIR') {
+      throw new HttpError(400, 'Confirmação obrigatória: envie { confirmacao: "EXCLUIR" }.');
+    }
+    await apagarUsuario(req.user.id);
+    // Sem isto, o token desta sessão continuava "válido" (cache de 60s em
+    // middleware/auth.js) mesmo com a conta já excluída no Supabase.
+    invalidarSessaoDoPedido(req);
+    res.json({ ok: true });
   })
 );
 

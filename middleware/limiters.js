@@ -50,4 +50,13 @@ const denunciaLimiter = criarLimiter({
   mensagem: 'Demasiadas denúncias. Tenta de novo daqui a uma hora.',
 });
 
-module.exports = { criarLimiter, conviteLimiter, pushAdminLimiter, denunciaLimiter };
+// DELETE /api/me — 3/hora por usuário. Ação irreversível (LGPD/exigência das
+// lojas): o limite não é sobre abuso de custo, é um freio de segurança contra
+// automação/erro (um clique perdido não pode virar uma corrida de exclusões).
+const excluirContaLimiter = criarLimiter({
+  windowMs: HORA,
+  max: 3,
+  mensagem: 'Muitas tentativas de excluir a conta. Tente de novo daqui a 1 hora.',
+});
+
+module.exports = { criarLimiter, conviteLimiter, pushAdminLimiter, denunciaLimiter, excluirContaLimiter };
