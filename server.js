@@ -30,7 +30,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
-const rateLimit = require('express-rate-limit');
+const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
@@ -133,11 +133,28 @@ app.set('trust proxy', 1);
 // DEV (31-jul): fora de produção o tecto sobe para 2000 — numa tarde de teste o
 // dono + o Claude + o hot-reload estouravam os 200 e o app "morria" por 15 min.
 // Em produção (NODE_ENV=production) os 200 continuam valendo.
+// VELOCIDADE 4: a web passou a falar com o motor através de uma função na
+// Cloudflare (frontend/functions/api/[[path]].js), para acabar com o preflight.
+// O efeito colateral é que, visto daqui, TODOS esses pedidos chegam do mesmo IP
+// — o do edge. Um tecto por IP juntaria pessoas diferentes no mesmo balde e
+// bastavam quatro a navegar ao mesmo tempo para o app "cair" 15 minutos para
+// toda a gente. O edge reencaminha o IP real em CF-Connecting-IP; quando esse
+// header vem, é ele que conta.
+// O empate, de olhos abertos: quem bata direto no Cloud Run pode forjar o
+// header e trocar de balde. O tecto por IP é a rede grossa (anti-tráfego
+// anónimo); a rede fina é por utilizador (middleware/limiters.js) e essa não se
+// forja sem a sessão de alguém.
+function chaveDoPedido(req) {
+  const doEdge = req.get('cf-connecting-ip');
+  return ipKeyGenerator(doEdge || req.ip);
+}
+
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
   max: process.env.NODE_ENV === 'production' ? 200 : 2000,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: chaveDoPedido,
   message: { error: 'Demasiados pedidos. Tenta mais tarde.' },
   // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): /api/media/:token é o proxy
   // de imagem — um feed com muitas fotos faz várias chamadas de uma vez e
