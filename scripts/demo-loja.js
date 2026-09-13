@@ -94,8 +94,8 @@ const TIMES_PUBLICOS = [
   { nome: 'Society Lago Sul', slug: 'society-lago-sul-demo', cor: 'preto', modo: 'publico_aberto', localizacao: 'Lago Sul, Brasília, DF', geo: [-15.84, -47.87], descricao: 'Domingo 17h, campo com iluminação. Churrasco depois é tradição.', admin: 'Zé Gordo', membros: ['Índio', 'Cabeção', 'Careca', 'Dudu', 'Tiãozinho'] },
 ];
 
-// placar = [gols do time mais forte no sorteio, gols do mais fraco]: o time com
-// maior média de rating ganha 4, perde 1 e empata 1, para o ranking bater com as notas.
+// placar = [gols do time do Bruninho, gols do outro]: o time dele ganha 4, perde 1 e
+// empata 1, para o dono da conta demo aparecer no alto do ranking.
 const JOGOS_PASSADOS = [
   { data: brt(2026, 8, 2), placar: [4, 2] },
   { data: brt(2026, 8, 9), placar: [3, 1] },
@@ -109,11 +109,12 @@ const CONFIRMADOS_PROXIMO = ['Bruninho', 'Tiãozinho', 'Careca', 'Índio', 'Marq
 const RECUSARAM_PROXIMO = ['Fabinho', 'Renatinho'];
 
 const POSTS = [
+  // O post com foto é o mais recente, para a foto aparecer na primeira tela da Resenha.
   // Os comentários aparecem do mais novo para o mais antigo: cada um tem de fazer sentido sozinho.
-  { autor: 'Bruninho', diasAtras: 1, texto: 'Sorteio domingo às 8h45 em ponto. Quem chegar atrasado entra no time do Cabeção e ainda paga a água.', reacoes: { Tiãozinho: '😂', Careca: '😂', Dudu: '👍', Cabeção: '😡', 'Nego Di': '🍿' }, comentarios: [{ autor: 'Cabeção', texto: 'Meu time tá invicto há dois domingos, respeita.' }, { autor: 'Tiãozinho', texto: '8h30 eu já tô lá, com o colete escolhido.' }] },
-  { autor: 'Tiãozinho', diasAtras: 2, texto: 'Domingo tem clássico. Quem perder paga o churrasco, e o Careca já tá devendo dois.', reacoes: { Bruninho: '😂', 'Zé Gordo': '👍', Marquinhos: '😂', Fabinho: '🍿' }, comentarios: [{ autor: 'Careca', texto: 'Devo um. O outro foi empate e empate não paga.' }] },
-  { autor: 'Paulinho Gaúcho', diasAtras: 4, texto: 'Campo liberado pra domingo! Gramado tá um tapete. Zé Gordo, sem desculpa de buraco dessa vez.', foto: true, reacoes: { Bruninho: '❤️', Índio: '👍', Renatinho: '😮', Dudu: '❤️', 'Nego Di': '👍', Marquinhos: '👍' }, comentarios: [{ autor: 'Zé Gordo', texto: 'O buraco era real. Tinha até placa.' }] },
-  { autor: 'Índio', diasAtras: 5, texto: 'Três jogos sem tomar gol de fora da área. O Nego Di chuta pra fora desde 2019 e ainda pede pênalti.', reacoes: { 'Nego Di': '😡', Bruninho: '😂', Tiãozinho: '😂', Careca: '😂', Cabeção: '👍' }, comentarios: [{ autor: 'Nego Di', texto: 'Foi pênalti sim. Vou levar pro VAR do grupo.' }] },
+  { autor: 'Paulinho Gaúcho', horasAtras: 5, texto: 'Campo liberado pra domingo! Gramado tá um tapete. Zé Gordo, sem desculpa de buraco dessa vez.', foto: true, reacoes: { Bruninho: '❤️', Índio: '👍', Renatinho: '😮', Dudu: '❤️', 'Nego Di': '👍', Marquinhos: '👍' }, comentarios: [{ autor: 'Zé Gordo', texto: 'O buraco era real. Tinha até placa.' }] },
+  { autor: 'Bruninho', horasAtras: 27, texto: 'Sorteio domingo às 8h45 em ponto. Quem chegar atrasado entra no time do Cabeção e ainda paga a água.', reacoes: { Tiãozinho: '😂', Careca: '😂', Dudu: '👍', Cabeção: '😡', 'Nego Di': '🍿' }, comentarios: [{ autor: 'Cabeção', texto: 'Meu time tá invicto há dois domingos, respeita.' }, { autor: 'Tiãozinho', texto: '8h30 eu já tô lá, com o colete escolhido.' }] },
+  { autor: 'Tiãozinho', horasAtras: 50, texto: 'Domingo tem clássico. Quem perder paga o churrasco, e o Careca já tá devendo dois.', reacoes: { Bruninho: '😂', 'Zé Gordo': '👍', Marquinhos: '😂', Fabinho: '🍿' }, comentarios: [{ autor: 'Careca', texto: 'Devo um. O outro foi empate e empate não paga.' }] },
+  { autor: 'Índio', horasAtras: 120, texto: 'Três jogos sem tomar gol de fora da área. O Nego Di chuta pra fora desde 2019 e ainda pede pênalti.', reacoes: { 'Nego Di': '😡', Bruninho: '😂', Tiãozinho: '😂', Careca: '😂', Cabeção: '👍' }, comentarios: [{ autor: 'Nego Di', texto: 'Foi pênalti sim. Vou levar pro VAR do grupo.' }] },
 ];
 
 // ---------------------------------------------------------------------------
@@ -288,8 +289,9 @@ async function criarJogosPassados(ids, teamId) {
     const todos = JOGADORES.map((j) => jogadorParaSorteio(j, ids, ratings));
     const sorteio = executarSorteio(todos, 6, { seed: 1000 + i });
     const resultado = montarResultado(sorteio, todos.length);
-    // placar é [forte, fraco]; traduz para A/B conforme quem saiu mais forte no sorteio.
-    const aMaisForte = resultado.times[0].rating_medio >= resultado.times[1].rating_medio;
+    // placar é [forte, fraco]; o "forte" é o time do Bruninho (dono da conta demo), para
+    // ele aparecer no alto do ranking, que pesa vitórias, gols e destaques além da nota.
+    const aMaisForte = resultado.times[0].jogadores.some((j) => j.nome === 'Bruninho');
     const [pa, pb] = aMaisForte ? jp.placar : [jp.placar[1], jp.placar[0]];
     const golsA = distribuirGols(resultado.times[0].jogadores, pa, rng);
     const golsB = distribuirGols(resultado.times[1].jogadores, pb, rng);
@@ -360,7 +362,7 @@ async function criarProximoJogo(ids, teamId) {
 async function criarResenha(ids, teamId) {
   let fotoUrl = null;
   for (const p of POSTS) {
-    const criadoEm = new Date(Date.now() - p.diasAtras * 86400000 - 3 * 3600000).toISOString();
+    const criadoEm = new Date(Date.now() - p.horasAtras * 3600000).toISOString();
     const { data: post, error } = await supabase.from('feed_posts').insert({ team_id: teamId, author_id: ids[p.autor], body: p.texto, created_at: criadoEm, updated_at: criadoEm }).select().single();
     if (error) throw new Error(`feed_posts: ${error.message}`);
 
