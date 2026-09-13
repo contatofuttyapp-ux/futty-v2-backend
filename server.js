@@ -61,15 +61,6 @@ const inicioRoutes = require('./routes/inicio');
 
 const app = express();
 
-// Headers de segurança HTTP. crossOriginResourcePolicy em 'cross-origin' porque
-// este backend serve imagens (avatares, fotos) consumidas pelo frontend noutra
-// origem — o default 'same-origin' do helmet bloquearia esse carregamento.
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: 'cross-origin' },
-  })
-);
-
 // Origens permitidas: localhost (dev), qualquer URL do Codespaces (.app.github.dev)
 // e origens de produção definidas em CORS_ORIGINS (separadas por vírgula).
 const envOrigins = (process.env.CORS_ORIGINS || '')
@@ -80,6 +71,12 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   /\.app\.github\.dev$/, // Codespaces
+  // VELOCIDADE 4 — as origens do app nativo são NOSSAS e fixas (Capacitor: iOS
+  // serve em capacitor://localhost, Android em https://localhost). Estavam a
+  // depender de alguém lembrar-se de as pôr em CORS_ORIGINS; uma variável mal
+  // preenchida no Cloud Run tirava o app do ar inteiro. Ficam aqui, no código.
+  'capacitor://localhost',
+  'https://localhost',
   ...envOrigins,
 ];
 // VAGA DO CELULAR (dev-rede): fora de produção, aceita qualquer origem da rede
@@ -100,8 +97,33 @@ const corsOptions = {
   // o browser só lê headers "seguros" de um pedido cross-origin — sem isto o
   // header ia na resposta mas o DevTools/fetch do frontend não o enxergava.
   exposedHeaders: ['Server-Timing'],
+  // VELOCIDADE 4 (o app nativo "surreal de devagar" em Lisboa): sem maxAge o
+  // browser/WebView repete o preflight a CADA pedido. De Lisboa para São Paulo
+  // isso é ~250 ms de ida e volta desperdiçados antes de cada chamada — numa
+  // tela com 3 pedidos, quase um segundo só a pedir licença. 86400 = 24 h, o
+  // tecto que o Chromium aceita (o Safari corta em 600 s, e tudo bem: 10 min
+  // já cobre uma sessão inteira). O preflight passa a acontecer uma vez.
+  maxAge: 86400,
+  // 204 em vez do 200 default: resposta sem corpo é o que o preflight é.
+  optionsSuccessStatus: 204,
 };
+
+// PRIMEIRO middleware da casa, de propósito. O cors() responde ao OPTIONS e
+// termina ali (preflightContinue fica false), portanto o preflight nunca chega
+// ao helmet, ao rate limiter, ao parser de JSON, ao tempoPorRota nem a
+// autenticação nenhuma — nada disso tem o que fazer num pedido que só pergunta
+// "posso?". O limiter abaixo ainda ignora OPTIONS explicitamente, para o dia em
+// que alguém mexer nesta ordem.
 app.use(cors(corsOptions));
+
+// Headers de segurança HTTP. crossOriginResourcePolicy em 'cross-origin' porque
+// este backend serve imagens (avatares, fotos) consumidas pelo frontend noutra
+// origem — o default 'same-origin' do helmet bloquearia esse carregamento.
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // Atrás de 1 reverse proxy (Codespaces/produção): confia no X-Forwarded-For
 // para que o rate limiter conte por IP real do cliente, e não pelo IP do proxy.
@@ -124,7 +146,11 @@ const apiLimiter = rateLimit({
   // tectos apertados. NB: dentro de app.use('/api', ...) o Express já tira o
   // prefixo /api de req.path (confirmado com um teste rápido), por isso o
   // check é /media, não /api/media.
-  skip: (req) => req.path.startsWith('/media'),
+  // VELOCIDADE 4: o preflight já morre no cors() lá em cima, mas contá-lo aqui
+  // seria contar duas vezes cada chamada (OPTIONS + o pedido real) e cortar o
+  // tecto a meio. Ignorar OPTIONS é a rede de segurança para o dia em que
+  // alguém trocar a ordem dos middleware.
+  skip: (req) => req.method === 'OPTIONS' || req.path.startsWith('/media'),
 });
 app.use('/api', apiLimiter);
 
