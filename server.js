@@ -58,6 +58,7 @@ const denunciasRoutes = require('./routes/denuncias');
 const { ensureDenunciasBucket } = require('./utils/denunciaStore');
 const blocksRoutes = require('./routes/blocks');
 const inicioRoutes = require('./routes/inicio');
+const diagnosticoRoutes = require('./routes/diagnostico');
 
 const app = express();
 
@@ -255,6 +256,7 @@ app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 
 app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
 app.use(blocksRoutes); // /api/blocks — bloqueio entre jogadores (Apple UGC 1.2)
 app.use(inicioRoutes); // GET /api/inicio — agregado da tela Início (1 pedido só)
+app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app (VELOCIDADE 4)
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {

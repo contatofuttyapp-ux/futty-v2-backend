@@ -33,6 +33,7 @@ const RATE_LIMITS_ATIVOS = [
   { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
   { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
   { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por utilizador (partilhado)' },
+  { rota: 'POST /api/diagnostico', limite: '10/hora por utilizador' },
 ];
 
 // Série CUMULATIVA por semana (últimas 8): quantos existiam até ao fim de cada semana.

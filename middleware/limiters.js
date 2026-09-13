@@ -59,4 +59,13 @@ const excluirContaLimiter = criarLimiter({
   mensagem: 'Muitas tentativas de excluir a conta. Tente de novo daqui a 1 hora.',
 });
 
-module.exports = { criarLimiter, conviteLimiter, pushAdminLimiter, denunciaLimiter, excluirContaLimiter };
+// POST /api/diagnostico — 10/hora por utilizador (VELOCIDADE 4). É um botão que
+// se toca de propósito na tela de Diagnóstico, não um fluxo automático; o tecto
+// existe para um relatório enviado em loop não encher o Storage.
+const diagnosticoLimiter = criarLimiter({
+  windowMs: HORA,
+  max: 10,
+  mensagem: 'Já enviaste relatórios de sobra nesta hora. Tenta de novo mais tarde.',
+});
+
+module.exports = { criarLimiter, conviteLimiter, pushAdminLimiter, denunciaLimiter, excluirContaLimiter, diagnosticoLimiter };
