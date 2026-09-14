@@ -74,7 +74,7 @@ PRIORITY ORDER:
 
 STYLE:
 - Semi-realistic, high-detail cartoon illustration style
-- FIFA Ultimate Team / Panini premium sticker card quality
+- FIFA Ultimate Team / trading-card premium sticker card quality
 - Clean brushwork, rich deep color rendering, visible fabric texture
 - NO white sticker die-cut outline around the character — the illustration sits
   directly on the background, no border stroke of any kind
@@ -150,7 +150,7 @@ PRIORITY ORDER:
 4th — Attitude and illustration style
 
 STYLE:
-- Premium Panini sticker illustration style
+- Premium trading-card sticker illustration style
 - FIFA Ultimate Team card quality
 - Semi-realistic digital painting
 - NOT photographic, NOT anime, NOT cartoon

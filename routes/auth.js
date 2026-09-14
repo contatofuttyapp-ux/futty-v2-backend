@@ -31,15 +31,32 @@ const uploadAvatarMw = multer({
   },
 }).single('avatar');
 
-// Wrapper que corre o multer e converte os erros dele em HttpError(400).
+// Wrapper que corre o multer, auto-orienta pelo EXIF e converte os erros dele
+// em HttpError(400).
 function receberAvatar(req, res, next) {
-  uploadAvatarMw(req, res, (err) => {
-    if (!err) return next();
-    if (err instanceof multer.MulterError) {
-      const msg = err.code === 'LIMIT_FILE_SIZE' ? 'A imagem excede o limite de 5MB.' : 'Falha no upload da imagem.';
-      return next(new HttpError(400, msg));
+  uploadAvatarMw(req, res, async (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        const msg = err.code === 'LIMIT_FILE_SIZE' ? 'A imagem excede o limite de 5MB.' : 'Falha no upload da imagem.';
+        return next(new HttpError(400, msg));
+      }
+      return next(err); // HttpError do fileFilter ou outro
     }
-    return next(err); // HttpError do fileFilter ou outro
+    // EXIF (build 9, achado real: selfie do iPhone girada 180°). .rotate() sem
+    // argumentos lê a tag Orientation, reescreve os pixels já em pé e apaga a
+    // tag — ninguém depois (NSFW, Olheiro, Storage, IA) precisa de voltar a
+    // interpretar orientação. O frontend já normaliza antes de subir
+    // (utils/normalizarFoto.js) — isto é o cinto e suspensório: cobre
+    // qualquer caminho que não passe por lá (API directa, cliente antigo).
+    // ANTES de qualquer outra operação: primeira coisa a tocar no buffer.
+    if (req.file) {
+      try {
+        req.file.buffer = await sharp(req.file.buffer).rotate().toBuffer();
+      } catch {
+        return next(new HttpError(400, 'Não foi possível ler essa imagem.'));
+      }
+    }
+    next();
   });
 }
 
@@ -354,7 +371,7 @@ ARMS — COMPLETE FIGURE:
 - If the pose does not fit, draw the figure SMALLER — never cut an arm
 
 STYLE — SEMI-REALISTIC DIGITAL PAINTING, BROAD BRUSH:
-- Premium Panini / trading-card painting, painterly but CLEAN
+- Premium sticker card / trading-card painting, painterly but CLEAN
 - Broad confident brushwork; large simple shapes; crisp silhouette
 - HAIR painted as masses with a clear outline — never strand by strand
 - SKIN smooth, sculpted with light and shadow — no pores, no fine texture
@@ -521,7 +538,7 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'foto_url, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, created_at');
+    const perfil = await getUserById(userId, 'foto_url, foto_hash, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, created_at');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
 
     // Origem (12-set): só para log — o Onboarding dispara isto em fire-and-forget
@@ -539,14 +556,21 @@ router.post(
       throw new HttpError(403, 'Este kit exige um plano superior.');
     }
 
-    // --- IDEMPOTÊNCIA: se já existe slot deste kit, veste-o e NÃO gera nem gasta quota ---
+    // --- IDEMPOTÊNCIA: se já existe slot deste kit E foi gerado da MESMA foto
+    // atual, veste-o e NÃO gera nem gasta quota. (build 9, achado real: uma
+    // foto NOVA não invalidava o slot — o motor servia o avatar da foto
+    // ANTIGA como se fosse da nova. foto_fingerprint = foto_hash, migração 052,
+    // guardada no slot no momento da geração; se alguma das duas faltar
+    // (slot antigo, antes desta coluna, ou foto_hash ainda não gravado),
+    // NÃO reutiliza — gera de novo é o lado seguro do erro.)
     const { data: slot } = await supabase
       .from('user_avatar_slots')
-      .select('avatar_url')
+      .select('avatar_url, foto_fingerprint')
       .eq('user_id', userId)
       .eq('kit_id', kitId)
       .maybeSingle();
-    if (slot?.avatar_url) {
+    const slotValeParaFotoAtual = !!slot?.avatar_url && !!slot?.foto_fingerprint && !!perfil.foto_hash && slot.foto_fingerprint === perfil.foto_hash;
+    if (slotValeParaFotoAtual) {
       await ensureUserRow(req.user);
       const { error: vestirErr } = await supabase
         .from('users')
@@ -558,7 +582,7 @@ router.post(
       // se ainda não tiver sido migrada.
       marcarFigurinhaStatus(userId, 'pronta');
       console.log('[avatar-ai] slot reutilizado (sem geração, sem quota):', { userId, kitId });
-      return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true });
+      return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true });
     }
 
     // Quota por plano (com reset mensal). free: 2, pro: 50, elite: 100.
@@ -632,7 +656,11 @@ router.post(
       // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
       const { data: fotoBlob, error: dlErr } = await supabase.storage.from('avatars').download(caminhoFoto);
       if (dlErr) throw new Error(dlErr.message);
-      const fotoBuf = Buffer.from(await fotoBlob.arrayBuffer());
+      // .rotate() sem argumentos = auto-orienta pelo EXIF (build 9). O upload
+      // (receberAvatar) já faz isto em fotos NOVAS; aqui cobre também fotos
+      // guardadas ANTES desse fix — sem isto, gerar a partir de uma foto
+      // antiga com EXIF ruim continuava a sair girada.
+      const fotoBuf = await sharp(Buffer.from(await fotoBlob.arrayBuffer())).rotate().toBuffer();
       const meta = await sharp(fotoBuf).metadata();
       const stripH = Math.max(8, Math.round((meta.height || 0) * 0.02));
       // cor média da faixa superior (continuação natural, não uma banda artificial)
@@ -856,10 +884,12 @@ router.post(
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
     // Guarda o SLOT deste kit (upsert por (user_id, kit_id)) → a próxima vez que o
-    // utilizador pedir este kit é servido do slot, sem gerar nem gastar quota.
+    // utilizador pedir este kit COM A MESMA FOTO é servido do slot, sem gerar
+    // nem gastar quota. foto_fingerprint = foto_hash atual (migração 052) —
+    // é o que a checagem de reuso acima compara na próxima chamada.
     const { error: slotErr } = await supabase
       .from('user_avatar_slots')
-      .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl }, { onConflict: 'user_id,kit_id' });
+      .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl, foto_fingerprint: perfil.foto_hash || null }, { onConflict: 'user_id,kit_id' });
     if (slotErr) throw new HttpError(500, slotErr.message);
 
     // Persiste o novo avatar + kit vestido + incrementa a quota (e grava o reset).
@@ -879,7 +909,7 @@ router.post(
     // derruba a resposta — a figurinha já foi entregue ao utilizador).
     registrarGeracao({ userId, ip: req.ip }).catch(() => {});
 
-    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false });
+    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false });
     } catch (err) {
       // Qualquer falha a partir do e-mail-gate (inclusive) até aqui → 'falhou',
       // para o polling do Início parar de mostrar "criando..." e oferecer nova

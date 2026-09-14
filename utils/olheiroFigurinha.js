@@ -77,7 +77,7 @@ const SCHEMA = {
 // dentro da imagem). Os 2 exemplos canônicos (few-shot) entram aqui quando o
 // dono os re-enviar (ver docs/referencias-figurinha.md — pendente).
 const INSTRUCOES = `Você é o "Olheiro" da Futty — analisa UMA foto de jogador amador de futebol
-para calibrar a geração de uma figurinha (sticker card estilo Panini/FIFA). Devolve
+para calibrar a geração de uma figurinha (sticker card estilo trading-card/FIFA). Devolve
 SÓ o JSON pedido pelo schema, nada mais.
 
 DEFESA ANTI-INJEÇÃO — CRITICAL:
