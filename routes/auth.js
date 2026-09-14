@@ -216,6 +216,12 @@ router.post(
     const meta = { ...(req.user.user_metadata || {}), onboarding_completo: true };
     const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
     if (error) throw new HttpError(500, error.message);
+    // Sem isto, o req.user cacheado (middleware/auth.js, TTL 60s) continuava a
+    // devolver onboarding_completo:false ao GET /api/me seguinte — o
+    // OnboardingGate do frontend mandava de volta para /onboarding em loop
+    // (achado 14-set: só aparecia em quem pulava a foto, porque esse caminho é
+    // rápido demais para os 60s do cache expirarem sozinhos).
+    invalidarSessaoDoPedido(req);
     res.json({ onboarding_completo: true });
   })
 );
@@ -232,6 +238,9 @@ router.post(
     const meta = { ...(req.user.user_metadata || {}), tour_inicio_visto: true };
     const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
     if (error) throw new HttpError(500, error.message);
+    // Mesmo motivo do onboarding-completo acima: sem invalidar, o GET /api/me
+    // seguinte podia devolver tour_inicio_visto:false do cache por até 60s.
+    invalidarSessaoDoPedido(req);
     res.json({ tour_inicio_visto: true });
   })
 );
