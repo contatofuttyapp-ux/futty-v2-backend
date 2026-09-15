@@ -414,21 +414,36 @@ function podeVerCampanha(c, adulto) {
   return (c.cls || '18+') === 'livre' ? true : adulto === true;
 }
 
+// PUBLICIDADE EM TODOS OS PLANOS (15-set, decisão do dono): Pro/Elite deixam de
+// ficar isentos de anúncio — passam a ver METADE das oportunidades elegíveis,
+// nunca zero (o Free continua a ver todas). Hash simples e determinístico de
+// userId+dia: o MESMO utilizador recebe a MESMA decisão em qualquer tela nesse
+// dia (não pisca entre Início/sorteio), e muda sozinho no dia seguinte.
+function metadeDasVezes(userId, hoje) {
+  const s = `${userId}:${hoje}`;
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return (h >>> 0) % 2 === 0;
+}
+
 async function obterAd(pagina, userId) {
   const store = await gabineteStore.ler();
   if (store.ads_ativo === false) return { ad: null }; // interruptor geral OFF
   if (!store.toggles || store.toggles[pagina] !== true) return { ad: null }; // página OFF
 
   let adulto = false;
+  let plano = 'free';
   if (userId) {
-    const { data: u } = await supabase.from('users').select('birthdate').eq('id', userId).maybeSingle();
+    const { data: u } = await supabase.from('users').select('birthdate, plan').eq('id', userId).maybeSingle();
     adulto = ehAdulto(u && u.birthdate);
+    plano = u?.plan || 'free';
   }
   const hoje = hojeStr();
   const elegiveis = (store.campanhas || []).filter(
     (c) => Array.isArray(c.paginas) && c.paginas.includes(pagina) && campanhaAtiva(c, hoje) && podeVerCampanha(c, adulto),
   );
   if (!elegiveis.length) return { ad: null };
+  if ((plano === 'pro' || plano === 'elite') && !metadeDasVezes(userId, hoje)) return { ad: null };
   const c = elegiveis[Math.floor(Date.now() / 60000) % elegiveis.length];
   return {
     ad: {
