@@ -41,6 +41,16 @@ const pedidoCom = (tk) => ({ headers: { authorization: `Bearer ${tk}` }, user: {
 beforeEach(() => mock.timers.enable({ apis: ['Date'], now: AGORA }));
 afterEach(() => mock.timers.reset());
 
+// A "manada" do relatório do Diagnóstico: arranque frio, 3 pedidos com o mesmo token.
+test('3 chamadas simultâneas a getUserCacheado com o mesmo token → 1 chamada ao supabase.auth.getUser', async () => {
+  const auth = authFalso();
+  const { getUserCacheado } = carregarAuth(auth);
+  const tk = token(3600);
+  const users = await Promise.all([getUserCacheado(tk), getUserCacheado(tk), getUserCacheado(tk)]);
+  assert.equal(auth.chamadas, 1, `a manada voltou: ${auth.chamadas} chamadas ao getUser`);
+  assert.ok(users.every((u) => u?.id === 'u1'), 'algum pedido ficou sem a sessão');
+});
+
 test('passados os 60 s, a sessão sai na hora e o Supabase é consultado por trás', async () => {
   const auth = authFalso();
   const { getUserCacheado } = carregarAuth(auth);
