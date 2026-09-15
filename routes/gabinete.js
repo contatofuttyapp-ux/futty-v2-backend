@@ -65,7 +65,10 @@ router.get(
     const [usersRes, teamsRes, campsRes, gamesRes, postsRes] = await Promise.all([
       supabase.from('users').select('created_at'),
       supabase.from('teams').select('id, nome, created_at'),
-      supabase.from('campeonatos').select('nome, estado, campeao, created_at'),
+      // A coluna de data desta tabela é `criado_em` (migração 026), não `created_at`:
+      // com o nome errado o PostgREST devolvia erro, `camps` caía para [] e o
+      // gráfico de campeonatos ficava eternamente a zero (15-set).
+      supabase.from('campeonatos').select('nome, estado, campeao, criado_em'),
       supabase.from('games').select('data, created_at, sorteio_realizado'),
       supabase.from('feed_posts').select('created_at'),
     ]);
@@ -92,7 +95,7 @@ router.get(
       semanas,
       users: cumulativoSemanal(users.map((u) => u.created_at)),
       equipas: cumulativoSemanal(teams.map((t) => t.created_at)),
-      camp: cumulativoSemanal(camps.map((c) => c.created_at)),
+      camp: cumulativoSemanal(camps.map((c) => c.criado_em)),
     };
 
     // ── VIDA (7 dias) ──
