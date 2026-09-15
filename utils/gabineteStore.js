@@ -108,7 +108,17 @@ function validarAcessos(lista) {
   return lista;
 }
 
-async function ler() {
+// VELOCIDADE 6A (15-set): ler() corria um DOWNLOAD do Storage dentro de rotas
+// quentes — um por /api/inicio e outro por /api/ads, em todo carregamento de
+// tela. O ficheiro muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
+// (mesmo padrão de utils/plataformaStore.js), invalidada em gravar() para o
+// dono ver a própria edição de imediato.
+const TTL_MS = 30000;
+let _cache = null;
+let _cacheAt = 0;
+
+/** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia. */
+async function lerRaw() {
   try {
     const { data } = await supabase.storage.from(BUCKET).download(CAMINHO);
     if (!data) return { ...SEED };
@@ -117,6 +127,20 @@ async function ler() {
   } catch {
     return { ...SEED };
   }
+}
+
+async function ler() {
+  const agora = Date.now();
+  if (_cache && agora - _cacheAt < TTL_MS) return _cache;
+  _cache = await lerRaw();
+  _cacheAt = agora;
+  return _cache;
+}
+
+/** Esquece a cache (o dono gravou — tem de ver a própria edição já). */
+function invalidar() {
+  _cache = null;
+  _cacheAt = 0;
 }
 
 async function gravar(obj) {
@@ -141,6 +165,8 @@ async function gravar(obj) {
     protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
   };
   await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true });
+  _cache = limpo; // o dono acabou de gravar: a próxima leitura é já a nova
+  _cacheAt = Date.now();
   return limpo;
 }
 
@@ -149,4 +175,4 @@ function novoId() {
   return randomUUID().slice(0, 8);
 }
 
-module.exports = { ler, gravar, SEED, novoId };
+module.exports = { ler, lerRaw, gravar, invalidar, SEED, novoId };

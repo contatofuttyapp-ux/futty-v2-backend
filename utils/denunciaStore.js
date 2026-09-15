@@ -62,9 +62,19 @@ async function ajustarPeso(userId, confirmada) {
 function chaveEquipa(teamId) { return teamId || '_sem'; }
 function caminhoCaso(teamId, id) { return `casos/${chaveEquipa(teamId)}/${id}.json`; }
 
+// VELOCIDADE 6A (15-set): quem lê casos em rota quente (services/inicio.js,
+// obterDesfechosDenuncias) guarda o resultado em cache por equipa. Gravar um
+// caso tem de esquecer essa cache, senão o utilizador não via o desfecho da
+// própria denúncia durante minutos. Registado por quem cacheia, chamado aqui.
+const aoGravarCaso = [];
+function aoGravar(fn) { aoGravarCaso.push(fn); }
+
 async function guardarCaso(caso) {
   await supabase.storage.from(BUCKET).upload(caminhoCaso(caso.team_id, caso.id), Buffer.from(JSON.stringify(caso)),
     { contentType: 'application/json', upsert: true, cacheControl: '0' });
+  for (const fn of aoGravarCaso) {
+    try { fn(caso.team_id); } catch (e) { console.error('[denuncias] invalidação falhou:', e.message); }
+  }
   return caso;
 }
 async function obterCaso(teamId, id) {
@@ -132,6 +142,6 @@ async function agregados(teamIds) {
 module.exports = {
   ensureDenunciasBucket, CATEGORIAS, LIMITE_DIA,
   registarQuota, ajustarPeso,
-  guardarCaso, obterCaso, listarEquipa, jaDenunciou, novoCaso, logar,
+  guardarCaso, obterCaso, listarEquipa, jaDenunciou, novoCaso, logar, aoGravar,
   agregados,
 };

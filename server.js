@@ -39,6 +39,7 @@ const { carregarModelo } = require('./utils/nsfwFilter');
 const { mediaUrls } = require('./middleware/mediaUrls');
 const { tempoPorRota } = require('./middleware/tempo');
 const { privatizarBuckets } = require('./utils/storage');
+const adsStore = require('./utils/adsStore');
 const { HttpError } = require('./utils/http');
 
 const authRoutes = require('./routes/auth');
@@ -296,7 +297,7 @@ app.use((err, req, res, next) => {
 // testes colidiam com um dev server já a correr em 3001 (EADDRINUSE).
 if (require.main === module) {
   const port = process.env.PORT || 3001;
-  app.listen(port, () => {
+  const servidor = app.listen(port, () => {
     console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
     console.log(`[Futty] Health check: http://localhost:${port}/health`);
     // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
@@ -308,6 +309,19 @@ if (require.main === module) {
     // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
     privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
   });
+
+  // VELOCIDADE 6A (15-set): as impressões de publicidade ficam num acumulador em
+  // memória e só descem ao Storage de 30 em 30 s. O Cloud Run manda SIGTERM antes
+  // de apagar a instância — é a última oportunidade de gravar o que está pendente.
+  const encerrar = async (sinal) => {
+    console.log(`[Futty] ${sinal} recebido — a gravar o que está pendente.`);
+    try { await adsStore.descarregar(); } catch (e) { console.error('[Futty] flush de ads:', e.message); }
+    servidor.close(() => process.exit(0));
+    // Se alguma ligação ficar presa, não esperar para sempre.
+    setTimeout(() => process.exit(0), 5000).unref();
+  };
+  process.on('SIGTERM', () => encerrar('SIGTERM'));
+  process.on('SIGINT', () => encerrar('SIGINT'));
 }
 
 module.exports = { app, supabase };

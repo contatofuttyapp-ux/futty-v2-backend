@@ -159,6 +159,10 @@ router.get(
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
     const store = await gabineteStore.ler();
+    // As impressões vivem num acumulador em memória que só desce ao Storage de
+    // 30 em 30 s (Velocidade 6A). Aqui o dono quer o número certo AGORA, por
+    // isso força o flush antes de ler — é uma tela de dono, não um caminho quente.
+    await adsStore.descarregar();
     const metricas = await adsStore.ler();
     const hoje = inicioDiaUTC(new Date()).toISOString().slice(0, 10);
     const campanhas = (store.campanhas || []).map((c) => {

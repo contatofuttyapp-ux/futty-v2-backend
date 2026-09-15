@@ -297,12 +297,33 @@ async function obterVotacoesPendentes(userId) {
 }
 
 // ─── GET /api/denuncias/meus-desfechos ────────────────────────────────────────
+// VELOCIDADE 6A (15-set): isto corria em TODO /api/inicio e fazia, por equipa,
+// um `list` no Storage MAIS um download por ficheiro de caso. Numa equipa com
+// 20 denúncias eram 21 idas ao Storage só para saber um número que quase sempre
+// é zero. Cache de 5 minutos por equipa, esquecida assim que um caso é gravado
+// (denunciaStore.aoGravar) — o utilizador vê o desfecho da própria denúncia na
+// mesma, sem pagar o preço em cada abertura da tela.
+const DESFECHOS_TTL_MS = 5 * 60 * 1000;
+const casosPorEquipa = new Map(); // teamId -> { casos, em }
+
+denunciaStore.aoGravar((teamId) => casosPorEquipa.delete(teamId || '_sem'));
+
+async function casosDaEquipaComCache(teamId) {
+  const chave = teamId || '_sem';
+  const agora = Date.now();
+  const guardado = casosPorEquipa.get(chave);
+  if (guardado && agora - guardado.em < DESFECHOS_TTL_MS) return guardado.casos;
+  const casos = await denunciaStore.listarEquipa(teamId);
+  casosPorEquipa.set(chave, { casos, em: agora });
+  return casos;
+}
+
 async function obterDesfechosDenuncias(userId) {
   const { data: membros } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
   const teamIds = (membros || []).map((m) => m.team_id);
   // Velocidade 2 (12-set): era um `for` sequencial (1 download de Storage por
-  // equipa, em série) — agora todas as equipas em paralelo.
-  const porEquipa = await Promise.all(teamIds.map((tid) => denunciaStore.listarEquipa(tid)));
+  // equipa, em série) — agora todas as equipas em paralelo (e quase sempre em cache).
+  const porEquipa = await Promise.all(teamIds.map((tid) => casosDaEquipaComCache(tid)));
   const n = porEquipa.reduce((total, casos) => total + casos.filter((c) => c.reporter_id === userId && c.resolvido_em).length, 0);
   return { total: n }; // só a contagem — nunca o veredicto
 }
