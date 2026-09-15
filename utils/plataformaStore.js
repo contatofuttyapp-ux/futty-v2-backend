@@ -5,14 +5,17 @@
 // `denuncias`, SEM DDL. Cache em memória (TTL curto) porque a gate corre em CADA
 // pedido autenticado — suspensões são raras, por isso o custo é ~nulo.
 const { supabase } = require('./db');
+const { criarCache } = require('./cacheQuente');
 
 const BUCKET = 'denuncias';
 const CAMINHO = '_plataforma/suspensoes.json';
 const TTL_MS = 15000; // 15s — coerência "quase-imediata" sem download por pedido
 
 const VAZIO = { users: [], equipas: [] };
-let _cache = null;
-let _cacheAt = 0;
+// Velocidade 7A (15-set): no arranque frio, os 3 pedidos simultâneos do app
+// baixavam este arquivo 3 vezes. Agora quem chega junto espera o mesmo download.
+const CHAVE = 'suspensoes';
+const cache = criarCache({ ttlMs: TTL_MS, max: 1 });
 
 function normalizar(o) {
   return {
@@ -35,11 +38,7 @@ async function lerRaw() {
 
 // Lê com cache (TTL). Usado pela gate de cada pedido.
 async function ler() {
-  const agora = Date.now();
-  if (_cache && agora - _cacheAt < TTL_MS) return _cache;
-  _cache = await lerRaw();
-  _cacheAt = agora;
-  return _cache;
+  return cache.obter(CHAVE, lerRaw);
 }
 
 async function gravar(obj) {
@@ -50,8 +49,7 @@ async function gravar(obj) {
   await supabase.storage
     .from(BUCKET)
     .upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true });
-  _cache = limpo; // atualiza já → efeito imediato
-  _cacheAt = Date.now();
+  cache.definir(CHAVE, limpo); // atualiza já → efeito imediato
   return limpo;
 }
 

@@ -16,19 +16,20 @@ const path = require('node:path');
 // Substitui utils/db no cache de módulos ANTES de carregar quem depende dele.
 const caminhoDb = require.resolve('../utils/db');
 const dbReal = require.cache[caminhoDb];
+const MODULOS = ['../utils/adsStore', '../utils/gabineteStore', '../utils/plataformaStore'];
 
 function comSupabaseFalso(fabrica, fn) {
   const espiao = fabrica();
   require.cache[caminhoDb] = { id: caminhoDb, filename: caminhoDb, loaded: true, exports: { supabase: espiao.supabase } };
   // Limpa os módulos que capturam `supabase` no require.
-  for (const m of ['../utils/adsStore', '../utils/gabineteStore']) {
+  for (const m of MODULOS) {
     delete require.cache[require.resolve(m)];
   }
   try {
     return fn(espiao);
   } finally {
     if (dbReal) require.cache[caminhoDb] = dbReal; else delete require.cache[caminhoDb];
-    for (const m of ['../utils/adsStore', '../utils/gabineteStore']) {
+    for (const m of MODULOS) {
       delete require.cache[require.resolve(m)];
     }
   }
@@ -65,6 +66,28 @@ test('gabineteStore.ler() só desce ao Storage uma vez dentro do TTL', async () 
     await store.ler();
     await store.ler();
     assert.equal(espiao.contas.download, 1, 'a cache não segurou — seriam 3 downloads por 3 leituras');
+  });
+});
+
+// Velocidade 7A: o arranque frio do app manda 3 pedidos juntos.
+test('3 leituras simultâneas do gabinete → 1 download só', async () => {
+  await comSupabaseFalso(() => espiaoStorage({ ads_ativo: true }), async (espiao) => {
+    const store = require('../utils/gabineteStore');
+    await Promise.all([store.ler(), store.ler(), store.ler()]);
+    assert.equal(espiao.contas.download, 1, 'cada pedido baixou o arquivo sozinho (manada)');
+  });
+});
+
+test('3 checagens simultâneas de suspensão → 1 download só', async () => {
+  await comSupabaseFalso(() => espiaoStorage({ users: ['u-suspenso'], equipas: [] }), async (espiao) => {
+    const plataforma = require('../utils/plataformaStore');
+    const r = await Promise.all([
+      plataforma.userSuspenso('u-suspenso'),
+      plataforma.userSuspenso('u-livre'),
+      plataforma.equipaSuspensa('t-1'),
+    ]);
+    assert.deepEqual(r, [true, false, false]);
+    assert.equal(espiao.contas.download, 1, 'cada pedido baixou as suspensões sozinho (manada)');
   });
 });
 

@@ -1,6 +1,7 @@
 // Futty v2.0 — Middleware de autenticação (valida o JWT do Supabase).
 const { supabase } = require('../utils/db');
 const { HttpError } = require('../utils/http');
+const { criarCache } = require('../utils/cacheQuente');
 const plataforma = require('../utils/plataformaStore');
 
 // Mensagem digna para a conta suspensa (a Super age sobre a PLATAFORMA, nunca sobre
@@ -23,26 +24,21 @@ function bearerToken(req) {
 // falta/inválido nunca fica "esquecido" como bom, e a checagem nem chega a
 // tocar o cache). Mesma filosofia do cache de suspensão em plataformaStore.js
 // (TTL curto, fail-aberto do lado de fora, nada distribuído).
+//
+// Dedupe (15-set, "Velocidade 7A"): no arranque frio o app manda 3 pedidos com o
+// MESMO token ao mesmo tempo, e cada um fazia o seu getUser. Agora os 3 esperam a
+// mesma ida ao Supabase Auth (utils/cacheQuente.js).
 const SESSAO_CACHE_TTL_MS = 60_000;
 const SESSAO_CACHE_MAX = 500;
-const sessaoCache = new Map(); // token -> { user, expiraEm }
+const sessoes = criarCache({ ttlMs: SESSAO_CACHE_TTL_MS, max: SESSAO_CACHE_MAX, guardarSe: (user) => !!user });
 
-async function getUserCacheado(token) {
-  const agora = Date.now();
-  const hit = sessaoCache.get(token);
-  if (hit) {
-    if (hit.expiraEm > agora) return hit.user;
-    sessaoCache.delete(token); // expirou o cache (não necessariamente o token)
-  }
-
+async function validarNoSupabase(token) {
   const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user) return null;
+  return error || !data?.user ? null : data.user;
+}
 
-  if (sessaoCache.size >= SESSAO_CACHE_MAX) {
-    sessaoCache.delete(sessaoCache.keys().next().value); // remove a mais antiga
-  }
-  sessaoCache.set(token, { user: data.user, expiraEm: agora + SESSAO_CACHE_TTL_MS });
-  return data.user;
+function getUserCacheado(token) {
+  return sessoes.obter(token, () => validarNoSupabase(token));
 }
 
 /**
@@ -116,7 +112,7 @@ async function requireSuperAdmin(req, res, next) {
  */
 function invalidarSessaoDoPedido(req) {
   const token = bearerToken(req);
-  if (token) sessaoCache.delete(token);
+  if (token) sessoes.invalidar(token);
 }
 
 module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido };

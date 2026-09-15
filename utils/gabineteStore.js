@@ -12,6 +12,7 @@
 const { randomUUID } = require('crypto');
 const { supabase } = require('./db');
 const { HttpError } = require('./http');
+const { criarCache } = require('./cacheQuente');
 
 const BUCKET = 'denuncias';
 const CAMINHO = '_gabinete/operacao.json';
@@ -113,9 +114,10 @@ function validarAcessos(lista) {
 // tela. O ficheiro muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
 // (mesmo padrão de utils/plataformaStore.js), invalidada em gravar() para o
 // dono ver a própria edição de imediato.
+// Velocidade 7A: leituras simultâneas (arranque frio) esperam o MESMO download.
 const TTL_MS = 30000;
-let _cache = null;
-let _cacheAt = 0;
+const CHAVE = 'operacao';
+const cache = criarCache({ ttlMs: TTL_MS, max: 1 });
 
 /** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia. */
 async function lerRaw() {
@@ -130,17 +132,12 @@ async function lerRaw() {
 }
 
 async function ler() {
-  const agora = Date.now();
-  if (_cache && agora - _cacheAt < TTL_MS) return _cache;
-  _cache = await lerRaw();
-  _cacheAt = agora;
-  return _cache;
+  return cache.obter(CHAVE, lerRaw);
 }
 
 /** Esquece a cache (o dono gravou — tem de ver a própria edição já). */
 function invalidar() {
-  _cache = null;
-  _cacheAt = 0;
+  cache.invalidar(CHAVE);
 }
 
 async function gravar(obj) {
@@ -165,8 +162,7 @@ async function gravar(obj) {
     protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
   };
   await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true });
-  _cache = limpo; // o dono acabou de gravar: a próxima leitura é já a nova
-  _cacheAt = Date.now();
+  cache.definir(CHAVE, limpo); // o dono acabou de gravar: a próxima leitura é já a nova
   return limpo;
 }
 

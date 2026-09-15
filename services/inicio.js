@@ -12,6 +12,7 @@ const { notaParaExibir } = require('../utils/helpers');
 const { ehAdulto } = require('../utils/rostoPublico');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
+const { criarCache } = require('../utils/cacheQuente');
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
 const PERFIL_COLS_BASE =
@@ -305,19 +306,14 @@ async function obterVotacoesPendentes(userId) {
 // é zero. Cache de 5 minutos por equipa, esquecida assim que um caso é gravado
 // (denunciaStore.aoGravar) — o utilizador vê o desfecho da própria denúncia na
 // mesma, sem pagar o preço em cada abertura da tela.
+// Velocidade 7A: pedidos simultâneos do mesmo time esperam a MESMA listagem.
 const DESFECHOS_TTL_MS = 5 * 60 * 1000;
-const casosPorEquipa = new Map(); // teamId -> { casos, em }
+const casosPorEquipa = criarCache({ ttlMs: DESFECHOS_TTL_MS, max: 2000 });
 
-denunciaStore.aoGravar((teamId) => casosPorEquipa.delete(teamId || '_sem'));
+denunciaStore.aoGravar((teamId) => casosPorEquipa.invalidar(teamId || '_sem'));
 
-async function casosDaEquipaComCache(teamId) {
-  const chave = teamId || '_sem';
-  const agora = Date.now();
-  const guardado = casosPorEquipa.get(chave);
-  if (guardado && agora - guardado.em < DESFECHOS_TTL_MS) return guardado.casos;
-  const casos = await denunciaStore.listarEquipa(teamId);
-  casosPorEquipa.set(chave, { casos, em: agora });
-  return casos;
+function casosDaEquipaComCache(teamId) {
+  return casosPorEquipa.obter(teamId || '_sem', () => denunciaStore.listarEquipa(teamId));
 }
 
 async function obterDesfechosDenuncias(userId) {
