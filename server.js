@@ -97,7 +97,10 @@ const corsOptions = {
   // Server-Timing (13-set, "Velocidade 3", middleware/tempo.js): por omissão
   // o browser só lê headers "seguros" de um pedido cross-origin — sem isto o
   // header ia na resposta mas o DevTools/fetch do frontend não o enxergava.
-  exposedHeaders: ['Server-Timing'],
+  // X-Futty-Cache (15-set, "Velocidade 6A"): diz se a imagem veio do LRU do
+  // proxy (hit) ou do Storage (miss) — é como se mede, do lado de cá, se o
+  // cache está a trabalhar.
+  exposedHeaders: ['Server-Timing', 'X-Futty-Cache'],
   // VELOCIDADE 4 (o app nativo "surreal de devagar" em Lisboa): sem maxAge o
   // browser/WebView repete o preflight a CADA pedido. De Lisboa para São Paulo
   // isso é ~250 ms de ida e volta desperdiçados antes de cada chamada — numa
