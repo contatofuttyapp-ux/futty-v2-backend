@@ -30,6 +30,7 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
@@ -128,6 +129,14 @@ app.use(
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   })
 );
+
+// VELOCIDADE 6A (15-set): não havia compressão nenhuma. O /api/feed e o
+// /api/inicio são JSON com muito texto repetido — é onde o gzip ganha mais, e
+// de Lisboa cada KB poupado conta. `threshold: 1024` deixa passar as respostas
+// pequenas (comprimir 200 bytes custa mais CPU do que poupa rede).
+// O /api/media não é afetado: o `compression` salta o que já vem comprimido
+// (image/webp, image/gif), por isso as imagens seguem sem passar por aqui.
+app.use(compression({ threshold: 1024 }));
 
 // Atrás de 1 reverse proxy (Codespaces/produção): confia no X-Forwarded-For
 // para que o rate limiter conte por IP real do cliente, e não pelo IP do proxy.
