@@ -320,7 +320,9 @@ router.get(
       avatar_url: m.users?.avatar_url,
       avatar_generico: m.users?.avatar_generico || null,
       role: m.role,
-      posicao: m.posicao || null,
+      // Rodada 9: só existe goleiro ou jogador de linha. Valores antigos
+      // (DEF/MEI/ATA) ficam no banco mas nunca mais saem daqui.
+      posicao: m.posicao === 'GL' ? 'GL' : null,
       created_at: m.created_at,
     }));
 
@@ -506,7 +508,7 @@ router.get(
         role: m.role,
         pode_postar: !!m.pode_postar,
         categoria: m.categoria || 'linha',
-        posicao: m.posicao || null,
+        posicao: m.posicao === 'GL' ? 'GL' : null, // Rodada 9: goleiro ou linha, nada mais
         ausente_proximo: !!m.ausente_proximo,
         ativo: m.ativo !== false,
         visivel_ranking: m.visivel_ranking !== false,
@@ -535,18 +537,18 @@ router.get(
 );
 
 /**
- * PATCH /api/equipas/:slug/membros/posicao — define a posição do jogador na equipa.
- * Qualquer membro define a sua; admin pode definir a de outro (body.user_id).
- * Body: { posicao: 'GL'|'DEF'|'MEI'|'ATA'|null, user_id? }
+ * PATCH /api/equipas/:slug/membros/posicao — marca (ou desmarca) o jogador como
+ * goleiro do time. Qualquer membro define a sua; admin pode definir a de outro
+ * (body.user_id). Body: { posicao: 'GL'|null, user_id? }
+ * Rodada 9 (decisão do dono, 16-set): só existe goleiro ou jogador de linha —
+ * qualquer outro valor (inclusive os antigos DEF/MEI/ATA) vira null.
  */
 router.patch(
   '/api/equipas/:slug/membros/posicao',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const POSICOES = ['GL', 'DEF', 'MEI', 'ATA'];
     const { posicao, user_id: alvoId } = req.body || {};
-    const pos = posicao == null || posicao === '' ? null : String(posicao);
-    if (pos !== null && !POSICOES.includes(pos)) throw new HttpError(400, 'Posição inválida.');
+    const pos = posicao === 'GL' ? 'GL' : null;
 
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     const targetUserId = alvoId || req.user.id;
