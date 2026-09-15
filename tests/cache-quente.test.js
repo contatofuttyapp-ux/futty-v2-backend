@@ -78,6 +78,78 @@ test('definir durante a viagem: a escrita ganha da leitura que já viajava', asy
   assert.equal(await cache.obter('k', async () => 'rede'), 'gravado');
 });
 
+// ─── Stale-while-revalidate: nenhum pedido paga o vencimento de um cache ───────
+
+test('venceu: devolve o valor velho NA HORA e renova por trás', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 30 });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  const renovar = buscaContada('v2', 200);
+  const t0 = performance.now();
+  assert.equal(await cache.obter('k', renovar), 'v1');
+  assert.ok(performance.now() - t0 < 100, 'o pedido esperou a renovação');
+  assert.equal(renovar.chamadas, 1, 'a renovação não disparou');
+  await dormir(250);
+  assert.equal(await cache.obter('k', async () => 'rede'), 'v2', 'a renovação não gravou o valor novo');
+});
+
+test('vários pedidos com o cache vencido → uma renovação só', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 30 });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  const renovar = buscaContada('v2', 100);
+  const r = await Promise.all([cache.obter('k', renovar), cache.obter('k', renovar), cache.obter('k', renovar)]);
+  assert.deepEqual(r, ['v1', 'v1', 'v1']);
+  assert.equal(renovar.chamadas, 1);
+});
+
+test('renovação que falha mantém o valor velho', async (t) => {
+  t.mock.method(console, 'error', () => {});
+  const cache = criarCache({ nome: 't', ttlMs: 30 });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  const falhar = async () => { throw new Error('Storage fora do ar'); };
+  assert.equal(await cache.obter('k', falhar), 'v1');
+  await dormir(10);
+  assert.equal(await cache.obter('k', falhar), 'v1', 'uma renovação que falhou apagou o valor que havia');
+});
+
+test('renovação que devolve inválido (guardarSe=false) tira a entrada', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 30, guardarSe: (v) => v != null });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  assert.equal(await cache.obter('k', async () => null), 'v1');
+  await dormir(10);
+  assert.equal(await cache.obter('k', async () => 'rede'), 'rede', 'a entrada inválida continuou a ser servida');
+});
+
+test('servirVelhoSe=false: com a entrada vencida, espera a rede', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 30, servirVelhoSe: () => false });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  assert.equal(await cache.obter('k', async () => 'v2'), 'v2');
+});
+
+test('invalidar com a renovação por trás em voo: o resultado dela é descartado', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 30 });
+  await cache.obter('k', async () => 'v1');
+  await dormir(40);
+  assert.equal(await cache.obter('k', buscaContada('renovado-antes', 30)), 'v1');
+  cache.invalidar('k');
+  assert.equal(await cache.obter('k', async () => 'depois'), 'depois', 'serviu o velho depois do invalidar');
+  await dormir(50);
+  assert.equal(await cache.obter('k', async () => 'rede'), 'depois', 'a renovação antiga gravou por cima');
+});
+
+test('invalidarSe apaga só as entradas que batem', async () => {
+  const cache = criarCache({ nome: 't', ttlMs: 60_000 });
+  await cache.obter('a', async () => ({ time: 't1' }));
+  await cache.obter('b', async () => ({ time: 't2' }));
+  cache.invalidarSe((v) => v.time === 't1');
+  assert.deepEqual(await cache.obter('a', async () => ({ time: 'rede' })), { time: 'rede' });
+  assert.deepEqual(await cache.obter('b', async () => ({ time: 'rede' })), { time: 't2' });
+});
+
 test('teto de entradas: sai a mais antiga', async () => {
   const cache = criarCache({ ttlMs: 60_000, max: 2 });
   await cache.obter('a', async () => 1);

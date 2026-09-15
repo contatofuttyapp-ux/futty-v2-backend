@@ -306,9 +306,10 @@ async function obterVotacoesPendentes(userId) {
 // é zero. Cache de 5 minutos por equipa, esquecida assim que um caso é gravado
 // (denunciaStore.aoGravar) — o utilizador vê o desfecho da própria denúncia na
 // mesma, sem pagar o preço em cada abertura da tela.
-// Velocidade 7A: pedidos simultâneos do mesmo time esperam a MESMA listagem.
+// Velocidade 7A: pedidos simultâneos do mesmo time esperam a MESMA listagem, e
+// depois dos 5 min sai a conhecida enquanto a nova é buscada por trás.
 const DESFECHOS_TTL_MS = 5 * 60 * 1000;
-const casosPorEquipa = criarCache({ ttlMs: DESFECHOS_TTL_MS, max: 2000 });
+const casosPorEquipa = criarCache({ nome: 'denuncias', ttlMs: DESFECHOS_TTL_MS, max: 2000 });
 
 denunciaStore.aoGravar((teamId) => casosPorEquipa.invalidar(teamId || '_sem'));
 

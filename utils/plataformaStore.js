@@ -14,8 +14,11 @@ const TTL_MS = 15000; // 15s — coerência "quase-imediata" sem download por pe
 const VAZIO = { users: [], equipas: [] };
 // Velocidade 7A (15-set): no arranque frio, os 3 pedidos simultâneos do app
 // baixavam este arquivo 3 vezes. Agora quem chega junto espera o mesmo download.
+// E passados os 15 s ninguém mais espera: sai a lista conhecida e o download
+// novo corre por trás. Numa instância parada há horas, uma suspensão feita por
+// OUTRA instância vale a partir do segundo pedido, não do primeiro.
 const CHAVE = 'suspensoes';
-const cache = criarCache({ ttlMs: TTL_MS, max: 1 });
+const cache = criarCache({ nome: 'plataforma', ttlMs: TTL_MS, max: 1 });
 
 function normalizar(o) {
   return {

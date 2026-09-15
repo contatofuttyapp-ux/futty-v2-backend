@@ -1,4 +1,5 @@
 // Futty v2.0 — Middleware de autenticação (valida o JWT do Supabase).
+const { isAuthRetryableFetchError } = require('@supabase/supabase-js');
 const { supabase } = require('../utils/db');
 const { HttpError } = require('../utils/http');
 const { criarCache } = require('../utils/cacheQuente');
@@ -28,17 +29,47 @@ function bearerToken(req) {
 // Dedupe (15-set, "Velocidade 7A"): no arranque frio o app manda 3 pedidos com o
 // MESMO token ao mesmo tempo, e cada um fazia o seu getUser. Agora os 3 esperam a
 // mesma ida ao Supabase Auth (utils/cacheQuente.js).
+//
+// Renovação por trás (Velocidade 7A): passados os 60 s, a sessão conhecida sai
+// NA HORA e a revalidação no Supabase corre em segundo plano. Duas travas:
+//   · só se serve a sessão velha enquanto o PRÓPRIO token está no prazo (claim
+//     exp) — é o mesmo que uma verificação local do JWT aceitaria. Token vencido
+//     espera a resposta do Supabase, como antes;
+//   · se a revalidação disser que o token deixou de valer, a entrada sai; se só
+//     falhar a rede, a sessão fica (um soluço do Supabase não desloga ninguém).
 const SESSAO_CACHE_TTL_MS = 60_000;
 const SESSAO_CACHE_MAX = 500;
-const sessoes = criarCache({ ttlMs: SESSAO_CACHE_TTL_MS, max: SESSAO_CACHE_MAX, guardarSe: (user) => !!user });
+const sessoes = criarCache({
+  nome: 'sessao',
+  ttlMs: SESSAO_CACHE_TTL_MS,
+  max: SESSAO_CACHE_MAX,
+  guardarSe: (user) => !!user,
+  servirVelhoSe: (user, token) => tokenNoPrazo(token),
+});
+
+function tokenNoPrazo(token) {
+  try {
+    const { exp } = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    return typeof exp === 'number' && exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
 
 async function validarNoSupabase(token) {
   const { data, error } = await supabase.auth.getUser(token);
+  if (error && isAuthRetryableFetchError(error)) throw error; // rede, não token inválido
   return error || !data?.user ? null : data.user;
 }
 
-function getUserCacheado(token) {
-  return sessoes.obter(token, () => validarNoSupabase(token));
+async function getUserCacheado(token) {
+  try {
+    return await sessoes.obter(token, () => validarNoSupabase(token));
+  } catch (erro) {
+    // Sem sessão em cache e o Supabase não respondeu: 401, como sempre foi.
+    if (isAuthRetryableFetchError(erro)) return null;
+    throw erro;
+  }
 }
 
 /**
@@ -109,10 +140,16 @@ async function requireSuperAdmin(req, res, next) {
  * (14-set): sem isto, a conta já excluída continuava "autenticada" nesse
  * mesmo token por até SESSAO_CACHE_TTL_MS (60s), porque requireAuth nunca
  * voltaria a validar contra o Supabase dentro dessa janela.
+ *
+ * Velocidade 7A: esquece também as sessões da MESMA conta em outros tokens
+ * (outro aparelho). Com a renovação por trás, uma delas podia sair velha mais
+ * uma vez — com a conta já apagada ou o onboarding já concluído.
  */
 function invalidarSessaoDoPedido(req) {
   const token = bearerToken(req);
   if (token) sessoes.invalidar(token);
+  const userId = req.user?.id;
+  if (userId) sessoes.invalidarSe((user) => user.id === userId);
 }
 
-module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido };
+module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido, getUserCacheado };

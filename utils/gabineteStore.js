@@ -114,10 +114,11 @@ function validarAcessos(lista) {
 // tela. O ficheiro muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
 // (mesmo padrão de utils/plataformaStore.js), invalidada em gravar() para o
 // dono ver a própria edição de imediato.
-// Velocidade 7A: leituras simultâneas (arranque frio) esperam o MESMO download.
+// Velocidade 7A: leituras simultâneas (arranque frio) esperam o MESMO download,
+// e depois dos 30 s sai o valor conhecido enquanto o novo baixa por trás.
 const TTL_MS = 30000;
 const CHAVE = 'operacao';
-const cache = criarCache({ ttlMs: TTL_MS, max: 1 });
+const cache = criarCache({ nome: 'gabinete', ttlMs: TTL_MS, max: 1 });
 
 /** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia. */
 async function lerRaw() {
