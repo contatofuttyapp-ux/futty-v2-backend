@@ -162,6 +162,9 @@ async function obterTeams(userId) {
 }
 
 // ─── GET /api/games/my-invites ────────────────────────────────────────────────
+// VELOCIDADE 6A (15-set): eram 3 idas EM SÉRIE (team_members → games →
+// game_players). As presenças passam a vir embutidas nos jogos (select do
+// PostgREST), o que junta as duas últimas: ficam 2.
 async function obterConvites(userId) {
   const { data: memberships } = await supabase
     .from('team_members')
@@ -178,19 +181,17 @@ async function obterConvites(userId) {
 
   const { data: games, error } = await supabase
     .from('games')
-    .select('id, team_id, data, local, status, sorteio_realizado, cancelado')
+    .select('id, team_id, data, local, status, sorteio_realizado, cancelado, game_players ( user_id, confirmado )')
     .in('team_id', teamIds)
     .order('data', { ascending: true });
   if (error) throw new HttpError(500, error.message);
 
-  const ids = (games || []).map((g) => g.id);
   const counts = {};
   const myStatus = {};
-  if (ids.length) {
-    const { data: gp } = await supabase.from('game_players').select('game_id, user_id, confirmado').in('game_id', ids);
-    for (const row of gp || []) {
-      if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
-      if (row.user_id === userId) myStatus[row.game_id] = row.confirmado ? 'going' : 'not_going';
+  for (const g of games || []) {
+    for (const row of g.game_players || []) {
+      if (row.confirmado) counts[g.id] = (counts[g.id] || 0) + 1;
+      if (row.user_id === userId) myStatus[g.id] = row.confirmado ? 'going' : 'not_going';
     }
   }
 
@@ -240,42 +241,43 @@ async function obterPedidos(userId) {
 }
 
 // ─── GET /api/me/votacoes-pendentes ───────────────────────────────────────────
+// VELOCIDADE 6A (15-set): eram 4 idas EM SÉRIE — team_members → (teams, votes,
+// games) → as minhas presenças → as presenças dos colegas. Ficam 2:
+//   · os dados das equipas vêm embutidos no team_members (mata a query `teams`);
+//   · as presenças vêm embutidas nos jogos, e as minhas e as dos colegas saem
+//     do mesmo conjunto (matam as duas idas a game_players).
 async function obterVotacoesPendentes(userId) {
-  const { data: minhas } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
-  const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
+  const { data: minhas } = await supabase
+    .from('team_members')
+    .select('team_id, teams ( id, slug, nome, revotar_pedido_em )')
+    .eq('user_id', userId);
+  const teams = [...new Map((minhas || []).filter((m) => m.teams).map((m) => [m.teams.id, m.teams])).values()];
+  const teamIds = teams.map((t) => t.id);
   if (!teamIds.length) return { pendentes: [] };
 
-  // As 3 consultas abaixo só dependem de teamIds — nenhuma depende do
-  // resultado das outras (13-set, "Velocidade 3": eram sequenciais).
-  const [{ data: teams }, { data: votos }, { data: jogosDasEquipas }] = await Promise.all([
-    supabase.from('teams').select('id, slug, nome, revotar_pedido_em').in('id', teamIds),
+  const [{ data: votos }, { data: jogosDasEquipas }] = await Promise.all([
     supabase.from('votes').select('team_id, para_user_id, updated_at').eq('de_user_id', userId).in('team_id', teamIds),
     // Só pede avaliação de quem o utilizador REALMENTE jogou junto — jogos já
     // ENCERRADOS em que ambos estiveram confirmados.
-    supabase.from('games').select('id, team_id, data, status, cancelado').in('team_id', teamIds),
+    supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
   ]);
   const agora = Date.now();
-  const teamIdByGame = {};
-  const encerradoIds = [];
+  // Primeiro os jogos encerrados em que EU estive; depois, nesses mesmos jogos,
+  // quem mais esteve — é essa gente que fica por avaliar.
+  const meusJogos = [];
   for (const g of jogosDasEquipas || []) {
-    teamIdByGame[g.id] = g.team_id;
     const cancelado = !!g.cancelado || g.status === 'cancelado';
     const encerrado = !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-    if (encerrado) encerradoIds.push(g.id);
+    if (!encerrado) continue;
+    const presencas = g.game_players || [];
+    if (presencas.some((p) => p.user_id === userId && p.confirmado)) meusJogos.push({ teamId: g.team_id, presencas });
   }
-  const { data: minhasPresencas } = encerradoIds.length
-    ? await supabase.from('game_players').select('game_id').eq('user_id', userId).eq('confirmado', true).in('game_id', encerradoIds)
-    : { data: [] };
-  const meusGameIds = [...new Set((minhasPresencas || []).map((p) => p.game_id))];
-  const { data: colegasPresencas } = meusGameIds.length
-    ? await supabase.from('game_players').select('game_id, user_id').eq('confirmado', true).in('game_id', meusGameIds)
-    : { data: [] };
   const colegasPorTeam = {};
-  for (const p of colegasPresencas || []) {
-    if (p.user_id === userId) continue;
-    const tid = teamIdByGame[p.game_id];
-    if (!tid) continue;
-    (colegasPorTeam[tid] = colegasPorTeam[tid] || new Set()).add(p.user_id);
+  for (const { teamId, presencas } of meusJogos) {
+    for (const p of presencas) {
+      if (!p.confirmado || p.user_id === userId) continue;
+      (colegasPorTeam[teamId] = colegasPorTeam[teamId] || new Set()).add(p.user_id);
+    }
   }
 
   const pendentes = [];
@@ -329,8 +331,12 @@ async function obterDesfechosDenuncias(userId) {
 }
 
 // ─── GET /api/teams/:slug/votacao-status ──────────────────────────────────────
-async function obterVotacaoStatus(slug, userId) {
-  const { team } = await requireTeamMember(slug, userId);
+// `conhecido` (Velocidade 6A, 15-set): quando o chamador já sabe o time e o
+// papel — o /api/inicio sabe, veio do obterTeams — salta o requireTeamMember,
+// que é mais uma ida ao banco para confirmar o que já se sabe. A rota solta
+// continua a chamar sem ele e a validar como sempre.
+async function obterVotacaoStatus(slug, userId, conhecido = null) {
+  const team = conhecido?.id && conhecido?.role ? conhecido : (await requireTeamMember(slug, userId)).team;
 
   // Independentes entre si depois de `team` resolvido (13-set, "Velocidade
   // 3": eram 3 awaits em série).
@@ -349,15 +355,19 @@ async function obterVotacaoStatus(slug, userId) {
 }
 
 // ─── GET /api/equipas/:slug/campeonato ────────────────────────────────────────
-async function obterCampeonato(slug, userId) {
-  const team = await getTeamBySlug(slug, 'id, slug');
+// `conhecido` (Velocidade 6A, 15-set): o /api/inicio já tem o time e o papel do
+// obterTeams — passá-los aqui poupa o getTeamBySlug E o getRole, duas idas ao
+// banco só para reconfirmar o que já veio. A rota solta continua a validar.
+async function obterCampeonato(slug, userId, conhecido = null) {
+  const jaSabido = conhecido?.id && conhecido?.role ? conhecido : null;
+  const team = jaSabido || (await getTeamBySlug(slug, 'id, slug'));
   if (!team) throw new HttpError(404, 'Time não encontrado.');
 
   // role e campeonato só dependem de team.id, não um do outro (13-set,
   // "Velocidade 3": eram sequenciais). O acesso só é confirmado depois —
   // se `role` vier vazio o resultado de campeonato é descartado a seguir.
   const [role, { data: campeonato }] = await Promise.all([
-    getRole(team.id, userId),
+    jaSabido ? jaSabido.role : getRole(team.id, userId),
     supabase.from('campeonatos').select('*').eq('team_id', team.id).order('criado_em', { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
