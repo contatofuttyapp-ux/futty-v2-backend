@@ -5,6 +5,7 @@ const multer = require('multer');
 const sharp = require('sharp');
 const fal = require('@fal-ai/serverless-client');
 const { requireAuth, invalidarSessaoDoPedido } = require('../middleware/auth');
+const { marcarFase } = require('../middleware/tempo');
 const { excluirContaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
@@ -99,7 +100,10 @@ router.get(
   '/api/me',
   requireAuth,
   asyncHandler(async (req, res) => {
-    res.json(await obterMe(req.user));
+    marcarFase(res, 'auth');
+    const me = await obterMe(req.user);
+    marcarFase(res, 'perfil');
+    res.json(me);
   })
 );
 

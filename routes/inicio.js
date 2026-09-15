@@ -14,6 +14,7 @@
 // continuam — a tela não pode cair por causa de UM pedaço.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler } = require('../utils/http');
 const inicioService = require('../services/inicio');
 
@@ -33,6 +34,8 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
+    // O requireAuth já correu: tudo até aqui foi autenticação.
+    marcarFase(res, 'auth');
 
     // VELOCIDADE 6A (15-set): a onda 2 esperava a onda 1 INTEIRA — incluindo as
     // partes lentas (votações pendentes, desfechos de denúncia). Mas só precisa
@@ -42,8 +45,8 @@ router.get(
     // teams+convites. Enquanto as votações pendentes ainda correm, o campeonato
     // e o RSVP já estão a ser pedidos. O tempo da tela passa a ser o da parte
     // mais lenta, não a soma de duas ondas.
-    const teamsP = seguro(inicioService.obterTeams(userId));
-    const convitesP = seguro(inicioService.obterConvites(userId));
+    const teamsP = medir(res, 'teams', seguro(inicioService.obterTeams(userId)));
+    const convitesP = medir(res, 'convites', seguro(inicioService.obterConvites(userId)));
 
     const onda2P = Promise.all([teamsP, convitesP]).then(([teams, convites]) => {
       // Time principal = a 1ª equipa (teams vem ordenado por created_at ASC — o
@@ -51,24 +54,28 @@ router.get(
       // (convites vem ordenado por data ASC — idem).
       const principal = teams?.teams?.[0] || null;
       const nextId = (convites?.games || []).find((g) => g.status !== 'finished')?.id || null;
-      return Promise.all([
+      return medir(res, 'onda2', Promise.all([
         principal ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal)) : null,
         principal ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal)) : null,
         nextId ? seguro(inicioService.obterRsvp(nextId, userId)) : null,
-      ]);
+      ]));
     });
 
     const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, onda2] = await Promise.all([
-      seguro(inicioService.obterMe(req.user)),
+      medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
       convitesP,
-      seguro(inicioService.obterPedidos(userId)),
-      seguro(inicioService.obterVotacoesPendentes(userId)),
-      seguro(inicioService.obterDesfechosDenuncias(userId)),
-      seguro(inicioService.obterAd('inicio', userId)),
+      medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
+      medir(res, 'votacoes', seguro(inicioService.obterVotacoesPendentes(userId))),
+      medir(res, 'denuncias', seguro(inicioService.obterDesfechosDenuncias(userId))),
+      medir(res, 'ad', seguro(inicioService.obterAd('inicio', userId))),
       onda2P,
     ]);
     const [votacao_status, campeonato, rsvp] = onda2;
+    // 'dados' = o tempo real de espera de TODAS as partes juntas. As medidas por
+    // parte acima sobrepõem-se entre si (correm em paralelo): servem para ver
+    // qual é a lenta, não para somar.
+    marcarFase(res, 'dados');
 
     res.json({ me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp, ad });
   })

@@ -13,6 +13,7 @@ const { filtroNSFW } = require('../utils/nsfwFilter');
 const { removerFicheirosPorUrl } = require('../utils/storage');
 const { urlDeMidiaValida } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
+const { marcarFase } = require('../middleware/tempo');
 
 const router = express.Router();
 
@@ -174,11 +175,13 @@ router.get(
   '/api/feed',
   requireAuth,
   asyncHandler(async (req, res) => {
+    marcarFase(res, 'auth');
     // Equipas do utilizador
     const { data: memberships } = await supabase
       .from('team_members')
       .select('team_id, teams ( id, nome, slug )')
       .eq('user_id', req.user.id);
+    marcarFase(res, 'equipas');
     const teamMap = {};
     for (const m of memberships || []) {
       if (m.teams) teamMap[m.team_id] = m.teams;
@@ -218,6 +221,7 @@ router.get(
         .order('created_at', { ascending: false })
         .limit(LIMITE_FEED),
     ]);
+    marcarFase(res, 'jogos+posts');
     if (jogosRes.error) throw new HttpError(500, jogosRes.error.message);
     if (postsRes.error) throw new HttpError(500, postsRes.error.message);
     const games = jogosRes.data || [];
@@ -250,6 +254,8 @@ router.get(
         ? supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', [...idsConhecidos])
         : Promise.resolve({ data: [] }),
     ]);
+
+    marcarFase(res, 'detalhes');
 
     const mediaByPost = {};
     for (const m of mediaRes.data || []) {

@@ -3,6 +3,7 @@
 // Sem jogo de votação, sem períodos. Nota exibida em escala 6-10.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
+const { marcarFase } = require('../middleware/tempo');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
 const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
@@ -136,8 +137,11 @@ router.get(
   '/api/teams/:slug/ranking',
   requireAuth,
   asyncHandler(async (req, res) => {
+    marcarFase(res, 'auth');
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    marcarFase(res, 'equipa');
     const ranking = await buildRanking(team.id, req.user.id);
+    marcarFase(res, 'ranking');
     res.json({ team: { ...team, role }, ranking });
   })
 );
