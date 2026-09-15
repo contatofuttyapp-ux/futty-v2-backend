@@ -4,6 +4,8 @@
 //   node scripts/demo-completa.js --limpar          desfaz TUDO o que este script criou
 //   node scripts/demo-completa.js --email=x@y.com   adiciona mais um admin além dos dois do dono
 //   node scripts/demo-completa.js --ensaio          só mostra os elencos/sorteios, não grava nada
+//   node scripts/demo-completa.js --so-jogo-extra   só o 2º jogo futuro (Rodada 8B), sobre uma
+//                                                    demo já criada; idempotente (não duplica)
 //
 // Correr a partir de backend/ (utils/db.js lê o .env do diretório atual).
 //
@@ -29,6 +31,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const args = process.argv.slice(2);
 const LIMPAR = args.includes('--limpar');
 const ENSAIO = args.includes('--ensaio');
+const SO_JOGO_EXTRA = args.includes('--so-jogo-extra');
 const EMAIL_EXTRA = (args.find((a) => a.startsWith('--email=')) || '').slice(8).trim().toLowerCase() || null;
 
 const PREFIXO = 'demo-vila';
@@ -546,6 +549,75 @@ async function criarJogoFuturo(ids, teamId, donos) {
   return game;
 }
 
+// Segundo jogo futuro (Rodada 8B, 15-set): outro dia, outro formato — para o
+// Início mostrar DOIS sorteios ativos ao mesmo tempo (pedido do dono). 5x5,
+// capacidade menor (14), RSVP aberto com prazo mais folgado (5 dias). Idempotente
+// pelo par (team_id, local): rodar de novo (ou a demo inteira de novo) não duplica.
+const LOCAL_JOGO_EXTRA = 'Quadra do Guará';
+async function criarJogoExtra(ids, teamId, donos) {
+  const { data: existente } = await supabase.from('games').select('id').eq('team_id', teamId).eq('local', LOCAL_JOGO_EXTRA).maybeSingle();
+  if (existente) {
+    info(`jogo em "${LOCAL_JOGO_EXTRA}" já existe (id ${existente.id}) — nada a fazer.`);
+    return { id: existente.id, jaExistia: true };
+  }
+
+  const { data: game, error } = await supabase.from('games').insert({
+    team_id: teamId, data: dias(6), local: LOCAL_JOGO_EXTRA,
+    jogadores_por_time: 5, max_jogadores: 14,
+    rsvp_aberto: true, rsvp_fechado: false, rsvp_prazo: dias(5),
+  }).select().single();
+  if (error) throw new Error(`games(extra): ${error.message}`);
+
+  // 8 primeiros JOGADORES confirmados + o 1º dono; os 2 seguintes recusam; o
+  // resto (11 jogadores + o 2º dono, se houver) fica sem resposta.
+  const confirmados = JOGADORES.slice(0, 8).map((j) => j.apelido);
+  const recusaram = JOGADORES.slice(8, 10).map((j) => j.apelido);
+  const linhas = confirmados.map((a) => ({ game_id: game.id, user_id: ids[a], confirmado: true, goleiro: !!porApelido(a).gr, cabeca_chave: !!porApelido(a).cabeca }))
+    .concat(recusaram.map((a) => ({ game_id: game.id, user_id: ids[a], confirmado: false, goleiro: false, cabeca_chave: false })));
+  linhas.push({ game_id: game.id, user_id: donos[0].id, confirmado: true, goleiro: false, cabeca_chave: false });
+  const { error: e2 } = await supabase.from('game_players').insert(linhas);
+  if (e2) throw new Error(`game_players(extra): ${e2.message}`);
+
+  const rsvp = confirmados.map((a) => ({ game_id: game.id, user_id: ids[a], status: 'confirmado' }))
+    .concat(recusaram.map((a) => ({ game_id: game.id, user_id: ids[a], status: 'recusado' })));
+  rsvp.push({ game_id: game.id, user_id: donos[0].id, status: 'confirmado' });
+  const { error: e3 } = await supabase.from('rsvp_respostas').insert(rsvp);
+  if (e3) throw new Error(`rsvp_respostas(extra): ${e3.message}`);
+
+  ok(`jogo daqui a 6 dias em "${LOCAL_JOGO_EXTRA}" (5x5, máx 14): 9 confirmados (8 jogadores + você), 2 recusaram, resto sem resposta`);
+  return { id: game.id, jaExistia: false };
+}
+
+// Mapa apelido→id a partir de uma demo JÁ CRIADA (--so-jogo-extra corre sobre
+// ela sem recriar nada) — os ids não ficam no ARQ_ESTADO, só os emails batem
+// com o padrão fixo de emailDe(), por isso uma consulta por e-mail basta.
+async function carregarIdsJogadores() {
+  const emails = JOGADORES.map((j) => emailDe(j));
+  const { data, error } = await supabase.from('users').select('id, email').in('email', emails);
+  if (error) throw new Error(`users: ${error.message}`);
+  const idPorEmail = new Map((data || []).map((u) => [u.email, u.id]));
+  const ids = {};
+  for (const j of JOGADORES) {
+    const id = idPorEmail.get(emailDe(j));
+    if (!id) throw new Error(`jogador ${j.apelido} (${emailDe(j)}) não existe — rode a demo completa primeiro: node scripts/demo-completa.js`);
+    ids[j.apelido] = id;
+  }
+  return ids;
+}
+
+// --so-jogo-extra: insere SÓ o segundo jogo futuro sobre uma demo que já existe,
+// sem tocar em mais nada (nem recriar usuários, nem repetir votos/posts/etc.).
+async function criarSoJogoExtra() {
+  const { data: time } = await supabase.from('teams').select('id, slug').eq('slug', SLUG).maybeSingle();
+  if (!time) throw new Error(`time ${SLUG} não existe — rode a demo completa primeiro: node scripts/demo-completa.js`);
+  const donos = await acharDonos();
+  const ids = await carregarIdsJogadores();
+  const jogo = await criarJogoExtra(ids, time.id, donos);
+  if (!jogo.jaExistia) {
+    ok('Pronto — o Início de quem é dono agora mostra DOIS jogos futuros com RSVP aberto (3 e 6 dias).');
+  }
+}
+
 async function criarResenha(ids, teamId, donos) {
   const urls = [];
   const idPorApelido = (a) => ids[a];
@@ -744,6 +816,7 @@ async function criar() {
   await criarVotos(ids, time.id, donos);
   const guardados = await criarJogosPassados(ids, time.id, donos);
   const futuro = await criarJogoFuturo(ids, time.id, donos);
+  const futuroExtra = await criarJogoExtra(ids, time.id, donos);
   const { urls, postDenunciado } = await criarResenha(ids, time.id, donos);
   await criarDenuncia(ids, time.id, postDenunciado);
   const camps = await criarCampeonatosStorage(ids, time.id, donos);
@@ -754,7 +827,7 @@ async function criar() {
   fs.mkdirSync(LOJA, { recursive: true });
   fs.writeFileSync(ARQ_ESTADO, JSON.stringify({
     criadoEm: new Date().toISOString(), teamSlug: SLUG, teamId: time.id,
-    donos: donos.map((d) => d.email), jogoFuturoId: futuro.id,
+    donos: donos.map((d) => d.email), jogoFuturoId: futuro.id, jogoExtraId: futuroExtra.id,
     sorteioGuardado5x5: guardados['5x5'], sorteioGuardado11x11: guardados['11x11'],
     conviteToken: convite.token, campeonatoEmCurso: camps.emCurso.id, campeonatoTerminado: camps.mata.id,
     fotosResenha: urls,
@@ -776,7 +849,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l(`  · time "Vila Olímpica FC" em Lisboa, público com aprovação — você é ADMIN`);
   l(`  · 5 times públicos extra: 3 em Lisboa/Amadora, 2 em Brasília`);
   l(`  · 8 jogos passados com placar, gols, artilheiro e destaque`);
-  l(`  · 1 jogo daqui a 3 dias com RSVP aberto`);
+  l(`  · 2 jogos futuros com RSVP aberto: daqui a 3 dias (9x9) e daqui a 6 dias (5x5)`);
   l(`  · 2 campeonatos (1 rolando, 1 terminado) + 1 campeonato de 2 times para o card do Início`);
   l(`  · 12 posts na Resenha + 1 anúncio oficial, com comentários, respostas e reações`);
   l('');
@@ -786,6 +859,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('    → "Você tem colegas para avaliar": você ainda não deu nota a ninguém. Toque e avalie.');
   l('    → Card do campeonato "Duelo de Quarta": 3 de 8 jornadas, Coletes 7 x 2 Sem Colete.');
   l('    → Card do próximo jogo (3 dias) com botão de presença — 18 já confirmaram.');
+  l('    → Segundo card de jogo (6 dias, Quadra do Guará, 5x5) — dois sorteios ativos ao mesmo tempo.');
   l('    → Chip do time com BOLINHA DOURADA: 2 pessoas pedindo entrada.');
   l('    → Últimos Jogos: os 3 mais recentes, com placar.');
   l('');
@@ -935,6 +1009,7 @@ function ensaio() {
 (async () => {
   if (ENSAIO) ensaio();
   else if (LIMPAR) await limpar();
+  else if (SO_JOGO_EXTRA) await criarSoJogoExtra();
   else await criar();
 })().catch((e) => {
   console.error('ERRO:', e.message);
