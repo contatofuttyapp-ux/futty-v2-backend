@@ -299,41 +299,59 @@ app.use((err, req, res, next) => {
 // testes colidiam com um dev server já a correr em 3001 (EADDRINUSE).
 if (require.main === module) {
   const port = process.env.PORT || 3001;
-  const servidor = app.listen(port, () => {
-    console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
-    console.log(`[Futty] Health check: http://localhost:${port}/health`);
-    // VELOCIDADE 7A (15-set): aquece os caches que a primeira pessoa depois de um
-    // deploy (ou de uma instância nova do Cloud Run) pagaria dentro do tempo dela —
-    // as suspensões, lidas por TODO pedido autenticado, e o gabinete, lido pelo
-    // /api/inicio e pelo /api/ads: dois downloads do Storage. Quem chegar com isto
-    // ainda em curso espera o MESMO download, nunca um segundo. A chave VAPID não
-    // precisa: routes/push.js já a lê do ambiente quando o módulo carrega.
-    const inicioAquecimento = Date.now();
-    Promise.all([plataformaStore.ler(), gabineteStore.ler()])
-      .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
-      .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
-    // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
-    ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
-    ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
-    ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
-    // Tijolo 1: pré-carrega o modelo NSFW uma vez (não bloqueia; falha aberta).
-    carregarModelo();
-    // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
-    privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
-  });
+  let servidor = null; // só existe depois do listen() lá em baixo
 
   // VELOCIDADE 6A (15-set): as impressões de publicidade ficam num acumulador em
   // memória e só descem ao Storage de 30 em 30 s. O Cloud Run manda SIGTERM antes
   // de apagar a instância — é a última oportunidade de gravar o que está pendente.
+  // Registados JÁ (antes do modelo NSFW carregar): um SIGTERM a meio do arranque
+  // ainda encontra o handler — sem servidor para fechar, só sai.
   const encerrar = async (sinal) => {
     console.log(`[Futty] ${sinal} recebido — a gravar o que está pendente.`);
     try { await adsStore.descarregar(); } catch (e) { console.error('[Futty] flush de ads:', e.message); }
-    servidor.close(() => process.exit(0));
+    if (servidor) servidor.close(() => process.exit(0));
+    else process.exit(0);
     // Se alguma ligação ficar presa, não esperar para sempre.
     setTimeout(() => process.exit(0), 5000).unref();
   };
   process.on('SIGTERM', () => encerrar('SIGTERM'));
   process.on('SIGINT', () => encerrar('SIGINT'));
+
+  // RODADA 8B (15-set): o modelo NSFW (Tijolo 1) carrega ANTES de abrir a porta —
+  // antes disto, o listen() já aceitava pedidos com o modelo (TensorFlow.js +
+  // MobileNetV2) ainda a carregar em fundo. Não era incorreto (classificar() em
+  // utils/nsfwFilter.js espera a MESMA promessa de carga), só lento: quem
+  // disparasse o primeiro upload numa instância nova pagava essa espera. Com
+  // minScale 1 no Cloud Run (a instância nunca dorme), isso só acontece mesmo no
+  // DEPLOY — e é aí que o custo deve cair: o Cloud Run só manda tráfego para a
+  // revisão nova quando a porta responde, então atrasar o listen() até o modelo
+  // estar pronto tira essa espera de cima de qualquer pessoa real.
+  // carregarModelo() nunca rejeita (falha aberta, registada lá dentro) — o
+  // .then() corre sempre, mesmo se o modelo não carregar.
+  carregarModelo().then(() => {
+    servidor = app.listen(port, () => {
+      console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
+      console.log(`[Futty] Health check: http://localhost:${port}/health`);
+      // VELOCIDADE 7A (15-set): aquece os caches que a primeira pessoa depois de um
+      // deploy (ou de uma instância nova do Cloud Run) pagaria dentro do tempo dela —
+      // as suspensões, lidas por TODO pedido autenticado, e o gabinete, lido pelo
+      // /api/inicio e pelo /api/ads: dois downloads do Storage. Quem chegar com isto
+      // ainda em curso espera o MESMO download, nunca um segundo. A chave VAPID não
+      // precisa: routes/push.js já a lê do ambiente quando o módulo carrega. Estes
+      // continuam DEPOIS do listen (não bloqueiam a porta) — só o modelo NSFW, acima,
+      // ganhou esse privilégio.
+      const inicioAquecimento = Date.now();
+      Promise.all([plataformaStore.ler(), gabineteStore.ler()])
+        .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
+        .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
+      // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
+      ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
+      ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
+      ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
+      // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
+      privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
+    });
+  });
 }
 
 module.exports = { app, supabase };
