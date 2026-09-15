@@ -24,6 +24,12 @@ const COMENTARIO_MEDIA = ['image', 'gif'];
 // Motivos de denúncia (igual ao CHECK da migração 009).
 const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo', 'outro'];
 
+// VELOCIDADE 6A (15-set): o feed vinha SEM limite — uma equipa antiga puxava
+// todos os jogos e todos os posts desde sempre, em cada abertura da tela. 60 de
+// cada lado dá mais de um mês de Resenha para uma equipa que joga por semana.
+// A paginação "ver mais antigos" fica para a v1.1 (registado em ONDE-ESTAMOS.md).
+const LIMITE_FEED = 60;
+
 // Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
 // Tecto 50MB (vídeo). As fotos passam pelo crop no cliente (clampadas a 1600px +
 // JPEG), portanto chegam bem abaixo disto. Sem transcodificação de vídeo.
@@ -121,9 +127,14 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
   for (const id of parentIds) map[id] = { recentes: [], total: 0 };
   if (!parentIds.length) return map;
 
+  // VELOCIDADE 6A (15-set): o autor vem EMBUTIDO. Antes, os ids dos autores dos
+  // comentários só se sabiam depois desta query, o que obrigava a query de
+  // `users` a esperar por ela — uma ida em série a mais. Com o autor embutido,
+  // a query de users cobre só os jogos e os posts, que já se conhecem, e as
+  // duas correm na mesma onda.
   const { data } = await supabase
     .from('comentarios')
-    .select('parent_id, author_id, body, created_at')
+    .select('parent_id, author_id, body, created_at, users ( id, nome, nome_jogador, avatar_url )')
     .eq('parent_type', parentType)
     .in('parent_id', parentIds)
     .is('deleted_at', null)
@@ -181,65 +192,78 @@ router.get(
     }
     if (!teamIds.length) return res.json({ items: [] });
 
-    // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
-    // este utilizador não aparece na Resenha dele — nem posts nem comentários.
-    const bloqueados = await conjuntoMutuo(req.user.id);
+    // VELOCIDADE 6A (15-set): eram 10 idas ao banco EM SÉRIE. Agora são 3 ondas.
+    //
+    // Onda 2: o bloqueio, os jogos e os posts não dependem uns dos outros — só
+    // de teamIds. (A filtragem por bloqueio é feita em memória logo a seguir.)
+    const [bloqueados, jogosRes, postsRes] = await Promise.all([
+      // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
+      // este utilizador não aparece na Resenha dele — nem posts nem comentários.
+      conjuntoMutuo(req.user.id),
+      supabase
+        .from('games')
+        .select(
+          'id, team_id, data, local, times_resultado, campeao_time_index, campeao_foto_url, ' +
+            'artilheiro_user_id, artilheiro_gols, destaque_user_id, destaque_titulo, ' +
+            'rodada_user_id, rodada_foto_url, created_at'
+        )
+        .in('team_id', teamIds)
+        .not('campeao_time_index', 'is', null)
+        .order('created_at', { ascending: false })
+        .limit(LIMITE_FEED),
+      supabase
+        .from('feed_posts')
+        .select('id, team_id, author_id, body, tipo, conteudo, created_at')
+        .in('team_id', teamIds)
+        .order('created_at', { ascending: false })
+        .limit(LIMITE_FEED),
+    ]);
+    if (jogosRes.error) throw new HttpError(500, jogosRes.error.message);
+    if (postsRes.error) throw new HttpError(500, postsRes.error.message);
+    const games = jogosRes.data || [];
+    const posts = (postsRes.data || []).filter((p) => !bloqueados.has(p.author_id));
 
-    // Jogos com campeão definido
-    const { data: games, error: gErr } = await supabase
-      .from('games')
-      .select(
-        'id, team_id, data, local, times_resultado, campeao_time_index, campeao_foto_url, ' +
-          'artilheiro_user_id, artilheiro_gols, destaque_user_id, destaque_titulo, ' +
-          'rodada_user_id, rodada_foto_url, created_at'
-      )
-      .in('team_id', teamIds)
-      .not('campeao_time_index', 'is', null)
-      .order('created_at', { ascending: false });
-    if (gErr) throw new HttpError(500, gErr.message);
+    const gameIds = games.map((g) => g.id);
+    const postIds = posts.map((p) => p.id);
 
-    // Posts editoriais (menos os de quem está bloqueado/me bloqueou)
-    const { data: postsRaw, error: pErr } = await supabase
-      .from('feed_posts')
-      .select('id, team_id, author_id, body, tipo, conteudo, created_at')
-      .in('team_id', teamIds)
-      .order('created_at', { ascending: false });
-    if (pErr) throw new HttpError(500, pErr.message);
-    const posts = (postsRaw || []).filter((p) => !bloqueados.has(p.author_id));
+    // Os utilizadores referenciados pelos JOGOS e pelos POSTS já se conhecem
+    // aqui (prémios e autores), por isso a query deles entra na onda 3 em vez
+    // de esperar por ela. Os autores dos COMENTÁRIOS vêm embutidos na própria
+    // query dos comentários.
+    const idsConhecidos = new Set();
+    for (const g of games) {
+      for (const id of [g.artilheiro_user_id, g.destaque_user_id, g.rodada_user_id]) if (id) idsConhecidos.add(id);
+    }
+    for (const p of posts) if (p.author_id) idsConhecidos.add(p.author_id);
 
-    // Média dos posts
-    const postIds = (posts || []).map((p) => p.id);
+    // Onda 3: tudo o que depende dos ids acima, de uma vez só — média, os 2
+    // comentários recentes de cada lado, as reações de cada lado e os users.
+    const [mediaRes, comGames, comPosts, reacGames, reacPosts, usersRes] = await Promise.all([
+      postIds.length
+        ? supabase.from('feed_post_media').select('post_id, url, media_type, position').in('post_id', postIds).order('position', { ascending: true })
+        : Promise.resolve({ data: [] }),
+      comentariosRecentesParaTargets('game', gameIds, bloqueados),
+      comentariosRecentesParaTargets('post', postIds, bloqueados),
+      reacoesParaTargets('game', gameIds, req.user.id),
+      reacoesParaTargets('post', postIds, req.user.id),
+      idsConhecidos.size
+        ? supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', [...idsConhecidos])
+        : Promise.resolve({ data: [] }),
+    ]);
+
     const mediaByPost = {};
-    if (postIds.length) {
-      const { data: media } = await supabase
-        .from('feed_post_media')
-        .select('post_id, url, media_type, position')
-        .in('post_id', postIds)
-        .order('position', { ascending: true });
-      for (const m of media || []) {
-        (mediaByPost[m.post_id] ||= []).push({ url: m.url, media_type: m.media_type, position: m.position });
-      }
+    for (const m of mediaRes.data || []) {
+      (mediaByPost[m.post_id] ||= []).push({ url: m.url, media_type: m.media_type, position: m.position });
     }
 
-    // Comentários: os 2 mais recentes + total, por jogo e por post (Bloco F).
-    const comGames = await comentariosRecentesParaTargets('game', (games || []).map((g) => g.id), bloqueados);
-    const comPosts = await comentariosRecentesParaTargets('post', postIds, bloqueados);
-
-    // Utilizadores referenciados (prémios dos jogos + autores dos posts + autores dos
-    // comentários recentes, para lhes resolver nome/avatar na mesma query de users).
-    const userIds = new Set();
-    for (const g of games || []) {
-      for (const id of [g.artilheiro_user_id, g.destaque_user_id, g.rodada_user_id]) if (id) userIds.add(id);
-    }
-    for (const p of posts || []) if (p.author_id) userIds.add(p.author_id);
-    for (const slot of [...Object.values(comGames), ...Object.values(comPosts)]) {
-      for (const c of slot.recentes) if (c.author_id) userIds.add(c.author_id);
-    }
+    // Os autores dos comentários vieram embutidos; os prémios/autores de posts
+    // vieram da query de users da onda 3. Juntam-se no mesmo mapa.
     const userMap = {};
-    if (userIds.size) {
-      const { data: us } = await supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', [...userIds]);
-      for (const u of us || []) userMap[u.id] = u;
+    for (const slot of [...Object.values(comGames), ...Object.values(comPosts)]) {
+      for (const c of slot.recentes) if (c.users) userMap[c.users.id] = c.users;
     }
+    for (const u of usersRes.data || []) userMap[u.id] = u;
+
     const nomeOf = (id) => {
       const u = userMap[id];
       return u ? u.nome_jogador || u.nome || 'Jogador' : null;
@@ -253,10 +277,6 @@ router.get(
         body: c.body,
       })),
     });
-
-    // Reações dos jogos e dos posts
-    const reacGames = await reacoesParaTargets('game', (games || []).map((g) => g.id), req.user.id);
-    const reacPosts = await reacoesParaTargets('post', postIds, req.user.id);
 
     const jogoItems = (games || []).map((g) => {
       const dt = g.data ? new Date(g.data) : null;
