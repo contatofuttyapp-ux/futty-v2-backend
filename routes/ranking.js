@@ -8,6 +8,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
 const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
+const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
 
@@ -394,6 +395,7 @@ router.post(
       .select('para_user_id, nota, updated_at')
       .single();
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarEquipa(team.id); // a nota mexe no ranking → selo "RANKING 1º"
 
     res.json({ voto: data });
   })
@@ -442,6 +444,7 @@ router.delete(
       .eq('para_user_id', req.params.userId);
     const { error } = await supabase.from('votes').delete().eq('team_id', team.id).eq('para_user_id', req.params.userId);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarEquipa(team.id);
     res.json({ deleted: true, count: count || 0 });
   })
 );
@@ -457,6 +460,7 @@ router.delete(
     const { count } = await supabase.from('votes').select('id', { count: 'exact', head: true }).eq('team_id', team.id);
     const { error } = await supabase.from('votes').delete().eq('team_id', team.id);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarEquipa(team.id);
     res.json({ deleted: true, count: count || 0 });
   })
 );

@@ -6,6 +6,7 @@ const { requireAuth, optionalAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, getTeamBySlug, getRole } = require('../utils/db');
 const store = require('../utils/campeonatoStore');
+const selosCache = require('../utils/selosCache');
 const { buildRanking } = require('./ranking');
 
 const router = express.Router();
@@ -115,14 +116,20 @@ async function computeSelos(uid, teamIds) {
   return semDuplicados;
 }
 
-/** GET /api/me/selos — selos do próprio (todas as equipas). */
+/** GET /api/me/selos — selos do próprio (todas as equipas). Cache: utils/selosCache.js. */
 router.get(
   '/api/me/selos',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: minhas } = await supabase.from('team_members').select('team_id').eq('user_id', req.user.id);
-    const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
-    res.json({ selos: await computeSelos(req.user.id, teamIds) });
+    const uid = req.user.id;
+    const { selos } = await selosCache.obter(uid, async () => {
+      const { data: minhas, error } = await supabase.from('team_members').select('team_id').eq('user_id', uid);
+      // Falha não entra no cache: sem isto, um soluço do banco deixava a pessoa sem selos por minutos.
+      if (error) throw new HttpError(500, error.message);
+      const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
+      return { selos: await computeSelos(uid, teamIds), teamIds };
+    });
+    res.json({ selos });
   })
 );
 
@@ -300,6 +307,7 @@ router.post(
       throw new HttpError(400, e.message);
     }
     await store.guardar(camp);
+    if (camp.estado === 'terminado') selosCache.invalidarEquipa(team.id); // o último resultado coroou alguém
     res.json({ campeonato: enriquecer(camp) });
   })
 );
@@ -315,6 +323,7 @@ router.post(
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
     store.terminarPontos(camp);
     await store.guardar(camp);
+    selosCache.invalidarEquipa(team.id);
     res.json({ campeonato: enriquecer(camp) });
   })
 );
@@ -327,6 +336,7 @@ router.delete(
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só o admin exclui campeonatos.');
     await store.apagar(team.id, req.params.id);
+    selosCache.invalidarEquipa(team.id); // se já tinha terminado, o selo sai junto
     res.json({ ok: true });
   })
 );

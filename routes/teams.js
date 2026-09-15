@@ -13,6 +13,7 @@ const { verificarImagemReal } = require('../utils/imagemReal');
 const { geocodar } = require('../utils/geocode');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
+const selosCache = require('../utils/selosCache');
 
 const router = express.Router();
 
@@ -124,6 +125,7 @@ router.post(
       await supabase.from('teams').delete().eq('id', team.id);
       throw new HttpError(500, memberError.message);
     }
+    selosCache.invalidarMembro(team.id, req.user.id);
 
     res.status(201).json({ team });
   })
@@ -606,6 +608,7 @@ router.patch(
       .eq('team_id', team.id)
       .eq('user_id', req.params.userId);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarEquipa(team.id); // inativo sai do ranking
     res.json({ ok: true, ativo });
   })
 );
@@ -628,6 +631,7 @@ router.delete(
       .eq('team_id', team.id)
       .eq('user_id', req.params.userId);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarMembro(team.id, req.params.userId);
     res.json({ removed: true });
   })
 );
@@ -669,6 +673,7 @@ router.delete(
       .eq('team_id', team.id)
       .eq('user_id', req.user.id);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarMembro(team.id, req.user.id);
     res.json({ saiu: true });
   })
 );
@@ -713,6 +718,7 @@ router.patch(
       .maybeSingle();
     if (error) throw new HttpError(500, error.message);
     if (!updated) throw new HttpError(404, 'Membro não encontrado.');
+    selosCache.invalidarEquipa(team.id); // categoria e visivel_ranking mexem no ranking
     res.json({ membro: updated });
   })
 );
@@ -835,6 +841,7 @@ router.post(
       }
       throw new HttpError(500, memberError.message);
     }
+    selosCache.invalidarMembro(team.id, req.user.id);
 
     // Marca o convite como usado
     await supabase.from('convites').update({ usado_por: req.user.id }).eq('id', convite.id);
@@ -863,6 +870,7 @@ router.post(
         .from('team_members')
         .upsert({ team_id: team.id, user_id: req.user.id, role: 'member' }, { onConflict: 'user_id,team_id' });
       if (me) throw new HttpError(500, me.message);
+      selosCache.invalidarMembro(team.id, req.user.id);
       return res.status(201).json({ entrou: true });
     }
 
@@ -1009,6 +1017,7 @@ router.patch(
         .from('team_members')
         .upsert({ team_id: team.id, user_id: pedido.user_id, role: 'member' }, { onConflict: 'user_id,team_id' });
       if (me) throw new HttpError(500, me.message);
+      selosCache.invalidarMembro(team.id, pedido.user_id);
     }
 
     const { data: updated, error } = await supabase
