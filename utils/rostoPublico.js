@@ -38,7 +38,7 @@ function aplicarRostoPublico(tr, usersById, base) {
     const u = j.user_id && usersById ? usersById.get(j.user_id) : null;
     if (u && podeRevelar(u)) {
       const p = parseUrlPublico(j.avatar_url);
-      j.avatar_url = p ? `${base}/api/media/${assinarToken(p.bucket, p.path)}` : '';
+      j.avatar_url = p ? `${base}/api/media/${assinarToken(p.bucket, p.path, { v: p.v })}` : '';
     } else {
       j.avatar_url = ''; // menor / sem dob / sem consentimento / convidado → silhueta
     }

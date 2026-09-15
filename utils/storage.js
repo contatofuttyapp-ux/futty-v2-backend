@@ -44,12 +44,19 @@ async function removerFicheirosPorUrl(bucket, urls) {
 // ─────────────────────────────────────────────────────────────────────────────
 const BUCKETS_PRIVADOS = ['avatars', 'resenha'];
 
-// Deteta um URL público de um bucket nosso privado → { bucket, path } | null.
+// Deteta um URL público de um bucket nosso privado → { bucket, path, v } | null.
+//
+// VELOCIDADE 6A (15-set): o `?v=<timestamp>` que os uploads gravam (routes/auth.js
+// :304 e :885, routes/teams.js :428) era simplesmente deitado fora aqui. É ele que
+// diz "este ficheiro MUDOU" — o caminho no bucket é fixo (upsert), só o v muda.
+// Agora é capturado e entra no token: conteúdo novo = v novo = URL novo (o cache
+// do celular renova-se sozinho); conteúdo igual = URL igual (o cache acerta).
 function parseUrlPublico(url) {
   if (typeof url !== 'string') return null;
-  const m = url.match(/\/storage\/v1\/object\/public\/(avatars|resenha)\/([^?"'\s]+)/);
+  const m = url.match(/\/storage\/v1\/object\/public\/(avatars|resenha)\/([^?"'\s]+)(\?[^"'\s]*)?/);
   if (!m) return null;
-  return { bucket: m[1], path: decodeURIComponent(m[2]) };
+  const v = m[3] ? new URLSearchParams(m[3].slice(1)).get('v') : null;
+  return { bucket: m[1], path: decodeURIComponent(m[2]), v: v || null };
 }
 
 // Percorre o payload (objetos/arrays) e aplica fn a cada STRING; se fn devolver
@@ -118,7 +125,7 @@ function proxificarPayload(payload, base) {
     percorrer(payload, (s) => {
       const p = parseUrlPublico(s);
       if (!p) return undefined;
-      return `${base}/api/media/${assinarToken(p.bucket, p.path)}`;
+      return `${base}/api/media/${assinarToken(p.bucket, p.path, { v: p.v })}`;
     });
     return payload;
   } catch (e) {

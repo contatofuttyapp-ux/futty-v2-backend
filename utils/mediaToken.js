@@ -8,7 +8,24 @@ const crypto = require('crypto');
 // O fallback para SUPABASE_SERVICE_KEY/'dev-only' só é alcançável em dev —
 // server.js recusa arrancar em produção sem MEDIA_TOKEN_SECRET definido.
 const SEGREDO = process.env.MEDIA_TOKEN_SECRET || process.env.SUPABASE_SERVICE_KEY || 'dev-only';
-const TTL_PADRAO = 7 * 24 * 3600; // 7 dias — o URL no DOM não expira à vista (mata o tradeoff da 1h)
+
+// VELOCIDADE 6A (15-set) — o token era `agora + 7 dias`, ou seja MUDAVA A CADA
+// SEGUNDO. URL diferente a cada leitura = o cache do celular NUNCA acertava: a
+// mesma foto foi medida a descer 3 vezes num único carregamento do Início,
+// 390 KB e 1,4 s cada.
+//
+// Agora o `exp` é arredondado a uma JANELA de 7 dias: todos os tokens emitidos
+// na mesma semana têm o mesmo `exp`, logo o MESMO token → a mesma URL → o
+// celular reaproveita do disco. O `+2` janelas garante que o token vale sempre
+// pelo menos 7 dias mesmo quando é emitido no último segundo de uma janela
+// (nunca entrega ao cliente um URL prestes a expirar).
+const JANELA = 7 * 24 * 3600;
+const TTL_PADRAO = JANELA; // mantido no export: outros módulos leem-no
+
+/** Fim da janela de 7 dias em que `agoraS` cai, mais uma janela de folga. */
+function expDaJanela(agoraS = Math.floor(Date.now() / 1000)) {
+  return (Math.floor(agoraS / JANELA) + 2) * JANELA;
+}
 
 function b64url(buf) {
   return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -20,14 +37,22 @@ function assinatura(corpo) {
   return b64url(crypto.createHmac('sha256', SEGREDO).update(corpo).digest());
 }
 
-/** Emite um token para {bucket, path} válido `ttl` segundos. */
-function assinarToken(bucket, path, ttl = TTL_PADRAO) {
-  const exp = Math.floor(Date.now() / 1000) + ttl;
-  const corpo = b64url(JSON.stringify({ b: bucket, p: path, e: exp }));
+/**
+ * Emite um token ESTÁVEL para {bucket, path}: o mesmo ficheiro dá o mesmo token
+ * durante toda a janela de 7 dias.
+ *
+ * `v` é a versão do conteúdo (o `?v=<timestamp>` que os uploads gravam no URL).
+ * É ela que quebra o cache quando o conteúdo muda: figurinha regenerada = v
+ * novo = token novo = URL novo. Sem `v`, o token fica igual ao formato antigo.
+ */
+function assinarToken(bucket, path, { v } = {}) {
+  const payload = { b: bucket, p: path, e: expDaJanela() };
+  if (v) payload.v = String(v);
+  const corpo = b64url(JSON.stringify(payload));
   return `${corpo}.${assinatura(corpo)}`;
 }
 
-/** Valida um token. Devolve {bucket, path} ou null (assinatura má / expirado). */
+/** Valida um token. Devolve {bucket, path, v} ou null (assinatura má / expirado). */
 function verificarToken(token) {
   try {
     if (typeof token !== 'string' || !token.includes('.')) return null;
@@ -37,13 +62,14 @@ function verificarToken(token) {
     const a = deB64url(sig);
     const b = deB64url(esperada);
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
-    const { b: bucket, p: path, e: exp } = JSON.parse(deB64url(corpo).toString());
+    const { b: bucket, p: path, e: exp, v } = JSON.parse(deB64url(corpo).toString());
     if (!bucket || !path || !exp) return null;
     if (Math.floor(Date.now() / 1000) > exp) return null;
-    return { bucket, path };
+    // Tokens emitidos antes da Velocidade 6A não têm `v` — continuam válidos.
+    return { bucket, path, v: v || null };
   } catch {
     return null;
   }
 }
 
-module.exports = { assinarToken, verificarToken, TTL_PADRAO };
+module.exports = { assinarToken, verificarToken, TTL_PADRAO, JANELA, expDaJanela };
