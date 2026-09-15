@@ -5,6 +5,7 @@
 // (só agregados). A tabela antiga `denuncias` (009) fica INTOCADA.
 const crypto = require('crypto');
 const { supabase } = require('./db');
+const { comPrazo } = require('./comPrazo');
 
 const BUCKET = 'denuncias';
 
@@ -28,8 +29,11 @@ const hoje = (agora) => new Date(agora).toISOString().slice(0, 10);
 function caminhoReporter(userId) {
   return `reporters/${userId}.json`;
 }
+// Rodada 8B: prazo de 3 s (comPrazo) em toda LEITURA do Storage deste módulo —
+// uma ida sem resposta nunca pode prender quem chama (ex.: obterDesfechosDenuncias,
+// no caminho de /api/inicio, embrulhado em seguro() do lado de lá).
 async function obterReporter(userId) {
-  const { data } = await supabase.storage.from(BUCKET).download(caminhoReporter(userId));
+  const { data } = await comPrazo(supabase.storage.from(BUCKET).download(caminhoReporter(userId)), 3000, 'denuncias/reporter');
   if (!data) return { peso: 1, dia: null, contagem_dia: 0 };
   try { return JSON.parse(await data.text()); } catch { return { peso: 1, dia: null, contagem_dia: 0 }; }
 }
@@ -78,12 +82,12 @@ async function guardarCaso(caso) {
   return caso;
 }
 async function obterCaso(teamId, id) {
-  const { data } = await supabase.storage.from(BUCKET).download(caminhoCaso(teamId, id));
+  const { data } = await comPrazo(supabase.storage.from(BUCKET).download(caminhoCaso(teamId, id)), 3000, 'denuncias/caso');
   if (!data) return null;
   try { return JSON.parse(await data.text()); } catch { return null; }
 }
 async function listarEquipa(teamId) {
-  const { data } = await supabase.storage.from(BUCKET).list(`casos/${chaveEquipa(teamId)}`, { limit: 500 });
+  const { data } = await comPrazo(supabase.storage.from(BUCKET).list(`casos/${chaveEquipa(teamId)}`, { limit: 500 }), 3000, 'denuncias/lista');
   const ids = (data || []).filter((f) => f.name.endsWith('.json')).map((f) => f.name.replace(/\.json$/, ''));
   const casos = await Promise.all(ids.map((id) => obterCaso(teamId, id)));
   return casos.filter(Boolean);

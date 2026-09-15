@@ -6,6 +6,7 @@
 // pedido autenticado — suspensões são raras, por isso o custo é ~nulo.
 const { supabase } = require('./db');
 const { criarCache } = require('./cacheQuente');
+const { comPrazo } = require('./comPrazo');
 
 const BUCKET = 'denuncias';
 const CAMINHO = '_plataforma/suspensoes.json';
@@ -29,9 +30,12 @@ function normalizar(o) {
 
 // Lê SEMPRE do Storage (sem cache) — usado antes de gravar para não perder
 // escritas concorrentes. Fail-open: erro → estado vazio (não bloqueia ninguém).
+// Rodada 8B: prazo de 3 s (comPrazo) — sem ele, uma ida sem resposta prendia
+// esta função (e quem a chama, como a gate de CADA pedido autenticado) para
+// sempre; o catch já existia, mas não protege contra uma promessa pendurada.
 async function lerRaw() {
   try {
-    const { data } = await supabase.storage.from(BUCKET).download(CAMINHO);
+    const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO), 3000, 'plataforma/suspensoes');
     if (!data) return { ...VAZIO };
     return normalizar(JSON.parse(await data.text()));
   } catch {

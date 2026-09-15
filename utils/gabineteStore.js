@@ -13,6 +13,7 @@ const { randomUUID } = require('crypto');
 const { supabase } = require('./db');
 const { HttpError } = require('./http');
 const { criarCache } = require('./cacheQuente');
+const { comPrazo } = require('./comPrazo');
 
 const BUCKET = 'denuncias';
 const CAMINHO = '_gabinete/operacao.json';
@@ -120,10 +121,14 @@ const TTL_MS = 30000;
 const CHAVE = 'operacao';
 const cache = criarCache({ nome: 'gabinete', ttlMs: TTL_MS, max: 1 });
 
-/** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia. */
+/** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia.
+ *  Rodada 8B: prazo de 3 s (comPrazo) — este é o download que /api/inicio e
+ *  /api/ads pagam em toda tela fria; sem prazo, uma ida sem resposta prendia
+ *  a tela inteira (o catch já existia, mas não protege contra uma promessa
+ *  pendurada, só contra uma que rejeita). */
 async function lerRaw() {
   try {
-    const { data } = await supabase.storage.from(BUCKET).download(CAMINHO);
+    const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO), 3000, 'gabinete/operacao');
     if (!data) return { ...SEED };
     const txt = await data.text();
     return { ...SEED, ...JSON.parse(txt) };

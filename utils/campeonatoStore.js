@@ -11,6 +11,7 @@
 const crypto = require('crypto');
 const { supabase } = require('./db');
 const { mulberry32, fisherYates } = require('./sorteio');
+const { comPrazo } = require('./comPrazo');
 
 const BUCKET = 'campeonatos';
 
@@ -49,8 +50,12 @@ async function guardar(camp) {
   return camp;
 }
 
+// Rodada 8B: prazo de 3 s (comPrazo) nas duas leituras — uma ida sem resposta
+// nunca pode prender quem chama (mesmo padrão de denunciaStore/gabineteStore/
+// plataformaStore). Se o prazo vencer, rejeita como uma falha normal do Storage
+// já rejeitaria — quem chama (asyncHandler das rotas) já sabe tratar isso.
 async function obter(teamId, id) {
-  const { data, error } = await supabase.storage.from(BUCKET).download(caminho(teamId, id));
+  const { data, error } = await comPrazo(supabase.storage.from(BUCKET).download(caminho(teamId, id)), 3000, 'campeonatos/obter');
   if (error || !data) return null;
   const txt = await data.text();
   try {
@@ -61,7 +66,7 @@ async function obter(teamId, id) {
 }
 
 async function listar(teamId) {
-  const { data } = await supabase.storage.from(BUCKET).list(`t/${teamId}`, { limit: 200 });
+  const { data } = await comPrazo(supabase.storage.from(BUCKET).list(`t/${teamId}`, { limit: 200 }), 3000, 'campeonatos/listar');
   const ficheiros = (data || []).filter((f) => f.name.endsWith('.json'));
   const camps = await Promise.all(ficheiros.map((f) => obter(teamId, f.name.replace(/\.json$/, ''))));
   return camps
