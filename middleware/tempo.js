@@ -12,7 +12,16 @@
 // que eles foram? `marcarFase(res, 'teams')` fecha a fase anterior e abre esta;
 // no fim sai `Server-Timing: auth;dur=…, teams;dur=…, resto;dur=…, app;dur=…`.
 // O `app` fica sempre em ÚLTIMO porque o Diagnóstico do app lê `app;dur`.
+//
+// CACHE (15-set, "Velocidade 7A"): os caches quentes (utils/cacheQuente.js)
+// avisam aqui se o pedido achou o valor pronto ou teve de esperar a rede. Sai
+// `cache;desc=hit` (tudo pronto) ou `cache;desc=miss` (algum frio), e para cada
+// cache frio uma fase `cache-<nome>;dur=…` com a espera — ex.: `cache-sessao;dur=612.3`.
+// É o que mostra quando o motor pagou cache frio. O pedido corrente é achado
+// pelo AsyncLocalStorage, para nenhum serviço precisar de receber o `res` só por isso.
+const { AsyncLocalStorage } = require('node:async_hooks');
 
+const pedidoAtual = new AsyncLocalStorage();
 const AGORA = () => process.hrtime.bigint();
 const MS = (de, ate) => Number(ate - de) / 1e6;
 
@@ -54,11 +63,26 @@ function medir(res, nome, promessa) {
   });
 }
 
+/**
+ * Chamado pelos caches quentes. `acertou` = o valor já estava pronto (fresco ou
+ * velho servido na hora); senão `esperaMs` é quanto este pedido ficou esperando
+ * a rede. Silencioso fora de um pedido (aquecimento no arranque, testes).
+ */
+function registrarCache(nome, acertou, esperaMs = 0) {
+  const t = pedidoAtual.getStore();
+  if (!t) return;
+  t.consultouCache = true;
+  if (acertou) return;
+  t.cacheFrio = true;
+  const fase = `cache-${nome}`;
+  t.fases[fase] = (t.fases[fase] || 0) + esperaMs;
+}
+
 function tempoPorRota(req, res, next) {
   const inicio = AGORA();
   const logar = process.env.NODE_ENV !== 'production';
 
-  res.locals._tempo = { inicio, fases: {}, faseDesde: inicio, marcou: false };
+  res.locals._tempo = { inicio, fases: {}, faseDesde: inicio, marcou: false, consultouCache: false, cacheFrio: false };
 
   // res.end é o ponto comum de saída (res.json/res.send/res.redirect chamam-no
   // por baixo) — intercetado para poder pôr o header ANTES dos headers saírem
@@ -73,6 +97,7 @@ function tempoPorRota(req, res, next) {
       if (t.marcou && sobra >= 0.1) t.fases.resto = (t.fases.resto || 0) + sobra;
       const total = MS(inicio, fim);
       const partes = Object.entries(t.fases).map(([nome, ms]) => `${nome};dur=${ms.toFixed(1)}`);
+      if (t.consultouCache) partes.push(`cache;desc=${t.cacheFrio ? 'miss' : 'hit'}`);
       partes.push(`app;dur=${total.toFixed(1)}`); // SEMPRE por último
       res.setHeader('Server-Timing', partes.join(', '));
 
@@ -91,7 +116,7 @@ function tempoPorRota(req, res, next) {
       if (ms > 500) console.log(`[tempo] ${req.method} ${req.originalUrl} ${Math.round(ms)}ms`);
     });
   }
-  next();
+  pedidoAtual.run(res.locals._tempo, next);
 }
 
-module.exports = { tempoPorRota, marcarFase, medir };
+module.exports = { tempoPorRota, marcarFase, medir, registrarCache };

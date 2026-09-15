@@ -76,3 +76,55 @@ test('marcarFase e medir não rebentam sem o middleware montado', () => {
   assert.doesNotThrow(() => marcarFase({}, 'x'));
   assert.doesNotThrow(() => medir({}, 'x', Promise.resolve(1)));
 });
+
+// ─── Velocidade 7A: o Server-Timing diz quando o motor pagou cache frio ───────
+
+const { criarCache } = require('../utils/cacheQuente');
+
+async function comApp(montarRota, fn) {
+  const app = express();
+  app.use(tempoPorRota);
+  montarRota(app);
+  const server = app.listen(0);
+  await new Promise((r) => server.once('listening', r));
+  const pedirX = async () => (await fetch(`http://127.0.0.1:${server.address().port}/x`)).headers.get('server-timing');
+  try {
+    return await fn(pedirX);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+}
+
+function rotaComCache(demoraMs) {
+  const cache = criarCache({ nome: 'sessao', ttlMs: 60_000 });
+  return (app) => app.get('/x', async (req, res) => {
+    await cache.obter('token', async () => {
+      await new Promise((r) => setTimeout(r, demoraMs));
+      return { id: 'u1' };
+    });
+    res.json({ ok: true });
+  });
+}
+
+test('cache frio: cache;desc=miss e a espera em cache-<nome>; quente: cache;desc=hit', async () => {
+  await comApp(rotaComCache(40), async (pedirX) => {
+    const frio = await pedirX();
+    assert.match(frio, /(?:^|, )cache;desc=miss(?:,|$)/, `faltou o miss: ${frio}`);
+    assert.ok(campos(frio)['cache-sessao'] >= 35, `a espera do cache frio não apareceu: ${frio}`);
+    assert.match(frio.split(', ').pop(), /^app;dur=/, 'app;dur deixou de ser o último');
+
+    const quente = await pedirX();
+    assert.match(quente, /(?:^|, )cache;desc=hit(?:,|$)/, `faltou o hit: ${quente}`);
+    assert.doesNotMatch(quente, /cache-sessao/, 'um acerto não devia aparecer como espera');
+  });
+});
+
+test('pedidos simultâneos no cache frio: cada um registra a própria espera', async () => {
+  await comApp(rotaComCache(60), async (pedirX) => {
+    const [a, b] = await Promise.all([pedirX(), pedirX()]);
+    for (const st of [a, b]) {
+      assert.match(st, /cache;desc=miss/, `um dos pedidos não viu o cache frio: ${st}`);
+      assert.ok(campos(st)['cache-sessao'] > 0, st);
+    }
+  });
+});

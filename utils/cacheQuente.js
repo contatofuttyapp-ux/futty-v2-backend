@@ -14,6 +14,10 @@
 // trás (uma de cada vez). Só espera quem não tem nada em cache.
 //
 // Vive só neste processo (nada distribuído): cada instância do Cloud Run tem o seu.
+//
+// Cada consulta avisa o Server-Timing do pedido (middleware/tempo.js): valor
+// pronto = hit; teve de esperar a rede = miss, com o tempo da espera.
+const { registrarCache } = require('../middleware/tempo');
 
 /**
  * @param {object} opcoes
@@ -60,16 +64,25 @@ function criarCache({ nome, ttlMs, max = 1000, guardarSe = () => true, servirVel
     async obter(chave, buscar) {
       const e = entradas.get(chave);
       if (e) {
-        if (Date.now() - e.em < ttlMs) return e.valor;
+        if (Date.now() - e.em < ttlMs) {
+          registrarCache(nome, true);
+          return e.valor;
+        }
         if (servirVelhoSe(e.valor, chave)) {
           if (!emVoo.has(chave)) {
             // Falhou a renovação: o valor velho fica, e o próximo pedido tenta de novo.
             carregar(chave, buscar).catch((erro) => console.error(`[cache ${nome}] renovação por trás falhou:`, erro.message));
           }
+          registrarCache(nome, true);
           return e.valor;
         }
       }
-      return emVoo.get(chave) || carregar(chave, buscar);
+      const inicio = performance.now();
+      try {
+        return await (emVoo.get(chave) || carregar(chave, buscar));
+      } finally {
+        registrarCache(nome, false, performance.now() - inicio);
+      }
     },
     /** Grava um valor já conhecido (quem acabou de escrever vê a própria escrita). */
     definir(chave, valor) {
