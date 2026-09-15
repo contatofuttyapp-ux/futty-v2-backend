@@ -2,7 +2,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
-const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
+const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings, goleirosDoTime } = require('../utils/db');
 const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
@@ -409,12 +409,17 @@ router.post(
   })
 );
 
-/** POST /api/games/:id/confirmar — confirma/cancela a própria presença. */
+/**
+ * POST /api/games/:id/confirmar — confirma/cancela a própria presença.
+ * Rodada 9: `goleiro` é opcional. Sem ele no body, vale o que já estiver
+ * marcado naquele jogo (pelo jogador ou pelo admin) e, se ainda não houver
+ * linha, a flag do time (team_members.posicao === 'GL').
+ */
 router.post(
   '/api/games/:id/confirmar',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { confirmado = true, goleiro = false } = req.body || {};
+    const { confirmado = true, goleiro } = req.body || {};
 
     const game = await loadGame(req.params.id);
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
@@ -424,13 +429,24 @@ router.post(
 
     await ensureUserRow(req.user);
 
+    let ehGoleiro = !!goleiro;
+    if (goleiro == null) {
+      const { data: linha } = await supabase
+        .from('game_players')
+        .select('goleiro')
+        .eq('game_id', game.id)
+        .eq('user_id', req.user.id)
+        .maybeSingle();
+      ehGoleiro = linha ? !!linha.goleiro : (await goleirosDoTime(game.teams.id, [req.user.id])).has(req.user.id);
+    }
+
     const { error } = await supabase.from('game_players').upsert(
-      { game_id: game.id, user_id: req.user.id, confirmado: !!confirmado, goleiro: !!goleiro },
+      { game_id: game.id, user_id: req.user.id, confirmado: !!confirmado, goleiro: ehGoleiro },
       { onConflict: 'game_id,user_id' }
     );
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ meuEstado: { confirmado: !!confirmado, goleiro: !!goleiro } });
+    res.json({ meuEstado: { confirmado: !!confirmado, goleiro: ehGoleiro } });
   })
 );
 

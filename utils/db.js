@@ -165,6 +165,21 @@ async function computeRatings(teamId, userIds) {
   return out;
 }
 
+/**
+ * Rodada 9: quem é goleiro DO TIME (team_members.posicao === 'GL').
+ * É o padrão de cada jogo: quem confirma sem dizer nada entra como goleiro.
+ * @param {string} teamId
+ * @param {string[]} [userIds] restringe a consulta (omitir = time inteiro)
+ * @returns {Promise<Set<string>>} user_ids marcados como goleiro no time
+ */
+async function goleirosDoTime(teamId, userIds) {
+  if (userIds && !userIds.length) return new Set();
+  let q = supabase.from('team_members').select('user_id').eq('team_id', teamId).eq('posicao', 'GL');
+  if (userIds) q = q.in('user_id', userIds);
+  const { data } = await q;
+  return new Set((data || []).map((m) => m.user_id).filter(Boolean));
+}
+
 module.exports = {
   supabase,
   getTeamBySlug,
@@ -176,4 +191,5 @@ module.exports = {
   loadGame,
   currentVotingGame,
   computeRatings,
+  goleirosDoTime,
 };

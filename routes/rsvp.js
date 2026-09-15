@@ -4,7 +4,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
-const { supabase, getRole, loadGame } = require('../utils/db');
+const { supabase, getRole, loadGame, goleirosDoTime } = require('../utils/db');
 const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
 
@@ -129,12 +129,25 @@ router.post(
 
     // Sincroniza os confirmados via RSVP para game_players (alimenta o sorteio
     // sem o admin ter de adicionar os jogadores manualmente).
+    // Rodada 9: quem já tem linha no jogo mantém o `goleiro` que ele ou o admin
+    // marcaram; quem entra agora herda a flag do time (posicao === 'GL').
     const { data: confirmados } = await supabase
       .from('rsvp_respostas')
       .select('user_id')
       .eq('game_id', game.id)
       .eq('status', 'confirmado');
-    const rows = (confirmados || []).map((r) => ({ game_id: game.id, user_id: r.user_id, confirmado: true }));
+    const ids = (confirmados || []).map((r) => r.user_id).filter(Boolean);
+    const { data: jaNoJogo } = ids.length
+      ? await supabase.from('game_players').select('user_id, goleiro').eq('game_id', game.id).in('user_id', ids)
+      : { data: [] };
+    const goleiroAtual = new Map((jaNoJogo || []).map((g) => [g.user_id, !!g.goleiro]));
+    const goleirosTime = await goleirosDoTime(game.teams.id, ids);
+    const rows = ids.map((userId) => ({
+      game_id: game.id,
+      user_id: userId,
+      confirmado: true,
+      goleiro: goleiroAtual.has(userId) ? goleiroAtual.get(userId) : goleirosTime.has(userId),
+    }));
     if (rows.length) {
       const { error: gpErr } = await supabase.from('game_players').upsert(rows, { onConflict: 'game_id,user_id' });
       if (gpErr) throw new HttpError(500, gpErr.message);
