@@ -40,6 +40,8 @@ const { mediaUrls } = require('./middleware/mediaUrls');
 const { tempoPorRota } = require('./middleware/tempo');
 const { privatizarBuckets } = require('./utils/storage');
 const adsStore = require('./utils/adsStore');
+const plataformaStore = require('./utils/plataformaStore');
+const gabineteStore = require('./utils/gabineteStore');
 const { HttpError } = require('./utils/http');
 
 const authRoutes = require('./routes/auth');
@@ -300,6 +302,16 @@ if (require.main === module) {
   const servidor = app.listen(port, () => {
     console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
     console.log(`[Futty] Health check: http://localhost:${port}/health`);
+    // VELOCIDADE 7A (15-set): aquece os caches que a primeira pessoa depois de um
+    // deploy (ou de uma instância nova do Cloud Run) pagaria dentro do tempo dela —
+    // as suspensões, lidas por TODO pedido autenticado, e o gabinete, lido pelo
+    // /api/inicio e pelo /api/ads: dois downloads do Storage. Quem chegar com isto
+    // ainda em curso espera o MESMO download, nunca um segundo. A chave VAPID não
+    // precisa: routes/push.js já a lê do ambiente quando o módulo carrega.
+    const inicioAquecimento = Date.now();
+    Promise.all([plataformaStore.ler(), gabineteStore.ler()])
+      .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
+      .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
     // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
     ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
     ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
