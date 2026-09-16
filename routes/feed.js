@@ -15,6 +15,7 @@ const { removerFicheirosPorUrl } = require('../utils/storage');
 const { urlDeMidiaValida } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
+const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
 
 const router = express.Router();
 
@@ -416,6 +417,30 @@ router.post(
       throw new HttpError(403, 'Você não tem permissão para publicar neste time.');
     }
 
+    // Cota de 500 MB por time (Rodada 15) — checada ANTES de criar o post,
+    // para não sobrar um post vazio se a mídia estourar o limite. O tamanho
+    // de cada anexo vem do STORAGE de verdade (tamanhoNoStorage), nunca do
+    // que o body diz — evita fingir um arquivo pequeno pra furar a cota.
+    //
+    // Sem a migração 053, bytesUsadosPeloTime devolve null: a cota não
+    // bloqueia (fail-open, aviso já registado por ela) E `colunaBytes` fica
+    // false, pra também NÃO tentar gravar feed_post_media.bytes — a coluna
+    // simplesmente não existe ainda, e um INSERT com uma coluna inexistente
+    // falharia com 500 em TODO post com mídia, não só na cota. O mesmo sinal
+    // (a RPC respondeu) decide os dois.
+    const bytesPorUrl = new Map();
+    let colunaBytes = false;
+    if (mediaList.length) {
+      const tamanhos = await Promise.all(mediaList.map((m) => tamanhoNoStorage(m.url)));
+      mediaList.forEach((m, i) => bytesPorUrl.set(m.url, tamanhos[i]));
+      const novosBytes = tamanhos.reduce((soma, b) => soma + (b || 0), 0);
+      const usados = await bytesUsadosPeloTime(teamId);
+      colunaBytes = usados !== null;
+      if (usados != null && usados + novosBytes > cotaBytesPorTime()) {
+        throw new HttpError(413, 'A Resenha deste time chegou ao limite de fotos. Apague posts antigos para liberar espaço.');
+      }
+    }
+
     await ensureUserRow(req.user);
 
     const { data: post, error } = await supabase
@@ -428,12 +453,16 @@ router.post(
     // Anexos do post (máx 4 — validado acima; slice como defesa).
     const mediaRows = mediaList
       .slice(0, 4)
-      .map((m, i) => ({
-        post_id: post.id,
-        url: String(m.url),
-        media_type: POST_MEDIA.includes(m.media_type) ? m.media_type : 'image',
-        position: Number.isFinite(Number(m.position)) ? Number(m.position) : i,
-      }));
+      .map((m, i) => {
+        const linha = {
+          post_id: post.id,
+          url: String(m.url),
+          media_type: POST_MEDIA.includes(m.media_type) ? m.media_type : 'image',
+          position: Number.isFinite(Number(m.position)) ? Number(m.position) : i,
+        };
+        if (colunaBytes) linha.bytes = bytesPorUrl.get(m.url) ?? null;
+        return linha;
+      });
     let savedMedia = [];
     if (mediaRows.length) {
       const { data: mm, error: me } = await supabase

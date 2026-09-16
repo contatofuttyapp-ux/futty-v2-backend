@@ -13,6 +13,7 @@ const { requireSuperAdmin } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
 const plataforma = require('../utils/plataformaStore');
+const { cotaBytesPorTime, bytesUsadosPorTodosOsTimes } = require('../utils/resenhaCota');
 
 const router = express.Router();
 
@@ -113,7 +114,8 @@ router.patch(
 );
 
 /**
- * GET /api/super/teams — lista todas as equipas com nr. de membros.
+ * GET /api/super/teams — lista todas as equipas com nr. de membros e uso de
+ * mídia da Resenha (Rodada 15: cota de 500 MB por time).
  */
 router.get(
   '/api/super/teams',
@@ -131,9 +133,23 @@ router.get(
     const contagem = {};
     for (const m of membros || []) contagem[m.team_id] = (contagem[m.team_id] || 0) + 1;
 
-    const { equipas: susEquipas } = await plataforma.conjuntos();
+    const [{ equipas: susEquipas }, bytesPorTime] = await Promise.all([
+      plataforma.conjuntos(),
+      bytesUsadosPorTodosOsTimes(), // {} se a migração 053 ainda não rodou (fail-open, já avisa no log)
+    ]);
+    const cotaMb = Math.round(cotaBytesPorTime() / (1024 * 1024));
     res.json({
-      teams: (teams || []).map((t) => ({ ...t, nr_membros: contagem[t.id] || 0, suspensa: susEquipas.has(t.id) })),
+      teams: (teams || []).map((t) => {
+        const bytes = bytesPorTime[t.id];
+        return {
+          ...t,
+          nr_membros: contagem[t.id] || 0,
+          suspensa: susEquipas.has(t.id),
+          // null = migração 053 ainda não rodou; o Gabinete mostra "—" nesse caso.
+          midia_mb: bytes != null ? Math.round((bytes / (1024 * 1024)) * 10) / 10 : null,
+          midia_cota_mb: cotaMb,
+        };
+      }),
     });
   })
 );
