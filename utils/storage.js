@@ -3,16 +3,29 @@
 // senão fica órfão, público e para sempre. Best-effort: se falhar, regista e segue
 // (nunca quebra o fluxo do utilizador que só quer apagar o post).
 const { supabase } = require('./db');
-const { assinarToken } = require('./mediaToken');
+const { assinarToken, decodificarToken } = require('./mediaToken');
 
-/** Extrai o caminho dentro do bucket a partir de uma URL pública do Storage. */
+/**
+ * Extrai o caminho dentro do bucket a partir de uma URL de mídia — a URL
+ * CRUA do Storage (.../object/public/<bucket>/<path>) OU a do PROXY que o
+ * Tijolo 2 emite (/api/media/<token>). Uma URL que veio do CLIENTE (salva em
+ * feed_post_media.url, comentario_anexos.url — o que o utilizador reenviou
+ * depois de um upload) é SEMPRE a forma do proxy desde o Tijolo 2: sem este
+ * segundo caminho, removerFicheirosPorUrl nunca achava o ficheiro e ele
+ * ficava órfão no Storage para sempre (achado real, Rodada 15). Usa
+ * decodificarToken (não verificarToken): apagar tem de continuar a
+ * funcionar mesmo com o token há muito expirado — expiração é sobre PODER
+ * SERVIR agora, não sobre saber a que ficheiro a URL se refere.
+ */
 function caminhoDeUrl(url, bucket) {
   if (typeof url !== 'string') return null;
   const marca = `/${bucket}/`;
   const i = url.indexOf(marca);
-  if (i === -1) return null;
-  // tira o bucket e a query (?v=…)
-  return decodeURIComponent(url.slice(i + marca.length).split('?')[0]);
+  if (i !== -1) return decodeURIComponent(url.slice(i + marca.length).split('?')[0]); // tira o bucket e a query (?v=…)
+  const m = url.match(/\/api\/media\/([^/?#]+)/);
+  if (!m) return null;
+  const alvo = decodificarToken(m[1]);
+  return alvo && alvo.bucket === bucket ? alvo.path : null;
 }
 
 /**
@@ -57,6 +70,26 @@ function parseUrlPublico(url) {
   if (!m) return null;
   const v = m[3] ? new URLSearchParams(m[3].slice(1)).get('v') : null;
   return { bucket: m[1], path: decodeURIComponent(m[2]), v: v || null };
+}
+
+/**
+ * Descobre a que bucket privado (avatars/resenha) uma URL GUARDADA pertence
+ * — crua OU do proxy — e o caminho dentro dele. Para LIMPEZA (apagarUsuario,
+ * scripts/limpar-usuarios-teste.js), que recebe uma pilha de URLs de fontes
+ * variadas (avatar, foto de campeão, mídia da Resenha…) sem saber de
+ * antemão o bucket de cada uma. Diferente de propósito do parseUrlPublico:
+ * aquele serve só o middleware de RESPOSTA (mediaUrls.js) e por isso casa só
+ * com a forma crua — um valor já em forma de proxy não precisa reescrita
+ * nenhuma, e se parseUrlPublico também casasse com ele, cada resposta
+ * reassinaria à toa a mídia que já veio pronta do banco (feed_post_media.url
+ * e comentario_anexos.url, que são proxy desde que foram gravados).
+ */
+function bucketEcaminho(url) {
+  for (const bucket of BUCKETS_PRIVADOS) {
+    const caminho = caminhoDeUrl(url, bucket);
+    if (caminho) return { bucket, path: caminho };
+  }
+  return null;
 }
 
 // Percorre o payload (objetos/arrays) e aplica fn a cada STRING; se fn devolver
@@ -166,6 +199,7 @@ module.exports = {
   removerFicheirosPorUrl,
   caminhoDeUrl,
   parseUrlPublico,
+  bucketEcaminho,
   assinarPayload,
   proxificarPayload,
   despublicarPayload,

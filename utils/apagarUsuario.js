@@ -22,7 +22,7 @@
 //      convites.criado_por/usado_por — todos CASCADE ou SET NULL, confirmado
 //      por grep em db/migrations/).
 const { supabase } = require('./db');
-const { removerFicheirosPorUrl, parseUrlPublico } = require('./storage');
+const { removerFicheirosPorUrl, bucketEcaminho } = require('./storage');
 
 /** Ordena por created_at ascendente (o mais antigo primeiro). */
 function porAntiguidade(a, b) {
@@ -143,7 +143,12 @@ async function apagarUsuario(userId) {
   const urls = [...(await coletarUrlsStorage(userId)), ...logosParaApagar];
   const urlsPorBucket = { avatars: [], resenha: [] };
   for (const url of urls) {
-    const p = parseUrlPublico(url);
+    // bucketEcaminho (não parseUrlPublico): a mídia da Resenha guardada em
+    // feed_post_media/comentario_anexos é sempre a URL do PROXY desde o
+    // Tijolo 2 — sem isto, essas URLs nunca entravam em urlsPorBucket e a
+    // conta apagada deixava fotos/comentários órfãos no bucket resenha para
+    // sempre (achado real, Rodada 15 — mesma causa do item 3 em feed.js).
+    const p = bucketEcaminho(url);
     if (p) urlsPorBucket[p.bucket].push(url);
   }
   let fotosRemovidas = 0;

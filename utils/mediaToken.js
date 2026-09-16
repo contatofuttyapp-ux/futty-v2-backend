@@ -52,8 +52,17 @@ function assinarToken(bucket, path, { v } = {}) {
   return `${corpo}.${assinatura(corpo)}`;
 }
 
-/** Valida um token. Devolve {bucket, path, v} ou null (assinatura má / expirado). */
-function verificarToken(token) {
+/**
+ * Decodifica um token (valida a ASSINATURA, ignora expiração). Uso interno:
+ * saber a que ficheiro uma URL antiga se refere, mesmo que o token em si já
+ * tenha expirado — é o caso de apagar um post/conta de meses atrás (Rodada
+ * 15: sem isto, removerFicheirosPorUrl/apagarUsuario nunca resolviam a URL
+ * salva em feed_post_media/comentario_anexos, que é sempre a do proxy desde
+ * o Tijolo 2 — os arquivos ficavam órfãos no Storage para sempre). NUNCA
+ * usar para decidir se um pedido pode VER o ficheiro agora — só verificarToken
+ * faz essa checagem.
+ */
+function decodificarToken(token) {
   try {
     if (typeof token !== 'string' || !token.includes('.')) return null;
     const [corpo, sig] = token.split('.');
@@ -64,12 +73,19 @@ function verificarToken(token) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     const { b: bucket, p: path, e: exp, v } = JSON.parse(deB64url(corpo).toString());
     if (!bucket || !path || !exp) return null;
-    if (Math.floor(Date.now() / 1000) > exp) return null;
-    // Tokens emitidos antes da Velocidade 6A não têm `v` — continuam válidos.
-    return { bucket, path, v: v || null };
+    return { bucket, path, exp, v: v || null };
   } catch {
     return null;
   }
 }
 
-module.exports = { assinarToken, verificarToken, TTL_PADRAO, JANELA, expDaJanela };
+/** Valida um token PARA SERVIR AGORA: assinatura + ainda dentro da validade. Devolve {bucket, path, v} ou null. */
+function verificarToken(token) {
+  const alvo = decodificarToken(token);
+  if (!alvo) return null;
+  if (Math.floor(Date.now() / 1000) > alvo.exp) return null;
+  // Tokens emitidos antes da Velocidade 6A não têm `v` — continuam válidos.
+  return { bucket: alvo.bucket, path: alvo.path, v: alvo.v };
+}
+
+module.exports = { assinarToken, verificarToken, decodificarToken, TTL_PADRAO, JANELA, expDaJanela };

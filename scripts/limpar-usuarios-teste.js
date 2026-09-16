@@ -37,7 +37,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { supabase } = require('../utils/db');
-const { removerFicheirosPorUrl, parseUrlPublico } = require('../utils/storage');
+const { removerFicheirosPorUrl, parseUrlPublico, bucketEcaminho } = require('../utils/storage');
 const { apagarUsuario } = require('../utils/apagarUsuario');
 
 const MANTER_EMAILS = ['phferreiraborgesbackup@gmail.com', 'contatofuttyapp@gmail.com'].map((e) => e.toLowerCase());
@@ -220,7 +220,10 @@ async function montarPlano({ timesTambem = false } = {}) {
 
   const urlsPorBucket = { avatars: [], resenha: [] };
   for (const url of todasUrls) {
-    const p = parseUrlPublico(url);
+    // bucketEcaminho (não parseUrlPublico): feed_post_media/comentario_anexos
+    // guardam a URL do PROXY desde o Tijolo 2, não a crua do Storage — mesmo
+    // achado do item 3 da Rodada 15 (ver utils/apagarUsuario.js).
+    const p = bucketEcaminho(url);
     if (p) urlsPorBucket[p.bucket].push(url);
   }
   // Ficheiro temporário determinístico (routes/auth.js: tmp/${userId}-pad.jpg,
@@ -236,7 +239,7 @@ async function montarPlano({ timesTambem = false } = {}) {
     participacoes: participacoesPorUser.get(u.id) || 0,
     jogos: jogosPorUser.get(u.id) || 0,
     votos: votosPorUser.get(u.id) || 0,
-    fotos_storage: (urlsPorUser.get(u.id) || []).filter((url) => parseUrlPublico(url)).length,
+    fotos_storage: (urlsPorUser.get(u.id) || []).filter((url) => bucketEcaminho(url)).length,
   }));
 
   return {
