@@ -329,11 +329,14 @@ async function criarTimePrincipal(ids, donos) {
   const membros = JOGADORES.map((j) => ({
     user_id: ids[j.apelido], team_id: time.id,
     role: j.apelido === 'Cacau' ? 'admin' : 'member',
-    categoria: j.gr ? 'GR' : 'linha', posicao: j.pos, pode_postar: true,
+    // Rodada 9: em team_members só existe goleiro ('GL') ou linha (null). O
+    // `pos` do elenco fictício continua a valer para distribuir os gols
+    // (distribuirGols), que é outra coisa — não vai para o banco.
+    categoria: j.gr ? 'GR' : 'linha', posicao: j.gr ? 'GL' : null, pode_postar: true,
     created_at: TIME.created_at,
   }));
   // Os dois e-mails do dono entram como ADMINISTRADORES.
-  for (const d of donos) membros.push({ user_id: d.id, team_id: time.id, role: 'admin', categoria: 'linha', posicao: 'MEI', pode_postar: true, created_at: TIME.created_at });
+  for (const d of donos) membros.push({ user_id: d.id, team_id: time.id, role: 'admin', categoria: 'linha', posicao: null, pode_postar: true, created_at: TIME.created_at });
   const { error: e2 } = await supabase.from('team_members').insert(membros);
   if (e2) throw new Error(`team_members: ${e2.message}`);
   ok(`time "${TIME.nome}" com ${JOGADORES.length} fictícios + ${donos.length} admin(s) do dono`);
