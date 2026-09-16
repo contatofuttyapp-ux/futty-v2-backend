@@ -4,6 +4,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
+const sharp = require('sharp');
 const { requireAuth } = require('../middleware/auth');
 const { denunciaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
@@ -32,16 +33,24 @@ const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo',
 const LIMITE_FEED = 60;
 
 // Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
-// Tecto 50MB (vídeo). As fotos passam pelo crop no cliente (clampadas a 1600px +
-// JPEG), portanto chegam bem abaixo disto. Sem transcodificação de vídeo.
-const UPLOAD_MAX_BYTES = 50 * 1024 * 1024;
+//
+// RODADA 15 (16-set): o teto geral desceu de 50MB para 12MB — fotos JPG/PNG/
+// WebP passam por compressão (ver comprimirImagem) antes de gravar, então
+// chegam bem abaixo disto; GIF tem o seu PRÓPRIO teto, mais apertado
+// (GIF_MAX_BYTES), porque não é comprimido (perderia a animação). Vídeo
+// segue sem transcodificação — 12MB é o teto dele também agora (era 50MB).
+const UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
+const GIF_MAX_BYTES = 8 * 1024 * 1024;
+// Lado maior de uma foto comprimida (px) e qualidade do WebP de saída.
+const COMPRESSAO_LADO_MAX = 1600;
+const COMPRESSAO_QUALIDADE = 80;
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: UPLOAD_MAX_BYTES } });
 // Wrapper que traduz o erro de tamanho do multer numa mensagem clara.
 function receberFicheiro(req, res, next) {
   upload.single('file')(req, res, (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE') {
-        return next(new HttpError(413, 'Arquivo grande demais: o limite é 50MB (vídeo). As fotos são otimizadas automaticamente.'));
+        return next(new HttpError(413, `Arquivo grande demais: o limite é ${UPLOAD_MAX_BYTES / (1024 * 1024)}MB. Fotos são otimizadas automaticamente; GIFs até ${GIF_MAX_BYTES / (1024 * 1024)}MB.`));
       }
       return next(new HttpError(400, 'Falha ao receber o arquivo.'));
     }
@@ -56,6 +65,8 @@ const UPLOAD_MIME = {
   'image/webp': 'webp',
   'video/mp4': 'mp4',
 };
+// Fotos estáticas que passam por compressão (o GIF fica de fora: animado).
+const IMAGENS_COMPRIMIVEIS = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const STORAGE_BUCKET = 'resenha';
 // Regex de menção: @<uuid> dentro do corpo do comentário.
 const MENTION_RE = /@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
@@ -151,6 +162,28 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
     if (slot.recentes.length < 2) slot.recentes.push(c);
   }
   return map;
+}
+
+/**
+ * Comprime uma foto estática antes de gravar (Rodada 15): respeita a
+ * orientação EXIF, reduz o lado maior a COMPRESSAO_LADO_MAX (nunca amplia) e
+ * converte para WebP. Fail-open: se o sharp falhar (arquivo corrompido de um
+ * jeito que passou pelo NSFW mas não pelo decode aqui), grava o ORIGINAL em
+ * vez de derrubar o upload — melhor uma foto grande que nenhuma foto.
+ * Devolve { buffer, mimetype, ext }.
+ */
+async function comprimirImagem(buffer, mimetypeOriginal, extOriginal) {
+  try {
+    const comprimido = await sharp(buffer)
+      .rotate() // aplica a orientação EXIF antes de qualquer coisa — sem isto a rotação vai junto para o WebP
+      .resize(COMPRESSAO_LADO_MAX, COMPRESSAO_LADO_MAX, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: COMPRESSAO_QUALIDADE })
+      .toBuffer();
+    return { buffer: comprimido, mimetype: 'image/webp', ext: 'webp' };
+  } catch (e) {
+    console.error('[feed] compressão falhou, gravando o arquivo original:', e.message);
+    return { buffer, mimetype: mimetypeOriginal, ext: extOriginal };
+  }
 }
 
 /** Garante (uma vez por processo) que o bucket público da Resenha existe. */
@@ -632,20 +665,33 @@ router.post(
   filtroNSFW, // Tijolo 1: bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum arquivo enviado.');
-    const ext = UPLOAD_MIME[req.file.mimetype];
-    if (!ext) throw new HttpError(400, 'Tipo de arquivo não permitido.');
+    const mimetypeOriginal = req.file.mimetype;
+    const extOriginal = UPLOAD_MIME[mimetypeOriginal];
+    if (!extOriginal) throw new HttpError(400, 'Tipo de arquivo não permitido.');
+
+    // GIF: fica animado, não passa por sharp — mas tem teto PRÓPRIO, mais
+    // apertado que o geral (a lei do app leve não abre exceção pra "é GIF").
+    if (mimetypeOriginal === 'image/gif' && req.file.buffer.length > GIF_MAX_BYTES) {
+      throw new HttpError(413, `GIF grande demais: o limite é ${GIF_MAX_BYTES / (1024 * 1024)}MB para manter a animação. Tente um arquivo menor.`);
+    }
+
+    const { buffer, mimetype, ext } = IMAGENS_COMPRIMIVEIS.has(mimetypeOriginal)
+      ? await comprimirImagem(req.file.buffer, mimetypeOriginal, extOriginal)
+      : { buffer: req.file.buffer, mimetype: mimetypeOriginal, ext: extOriginal };
 
     await ensureBucket();
 
     const filename = `${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
-      .upload(filename, req.file.buffer, { contentType: req.file.mimetype, upsert: false });
+      .upload(filename, buffer, { contentType: mimetype, upsert: false });
     if (error) throw new HttpError(500, error.message);
 
     const { data: pub } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(filename);
+    // O tipo de mídia (para a UI) segue o arquivo ORIGINAL — comprimir um JPEG
+    // para WebP não faz dele um "outro tipo", continua 'image'.
     const mediaType =
-      req.file.mimetype === 'image/gif' ? 'gif' : req.file.mimetype.startsWith('video/') ? 'video' : 'image';
+      mimetypeOriginal === 'image/gif' ? 'gif' : mimetypeOriginal.startsWith('video/') ? 'video' : 'image';
 
     res.status(201).json({ url: pub.publicUrl, media_type: mediaType });
   })
