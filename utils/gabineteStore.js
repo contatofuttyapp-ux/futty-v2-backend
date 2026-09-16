@@ -78,7 +78,12 @@ const SEED = {
   // continuam default OFF.
   ads_ativo: true,
   // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
-  toggles: { inicio: false, sorteio: false, p: false },
+  // Rodada 12C (16-set): entraram 'resenha', 'ranking' e 'figurinha' — a Resenha
+  // pedia 'inicio' emprestado (não dava para ligar uma sem a outra) e as outras
+  // duas não tinham slot nenhum. Nada no motor valida estes nomes: obterAd faz
+  // `toggles[pagina] !== true` e `c.paginas.includes(pagina)`, os dois
+  // fail-closed — uma página desconhecida devolve `ad: null` em vez de erro.
+  toggles: { inicio: false, resenha: false, ranking: false, figurinha: false, sorteio: false, p: false },
   // Proteção de dados (LGPD/compliance) — editável à mão. Default tudo por tratar/publicar.
   protecao_dados: {
     dpas: ['Supabase', 'Railway', 'Vercel', 'fal.ai', 'Anthropic', 'Apple (IAP)', 'Google (IAP)'].map((nome) => ({ nome, estado: 'por tratar', data: '', link: '' })),

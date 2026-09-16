@@ -15,7 +15,7 @@ const adsStore = require('../utils/adsStore');
 
 const router = express.Router();
 
-/** GET /api/ads?pagina=inicio|sorteio|p — devolve o anúncio a mostrar (ou {ad:null}). */
+/** GET /api/ads?pagina=inicio|resenha|ranking|figurinha|sorteio|p — devolve o anúncio a mostrar (ou {ad:null}). */
 router.get(
   '/api/ads',
   optionalAuth,

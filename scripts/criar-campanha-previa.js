@@ -1,19 +1,28 @@
-// Futty v2.0 — Rodada 12B: campanha de PRÉVIA para o slot IAB 320×100 da
-// página do sorteio, para o Pedro ver o tamanho/proporção reais na tela antes
-// de qualquer acordo comercial (ver Rodada 12A no frontend, que já criou o
-// slot). Gera uma imagem-placeholder (fundo vermelho sólido, "PUBLICIDADE
-// 320×100" em branco — propositalmente chamativa, ninguém confunde com um
-// anúncio real), sobe para o Storage e liga a campanha só na página 'sorteio'.
+// Futty v2.0 — Campanha de PRÉVIA da publicidade, para o Pedro ver como fica o
+// espaço de anúncio em cada tela antes de qualquer acordo comercial. Gera uma
+// imagem-placeholder (fundo vermelho sólido, "PUBLICIDADE 320×100" em branco —
+// propositalmente chamativa, ninguém confunde com um anúncio real), sobe para o
+// Storage e liga a campanha nas páginas de PAGINAS.
+//
+// Rodada 12B (16-set): nasceu só para o slot IAB 320×100 da página do sorteio.
+// Rodada 12C (16-set): passa a ligar nas CINCO telas com espaço de publicidade —
+// o dono quis ver o formato em todas. A vista pública /p/ fica de fora de
+// propósito (é a tela de quem não tem conta; anúncio ali é outra decisão).
+//
+// A MESMA arte serve os dois formatos: o slot 320×100 (proporção 3.2, igual à
+// da arte) e o nativo de altura 100 (proporção ~3.9). Num `object-fit: cover` a
+// arte mais "quadrada" numa caixa mais larga é escalada pela LARGURA e cortada
+// em cima/embaixo — as laterais ficam inteiras, e o texto centrado sobrevive.
 //
 // Idempotente: id fixo (CAMPANHA_ID) — rodar de novo ATUALIZA a mesma
 // campanha (nova imagem, mesmos dados) em vez de duplicar.
 //
-// Uso: node scripts/criar-campanha-previa-sorteio.js
+// Uso: node scripts/criar-campanha-previa.js
 //
 // Para DESLIGAR depois (o Pedro, pelo Gabinete → Anúncios):
-//   - apagar a campanha "Prévia do slot do sorteio" da lista, OU
-//   - desligar o toggle da página 'sorteio' (some daqui e de qualquer outra
-//     campanha futura ligada a essa página), OU
+//   - apagar a campanha "Prévia do espaço de publicidade" da lista, OU
+//   - desligar o toggle de uma página (some só dessa tela), OU
+//   - desligar o interruptor geral (corta a publicidade em todas), OU
 //   - mudar o estado da campanha para algo diferente de 'ativa'.
 require('dotenv').config({ quiet: true });
 const sharp = require('sharp');
@@ -21,7 +30,14 @@ const { supabase } = require('../utils/db');
 const gabineteStore = require('../utils/gabineteStore');
 const { obterAd } = require('../services/inicio');
 
-const CAMPANHA_ID = 'previa-sorteio-320x100'; // fixo de propósito (ver idempotência acima)
+// Fixo de propósito (ver idempotência acima). Mantém o nome de quando a
+// campanha só servia o sorteio: mudar o id agora criaria uma segunda campanha e
+// deixaria a primeira órfã na lista do dono — o id é interno, o que ele lê é o
+// `nome`.
+const CAMPANHA_ID = 'previa-sorteio-320x100';
+// As telas com espaço de publicidade (Rodada 12C). Os toggles do Gabinete
+// mandam por cima disto: uma página aqui com o toggle desligado não mostra nada.
+const PAGINAS = ['inicio', 'resenha', 'ranking', 'figurinha', 'sorteio'];
 // O bucket "avatars" (o único que a rota de upload de fotos usa) está com
 // `public: false` no Supabase real — quem serve as fotos ao vivo é o proxy
 // assinado (/api/media/:token, utils/mediaToken.js), nunca getPublicUrl()
@@ -84,9 +100,9 @@ async function gravarCampanha(imagemUrl) {
 
   const campanha = {
     id: CAMPANHA_ID,
-    nome: 'Prévia do slot do sorteio',
+    nome: 'Prévia do espaço de publicidade',
     anunciante: 'Futty (prévia interna)',
-    texto: 'Prévia do slot do sorteio',
+    texto: 'Prévia do espaço de publicidade',
     sub: 'Peça de teste 320×100 — desligar em Gabinete → Anúncios',
     cta: 'Ver',
     link: 'https://futtyapp.com.br',
@@ -94,7 +110,7 @@ async function gravarCampanha(imagemUrl) {
     estado: 'ativa',
     inicio: '',
     fim: '',
-    paginas: ['sorteio'],
+    paginas: [...PAGINAS],
     cls: 'livre',
   };
 
@@ -102,10 +118,11 @@ async function gravarCampanha(imagemUrl) {
     ? campanhas.map((c) => (c.id === CAMPANHA_ID ? campanha : c))
     : [...campanhas, campanha];
 
+  const togglesLigados = Object.fromEntries(PAGINAS.map((p) => [p, true]));
   const gravado = await gabineteStore.gravar({
     ...atual,
     campanhas: novaLista,
-    toggles: { ...atual.toggles, sorteio: true },
+    toggles: { ...atual.toggles, ...togglesLigados },
   });
 
   return { gravado, jaExiste };
@@ -134,17 +151,24 @@ async function confirmarComObterAd() {
 
   const hoje = new Date().toISOString().slice(0, 10);
   const veriaPelaRotacao = pedro.plan === 'free' ? true : metadeDasVezes(pedro.id, hoje);
-  const resultado = await obterAd('sorteio', pedro.id);
 
-  console.log(`\n[criar-campanha] obterAd('sorteio', ${pedro.email} · plano ${pedro.plan}):`);
-  console.log(`  ad: ${resultado.ad ? `"${resultado.ad.texto}" (id ${resultado.ad.id}, imagem ${resultado.ad.imagem_url ? 'sim' : 'não'})` : 'null'}`);
-  if (!resultado.ad && pedro.plan !== 'free' && !veriaPelaRotacao) {
-    console.log('  (plano pro/elite vê só metade das vezes — hoje a rotação por hash NÃO calhou para esta conta; é esperado, não é falha da campanha)');
+  console.log(`\n[criar-campanha] obterAd(<página>, ${pedro.email} · plano ${pedro.plan}) em cada tela:`);
+  for (const pagina of PAGINAS) {
+    // eslint-disable-next-line no-await-in-loop -- 5 leituras, todas do mesmo cache de 30 s
+    const r = await obterAd(pagina, pedro.id);
+    console.log(`  ${pagina.padEnd(9)} ${r.ad ? `OK — "${r.ad.texto}" (imagem ${r.ad.imagem_url ? 'sim' : 'não'})` : 'null'}`);
+  }
+  if (pedro.plan !== 'free' && !veriaPelaRotacao) {
+    console.log('  (plano pro/elite vê só metade das vezes — hoje a rotação por hash NÃO calhou para esta conta; os `null` acima são esperados, não são falha da campanha)');
   }
 
   // Também sem login (anônimo) — sempre determinístico, prova a campanha em si.
-  const anonimo = await obterAd('sorteio', null);
-  console.log(`[criar-campanha] obterAd('sorteio', <anônimo>): ad: ${anonimo.ad ? `"${anonimo.ad.texto}"` : 'null'}`);
+  console.log('[criar-campanha] o mesmo sem login (determinístico, sem a rotação de metade):');
+  for (const pagina of PAGINAS) {
+    // eslint-disable-next-line no-await-in-loop -- idem
+    const r = await obterAd(pagina, null);
+    console.log(`  ${pagina.padEnd(9)} ${r.ad ? 'OK' : 'null'}`);
+  }
 }
 
 async function main() {
@@ -153,12 +177,12 @@ async function main() {
   console.log(`[criar-campanha] imagem no Storage: ${url} (${bytes} bytes)`);
 
   const { jaExiste } = await gravarCampanha(url);
-  console.log(`[criar-campanha] campanha "${CAMPANHA_ID}" ${jaExiste ? 'atualizada' : 'criada'} · página 'sorteio' ligada (toggles.sorteio = true).`);
+  console.log(`[criar-campanha] campanha "${CAMPANHA_ID}" ${jaExiste ? 'atualizada' : 'criada'} · páginas ligadas: ${PAGINAS.join(', ')}.`);
 
   await confirmarComObterAd();
 
-  console.log('\n[criar-campanha] para desligar: Gabinete → Anúncios → apagar "Prévia do slot do sorteio"');
-  console.log('[criar-campanha] (ou desligar o toggle da página "sorteio", ou mudar o estado da campanha).');
+  console.log('\n[criar-campanha] para desligar: Gabinete → Anúncios → apagar "Prévia do espaço de publicidade"');
+  console.log('[criar-campanha] (ou desligar o toggle de uma página, ou o interruptor geral, ou mudar o estado da campanha).');
 }
 
 main().catch((e) => {
