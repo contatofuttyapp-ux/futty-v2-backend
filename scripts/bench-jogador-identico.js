@@ -14,7 +14,7 @@
 // ainda está só na árvore de trabalho. Depois de commitar, aponte o ref para o
 // commit anterior.
 //
-// A autenticação é a única coisa fingida: `requireAuth` passa a injetar o utilizador
+// A autenticação é a única coisa fingida: `requireAuth` passa a injetar o usuário
 // pedido (as contas de teste têm senha aleatória, não dá para pedir um JWT). Tudo o
 // resto é o caminho real — requireTeamMember, ranking, banco em São Paulo.
 const path = require('path');
@@ -37,17 +37,17 @@ const LIMITE = Number(arg('limite', '0')); // 0 = todos os membros do time
 
 // ── Autenticação fingida: tem de ser plantada ANTES de qualquer rota carregar
 // (routes/ranking.js desestrutura requireAuth no topo do módulo).
-let utilizadorAtual = null;
+let usuarioAtual = null;
 const auth = require('../middleware/auth');
-auth.requireAuth = (req, res, next) => { req.user = utilizadorAtual; next(); };
+auth.requireAuth = (req, res, next) => { req.user = usuarioAtual; next(); };
 
 const { supabase } = require('../utils/db');
 const { HttpError } = require('../utils/http');
 const { tempoPorRota } = require('../middleware/tempo');
 
-/** Compila um texto de módulo COMO SE fosse o ficheiro `caminho` — assim os
+/** Compila um texto de módulo COMO SE fosse o arquivo `caminho` — assim os
  *  require relativos (../utils/db, ./push) continuam a resolver, e nada precisa de
- *  ser escrito no disco nem entra no require.cache do ficheiro real. */
+ *  ser escrito no disco nem entra no require.cache do arquivo real. */
 function compilarComo(codigo, caminho) {
   const mod = new Module(caminho, module);
   mod.filename = caminho;
@@ -103,7 +103,7 @@ function ondeDiverge(a, b) {
   let alvos = (membros || []).map((m) => ({ id: m.user_id, email: m.users?.email || '?' }));
   if (LIMITE > 0) alvos = alvos.slice(0, LIMITE);
 
-  utilizadorAtual = { id: viewer.id, email: viewer.email };
+  usuarioAtual = { id: viewer.id, email: viewer.email };
   const servidor = montarServidor();
   await new Promise((r) => servidor.once('listening', r));
   const porta = servidor.address().port;
@@ -146,14 +146,14 @@ function ondeDiverge(a, b) {
     forasteiro && ['quem não é membro do time (403)', forasteiro, alvos[0].id],
   ].filter(Boolean);
   for (const [nome, quem, alvoId] of casos) {
-    utilizadorAtual = { id: quem.id, email: quem.email };
+    usuarioAtual = { id: quem.id, email: quem.email };
     const a = await pedir(porta, '/antes', alvoId);
     const b = await pedir(porta, '/agora', alvoId);
     const igual = a.status === b.status && a.bytes.equals(b.bytes);
     if (!igual) diferentes.push(nome);
     console.log(`  ${igual ? '✓' : '✗'} ${nome.padEnd(34)} ${a.status}/${b.status}  ${a.bytes.toString('utf8')}`);
   }
-  utilizadorAtual = { id: viewer.id, email: viewer.email };
+  usuarioAtual = { id: viewer.id, email: viewer.email };
 
   console.log(`\nServer-Timing da versão de agora: ${timingAgora}`);
   console.log(`Tempo somado (${alvos.length} pedidos): antes ${msAntes} ms · agora ${msAgora} ms`);

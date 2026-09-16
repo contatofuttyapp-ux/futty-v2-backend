@@ -1,5 +1,5 @@
 // Futty v2.0 — Ranking + perfil + votação (modelo definitivo).
-// 1 voto por (votante, votado, equipa), permanente/atualizável, meias estrelas.
+// 1 voto por (votante, votado, time), permanente/atualizável, meias estrelas.
 // Sem jogo de votação, sem períodos. Nota exibida em escala 6-10.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
@@ -23,9 +23,9 @@ function notaValida(n) {
 }
 
 /**
- * Constrói o ranking da equipa (score ponderado, separado por categoria).
+ * Constrói o ranking do time (score ponderado, separado por categoria).
  * @param {object} [opts]
- * @param {Promise} [opts.jogosPromessa] leitura de `games` desta equipa já em voo
+ * @param {Promise} [opts.jogosPromessa] leitura de `games` deste time já em voo
  *   (tem de trazer COLUNAS_JOGOS) — quem também precisa dos jogos partilha a sua
  *   em vez de mandar ler a mesma tabela outra vez.
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
@@ -42,7 +42,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
       .from('team_members')
       .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
       .eq('team_id', teamId),
-    // Votos da equipa (todos) — média + o meu voto por jogador.
+    // Votos do time (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
     jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
   ]);
@@ -100,7 +100,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     };
   }).filter((p) => p.jogos >= MIN_JOGOS);
 
-  // Normalização por eixo (÷ máximo da equipa nesse eixo). Fidelidade já é 0..1 absoluto.
+  // Normalização por eixo (÷ máximo do time nesse eixo). Fidelidade já é 0..1 absoluto.
   const maxDe = (f) => Math.max(1e-9, ...elig.map(f));
   const mNota = maxDe((p) => p.nota); const mWin = maxDe((p) => p.winrate);
   const mGol = maxDe((p) => p.golosJogo); const mArt = maxDe((p) => p.artJogo); const mDest = maxDe((p) => p.destJogo);
@@ -151,7 +151,7 @@ router.get(
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    marcarFase(res, 'equipa');
+    marcarFase(res, 'time');
     const ranking = await buildRanking(team.id, req.user.id);
     marcarFase(res, 'ranking');
     res.json({ team: { ...team, role }, ranking });
@@ -178,10 +178,10 @@ router.get(
     // para o JSON.
     const team = await getTeamBySlug(req.params.slug, 'id, slug, nome, cor, logo_url, cor_fundo, mostrar_gols');
     if (!team) throw new HttpError(404, 'Equipa não encontrada.');
-    marcarFase(res, 'equipa');
+    marcarFase(res, 'time');
 
     // ── ONDA 2 — tudo o que só depende do team.id (e de quem pede).
-    // Os jogos da equipa servem o histórico DAQUI e os agregados do ranking: uma
+    // Os jogos do time servem o histórico DAQUI e os agregados do ranking: uma
     // leitura só, partilhada. O construtor do PostgREST dispara uma consulta nova a
     // cada `.then`, por isso vira promessa de verdade antes de ser passada adiante.
     const jogosP = Promise.resolve(
@@ -203,13 +203,13 @@ router.get(
         .eq('user_id', userId)
         .order('created_at', { ascending: false }),
       // Evolução: média progressiva dos votos recebidos (escala exibida via notaParaExibir).
-      // Estes votos também estão nos votos da equipa que o buildRanking lê, mas aproveitar
+      // Estes votos também estão nos votos do time que o buildRanking lê, mas aproveitar
       // aqueles mudaria a ORDEM dos empates de data (a ordenação é estável) e com ela a
       // curva — os votos semeados de uma vez partilham o mesmo instante. Fica consulta própria.
       supabase.from('votes').select('nota, updated_at, created_at').eq('team_id', team.id).eq('para_user_id', userId),
-      // Escudos: equipas em comum entre o visitante e o jogador (viewer ∩ jogador).
-      // O acesso a este perfil já exige ser membro de :slug, por isso a actividade
-      // mostrada é a desta equipa — quem não partilha equipa nem chega aqui. Duas
+      // Escudos: times em comum entre o visitante e o jogador (viewer ∩ jogador).
+      // O acesso a este perfil já exige ser membro de :slug, por isso a atividade
+      // mostrada é a deste time — quem não partilha time nem chega aqui. Duas
       // consultas e não uma com `.in('user_id', [...])`: assim a ordem dos ids de
       // `partilhadasIds` é a mesma de antes, e com ela a ordem de equipas_partilhadas.
       supabase.from('team_members').select('team_id').eq('user_id', req.user.id),
@@ -224,18 +224,18 @@ router.get(
     const meusIds = new Set((minhasEquipas || []).map((m) => m.team_id));
     const partilhadasIds = [...new Set((equipasDele || []).map((m) => m.team_id).filter((id) => meusIds.has(id)))];
 
-    // ── ONDA 3 — precisa dos gameIds e das equipas partilhadas (onda 2). O ranking
+    // ── ONDA 3 — precisa dos gameIds e dos times partilhados (onda 2). O ranking
     // acaba aqui: arrancou na onda 2 e ainda lhe faltava uma ida (golos + presenças).
     const [ranking, { data: parts }, { data: eqs }, { data: posts }] = await Promise.all([
       rankingP,
-      // Participações do jogador nos jogos da equipa.
+      // Participações do jogador nos jogos do time.
       gameIds.length
         ? supabase.from('game_players').select('game_id, confirmado').eq('user_id', userId).in('game_id', gameIds)
         : { data: [] },
       partilhadasIds.length
         ? supabase.from('teams').select('id, nome, slug, cor').in('id', partilhadasIds)
         : { data: [] },
-      // Actividade social: posts do jogador NAS equipas partilhadas.
+      // Atividade social: posts do jogador NOS times partilhados.
       partilhadasIds.length
         ? supabase
           .from('feed_posts')
@@ -270,7 +270,7 @@ router.get(
     const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url, tipo: f.tipo || 'vitoria' }));
 
     const mostrarGols = team.mostrar_gols !== false; // default TRUE
-    // Flag OFF (equipa casual): gols+artilharia saem do radar → o polígono adapta-se
+    // Flag OFF (time casual): gols+artilharia saem do radar → o polígono adapta-se
     // (5→3 eixos no front). O tile de Gols e a conquista de Artilheiro escondem-se no
     // front via team.mostrar_gols.
     if (!mostrarGols) { radar.gols = null; radar.artilharia = null; }
@@ -297,7 +297,7 @@ router.get(
     // Sem campeão definido → 'empate' (resultado neutro).
     const resultadoDe = (g) => (g.campeao_time_index == null ? 'empate' : noTimeCampeao(g) ? 'vitoria' : 'derrota');
 
-    // Conquistas (carreira — todos os jogos da equipa).
+    // Conquistas (carreira — todos os jogos do time).
     const conquistas = {
       campeao: games.filter((g) => noTimeCampeao(g)).length,
       artilheiro: games.filter((g) => g.artilheiro_user_id === userId).length,
@@ -377,7 +377,7 @@ router.get(
 );
 
 /**
- * GET /api/teams/:slug/votacao-status — progresso de votação do utilizador.
+ * GET /api/teams/:slug/votacao-status — progresso de votação do usuário.
  * { total, votados, faltam, pedido_revotacao }
  */
 // Lógica em services/inicio.js#obterVotacaoStatus — a MESMA função que GET
@@ -391,8 +391,8 @@ router.get(
 );
 
 /**
- * GET /api/me/votacoes-pendentes — (P1-3) agrega, em TODAS as equipas do
- * utilizador, onde ainda há avaliações por dar. Alimenta o banner do Início —
+ * GET /api/me/votacoes-pendentes — (P1-3) agrega, em TODOS os times do
+ * usuário, onde ainda há avaliações por dar. Alimenta o banner do Início —
  * a votação deixa de ser invisível fora do Ranking.
  * { pendentes: [{ slug, nome, faltam, pedido_revotacao }] } (só as com trabalho).
  */
@@ -419,7 +419,7 @@ router.post(
     if (paraUserId === req.user.id) throw new HttpError(400, 'Não pode votar em você mesmo.');
     if (!notaValida(nota)) throw new HttpError(400, 'A nota deve ser entre 0.5 e 5 (incrementos de 0.5).');
 
-    // O votado tem de ser membro da equipa (visível no ranking).
+    // O votado tem de ser membro do time (visível no ranking).
     const { data: alvo } = await supabase
       .from('team_members')
       .select('id')
@@ -493,7 +493,7 @@ router.delete(
   })
 );
 
-/** DELETE /api/teams/:slug/votos — zera TODOS os votos da equipa (admin). */
+/** DELETE /api/teams/:slug/votos — zera TODOS os votos do time (admin). */
 router.delete(
   '/api/teams/:slug/votos',
   requireAuth,

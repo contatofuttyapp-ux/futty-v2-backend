@@ -11,9 +11,9 @@ const { supabase } = require('./db');
 // gordo e viajava a dobrar.
 const COLUNAS_JOGOS = 'id, times_resultado, resultado_nivel, time_vencedor, artilheiro_user_id, destaque_user_id';
 
-/** Mapas {user_id: n} dos 4 eixos, para uma equipa. Devolve também os gameIds.
+/** Mapas {user_id: n} dos 4 eixos, para um time. Devolve também os gameIds.
  * @param {object} [opts]
- * @param {object[]} [opts.jogos] linhas de `games` desta equipa já lidas (têm de
+ * @param {object[]} [opts.jogos] linhas de `games` deste time já lidas (têm de
  *   trazer COLUNAS_JOGOS); com elas, não se repete a consulta. */
 async function agregadosDaEquipa(teamId, { jogos } = {}) {
   const golsMap = {}; const vitoriasMap = {}; const artilhariaMap = {}; const destaquesMap = {};
@@ -37,7 +37,7 @@ async function agregadosDaEquipa(teamId, { jogos } = {}) {
   return { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds };
 }
 
-/** Total de golos de um jogador — todos os jogos, todas as equipas (para o /api/me). */
+/** Total de golos de um jogador — todos os jogos, todas as times (para o /api/me). */
 async function golosDoJogador(userId) {
   const { data } = await supabase.from('gols_jogadores').select('gols').eq('user_id', userId);
   return (data || []).reduce((s, r) => s + (r.gols || 0), 0);
