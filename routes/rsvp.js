@@ -130,7 +130,8 @@ router.post(
     // Sincroniza os confirmados via RSVP para game_players (alimenta o sorteio
     // sem o admin ter de adicionar os jogadores manualmente).
     // Rodada 9: quem já tem linha no jogo mantém o `goleiro` que ele ou o admin
-    // marcaram; quem entra agora herda a flag do time (posicao === 'GL').
+    // marcaram; quem entra agora herda a flag do time (Rodada 10B:
+    // team_members.categoria === 'GR', via goleirosDoTime).
     const { data: confirmados } = await supabase
       .from('rsvp_respostas')
       .select('user_id')

@@ -304,7 +304,7 @@ router.get(
       getRole(team.id, req.user.id),
       supabase
         .from('team_members')
-        .select('role, created_at, posicao, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
+        .select('role, created_at, categoria, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
         .eq('team_id', team.id)
         .order('created_at', { ascending: true }),
     ]);
@@ -320,9 +320,14 @@ router.get(
       avatar_url: m.users?.avatar_url,
       avatar_generico: m.users?.avatar_generico || null,
       role: m.role,
-      // Rodada 9: só existe goleiro ou jogador de linha. Valores antigos
-      // (DEF/MEI/ATA) ficam no banco mas nunca mais saem daqui.
-      posicao: m.posicao === 'GL' ? 'GL' : null,
+      // Rodada 10B: a FONTE é só categoria — a coluna `posicao` (Rodada 9) e a
+      // `categoria` (que já mandava no ranking) eram a mesma decisão guardada
+      // duas vezes; o dono escolheu ficar só com esta. `goleiro` é o campo novo
+      // (booleano); `posicao` continua saindo por compatibilidade com o app já
+      // instalado (Rodada 9) — os dois nunca podem discordar porque vêm da
+      // MESMA leitura.
+      goleiro: m.categoria === 'GR',
+      posicao: m.categoria === 'GR' ? 'GL' : null,
       created_at: m.created_at,
     }));
 
@@ -457,7 +462,7 @@ router.get(
     const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados] = await Promise.all([
       supabase
         .from('team_members')
-        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, posicao, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
+        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
         .eq('team_id', team.id),
       // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
@@ -508,7 +513,11 @@ router.get(
         role: m.role,
         pode_postar: !!m.pode_postar,
         categoria: m.categoria || 'linha',
-        posicao: m.posicao === 'GL' ? 'GL' : null, // Rodada 9: goleiro ou linha, nada mais
+        // Rodada 10B: uma só flag — categoria manda. `goleiro` é o campo novo;
+        // `posicao` sai calculado dela, só por compatibilidade com o app já
+        // instalado (nunca mais é lido da coluna `posicao`).
+        goleiro: m.categoria === 'GR',
+        posicao: m.categoria === 'GR' ? 'GL' : null,
         ausente_proximo: !!m.ausente_proximo,
         ativo: m.ativo !== false,
         visivel_ranking: m.visivel_ranking !== false,
@@ -539,16 +548,26 @@ router.get(
 /**
  * PATCH /api/equipas/:slug/membros/posicao — marca (ou desmarca) o jogador como
  * goleiro do time. Qualquer membro define a sua; admin pode definir a de outro
- * (body.user_id). Body: { posicao: 'GL'|null, user_id? }
- * Rodada 9 (decisão do dono, 16-set): só existe goleiro ou jogador de linha —
- * qualquer outro valor (inclusive os antigos DEF/MEI/ATA) vira null.
+ * (body.user_id). Body: { goleiro: true|false } (ou, por compatibilidade com o
+ * app já instalado antes da Rodada 10B: { posicao: 'GL'|null }).
+ *
+ * Rodada 9 (decisão do dono, 16-set): só existe goleiro ou jogador de linha.
+ * Rodada 10B (16-set): esta rota GRAVA `categoria` (não mais `posicao`) — era a
+ * mesma decisão em duas colunas (esta e a que já mandava no ranking); o dono
+ * escolheu ficar só com `categoria`. A rota/campo antigo do admin
+ * (PATCH /api/teams/:slug/membros/:userId com `categoria`) continua igual e
+ * grava a mesma coluna — as duas nunca mais podem discordar.
  */
 router.patch(
   '/api/equipas/:slug/membros/posicao',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { posicao, user_id: alvoId } = req.body || {};
-    const pos = posicao === 'GL' ? 'GL' : null;
+    const b = req.body || {};
+    // `goleiro` manda quando presente; senão cai no contrato antigo (posicao
+    // 'GL'|null) — qualquer valor que não seja 'GL' (inclusive os extintos
+    // DEF/MEI/ATA) vira "não é goleiro", como já era.
+    const ligado = 'goleiro' in b ? !!b.goleiro : b.posicao === 'GL';
+    const alvoId = b.user_id;
 
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     const targetUserId = alvoId || req.user.id;
@@ -558,12 +577,13 @@ router.patch(
 
     const { error } = await supabase
       .from('team_members')
-      .update({ posicao: pos })
+      .update({ categoria: ligado ? 'GR' : 'linha' })
       .eq('team_id', team.id)
       .eq('user_id', targetUserId);
     if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarMembro(team.id, targetUserId); // categoria mexe no ranking
 
-    res.json({ ok: true, posicao: pos });
+    res.json({ ok: true, goleiro: ligado, posicao: ligado ? 'GL' : null });
   })
 );
 

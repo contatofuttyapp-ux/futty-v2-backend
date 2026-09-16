@@ -413,7 +413,7 @@ router.post(
  * POST /api/games/:id/confirmar — confirma/cancela a própria presença.
  * Rodada 9: `goleiro` é opcional. Sem ele no body, vale o que já estiver
  * marcado naquele jogo (pelo jogador ou pelo admin) e, se ainda não houver
- * linha, a flag do time (team_members.posicao === 'GL').
+ * linha, a flag do time (Rodada 10B: team_members.categoria === 'GR').
  */
 router.post(
   '/api/games/:id/confirmar',

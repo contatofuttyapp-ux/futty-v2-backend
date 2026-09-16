@@ -166,15 +166,18 @@ async function computeRatings(teamId, userIds) {
 }
 
 /**
- * Rodada 9: quem é goleiro DO TIME (team_members.posicao === 'GL').
- * É o padrão de cada jogo: quem confirma sem dizer nada entra como goleiro.
+ * Rodada 9: quem é goleiro DO TIME. É o padrão de cada jogo: quem confirma sem
+ * dizer nada entra como goleiro.
+ * Rodada 10B: a fonte passa a ser SÓ team_members.categoria ('GR'). A coluna
+ * `posicao` ('GL'|null) era a mesma decisão guardada duas vezes — o dono
+ * decidiu manter uma só, e é esta (é a que já mandava no ranking).
  * @param {string} teamId
  * @param {string[]} [userIds] restringe a consulta (omitir = time inteiro)
  * @returns {Promise<Set<string>>} user_ids marcados como goleiro no time
  */
 async function goleirosDoTime(teamId, userIds) {
   if (userIds && !userIds.length) return new Set();
-  let q = supabase.from('team_members').select('user_id').eq('team_id', teamId).eq('posicao', 'GL');
+  let q = supabase.from('team_members').select('user_id').eq('team_id', teamId).eq('categoria', 'GR');
   if (userIds) q = q.in('user_id', userIds);
   const { data } = await q;
   return new Set((data || []).map((m) => m.user_id).filter(Boolean));
