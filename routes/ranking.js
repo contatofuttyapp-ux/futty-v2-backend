@@ -3,11 +3,11 @@
 // Sem jogo de votação, sem períodos. Nota exibida em escala 6-10.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { marcarFase } = require('../middleware/tempo');
+const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler, HttpError } = require('../utils/http');
-const { supabase, requireTeamMember, ensureUserRow } = require('../utils/db');
+const { supabase, requireTeamMember, getTeamBySlug, getRole, ensureUserRow } = require('../utils/db');
 const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
-const { agregadosDaEquipa } = require('../utils/agregados');
+const { agregadosDaEquipa, COLUNAS_JOGOS } = require('../utils/agregados');
 const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
@@ -24,12 +24,16 @@ function notaValida(n) {
 
 /**
  * Constrói o ranking da equipa (score ponderado, separado por categoria).
+ * @param {object} [opts]
+ * @param {Promise} [opts.jogosPromessa] leitura de `games` desta equipa já em voo
+ *   (tem de trazer COLUNAS_JOGOS) — quem também precisa dos jogos partilha a sua
+ *   em vez de mandar ler a mesma tabela outra vez.
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
-async function buildRanking(teamId, meUserId) {
-  // Membros, votos e agregados só dependem de teamId — nenhum depende do
-  // resultado dos outros (13-set, "Velocidade 3": eram 3 awaits em série).
-  const [{ data: membros }, { data: votos }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds }] = await Promise.all([
+async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
+  // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado
+  // dos outros (13-set, "Velocidade 3": eram 3 awaits em série).
+  const [{ data: membros }, { data: votos }, { data: jogos }] = await Promise.all([
     // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
     // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
     // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
@@ -40,9 +44,24 @@ async function buildRanking(teamId, meUserId) {
       .eq('team_id', teamId),
     // Votos da equipa (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
-    // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
-    agregadosDaEquipa(teamId),
+    jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
   ]);
+  const gameIds = (jogos || []).map((g) => g.id);
+
+  // FLUIDEZ 2 (16-set): os golos (dentro dos agregados) e os jogos por jogador só
+  // precisam dos gameIds — eram duas idas em série, agora saem juntas.
+  const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap }, { data: gps }] = await Promise.all([
+    // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
+    agregadosDaEquipa(teamId, { jogos: jogos || [] }),
+    // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
+    // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
+    gameIds.length
+      ? supabase.from('game_players').select('user_id').in('game_id', gameIds).eq('confirmado', true)
+      : { data: [] },
+  ]);
+  const jogosMap = {};
+  for (const gp of gps || []) jogosMap[gp.user_id] = (jogosMap[gp.user_id] || 0) + 1;
+
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
 
@@ -53,14 +72,6 @@ async function buildRanking(teamId, meUserId) {
     agg[v.para_user_id].sum += Number(v.nota);
     agg[v.para_user_id].count += 1;
     if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = Number(v.nota);
-  }
-
-  // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
-  // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
-  const jogosMap = {};
-  if (gameIds.length) {
-    const { data: gps } = await supabase.from('game_players').select('user_id').in('game_id', gameIds).eq('confirmado', true);
-    for (const gp of gps || []) jogosMap[gp.user_id] = (jogosMap[gp.user_id] || 0) + 1;
   }
 
   // ── RANKING v2 — TUDO por jogo, mín. 3 jogos para entrar. Cada eixo NORMALIZADO
@@ -147,15 +158,97 @@ router.get(
   })
 );
 
-/** GET /api/teams/:slug/jogador/:userId — perfil completo do jogador. */
+/** GET /api/teams/:slug/jogador/:userId — perfil completo do jogador.
+ *
+ * FLUIDEZ 2 (16-set): eram 18 consultas em 16 ondas EM SÉRIE — 1216 ms no iPhone,
+ * 644 ms só de motor. Ficam 16 consultas em 4 ondas, e cada onda tem a sua fase no
+ * Server-Timing (a rota não marcava fase nenhuma: o tempo do motor era opaco).
+ * O corpo do JSON é o MESMO byte a byte — provado em scripts/bench-jogador-identico.js. */
 router.get(
   '/api/teams/:slug/jogador/:userId',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    const ranking = await buildRanking(team.id, req.user.id);
+    marcarFase(res, 'auth');
+    const userId = req.params.userId;
 
-    const jogador = ranking.find((r) => r.user_id === req.params.userId);
+    // ── ONDA 1 — só o slug se conhece; o team.id abre todo o resto.
+    // O select traz JÁ logo_url/cor_fundo/mostrar_gols, que eram uma SEGUNDA leitura
+    // da mesma linha de `teams`. A ordem das colunas é a ordem das chaves do `team:`
+    // na resposta (o PostgREST devolve pela ordem do select) — não mexer sem olhar
+    // para o JSON.
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, nome, cor, logo_url, cor_fundo, mostrar_gols');
+    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    marcarFase(res, 'equipa');
+
+    // ── ONDA 2 — tudo o que só depende do team.id (e de quem pede).
+    // Os jogos da equipa servem o histórico DAQUI e os agregados do ranking: uma
+    // leitura só, partilhada. O construtor do PostgREST dispara uma consulta nova a
+    // cada `.then`, por isso vira promessa de verdade antes de ser passada adiante.
+    const jogosP = Promise.resolve(
+      supabase
+        .from('games')
+        .select(`${COLUNAS_JOGOS}, data, status, cancelado, campeao_time_index, rodada_user_id`)
+        .eq('team_id', team.id)
+    );
+    // O ranking atravessa as ondas 2 e 3 (é a parte mais pesada) — daí a medida própria.
+    const rankingP = medir(res, 'ranking', buildRanking(team.id, req.user.id, { jogosPromessa: jogosP }));
+    rankingP.catch(() => {}); // se a onda 2 sair por 403, ninguém fica com a rejeição na mão
+
+    const [role, { data: fotos }, { data: votosRecebidos }, { data: minhasEquipas }, { data: equipasDele }, { data: teamGames }] = await Promise.all([
+      getRole(team.id, req.user.id),
+      supabase
+        .from('champion_photos')
+        .select('*')
+        .eq('team_id', team.id)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false }),
+      // Evolução: média progressiva dos votos recebidos (escala exibida via notaParaExibir).
+      // Estes votos também estão nos votos da equipa que o buildRanking lê, mas aproveitar
+      // aqueles mudaria a ORDEM dos empates de data (a ordenação é estável) e com ela a
+      // curva — os votos semeados de uma vez partilham o mesmo instante. Fica consulta própria.
+      supabase.from('votes').select('nota, updated_at, created_at').eq('team_id', team.id).eq('para_user_id', userId),
+      // Escudos: equipas em comum entre o visitante e o jogador (viewer ∩ jogador).
+      // O acesso a este perfil já exige ser membro de :slug, por isso a actividade
+      // mostrada é a desta equipa — quem não partilha equipa nem chega aqui. Duas
+      // consultas e não uma com `.in('user_id', [...])`: assim a ordem dos ids de
+      // `partilhadasIds` é a mesma de antes, e com ela a ordem de equipas_partilhadas.
+      supabase.from('team_members').select('team_id').eq('user_id', req.user.id),
+      supabase.from('team_members').select('team_id').eq('user_id', userId),
+      jogosP,
+    ]);
+    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    marcarFase(res, 'onda2');
+
+    const games = teamGames || [];
+    const gameIds = games.map((g) => g.id);
+    const meusIds = new Set((minhasEquipas || []).map((m) => m.team_id));
+    const partilhadasIds = [...new Set((equipasDele || []).map((m) => m.team_id).filter((id) => meusIds.has(id)))];
+
+    // ── ONDA 3 — precisa dos gameIds e das equipas partilhadas (onda 2). O ranking
+    // acaba aqui: arrancou na onda 2 e ainda lhe faltava uma ida (golos + presenças).
+    const [ranking, { data: parts }, { data: eqs }, { data: posts }] = await Promise.all([
+      rankingP,
+      // Participações do jogador nos jogos da equipa.
+      gameIds.length
+        ? supabase.from('game_players').select('game_id, confirmado').eq('user_id', userId).in('game_id', gameIds)
+        : { data: [] },
+      partilhadasIds.length
+        ? supabase.from('teams').select('id, nome, slug, cor').in('id', partilhadasIds)
+        : { data: [] },
+      // Actividade social: posts do jogador NAS equipas partilhadas.
+      partilhadasIds.length
+        ? supabase
+          .from('feed_posts')
+          .select('id, team_id, body, created_at')
+          .eq('author_id', userId)
+          .in('team_id', partilhadasIds)
+          .order('created_at', { ascending: false })
+          .limit(5)
+        : { data: [] },
+    ]);
+    marcarFase(res, 'onda3');
+
+    const jogador = ranking.find((r) => r.user_id === userId);
     if (!jogador) throw new HttpError(404, 'Jogador não encontrado neste time.');
 
     // Posição entre quem tem nota (>= MIN_VOTOS votos)
@@ -174,55 +267,26 @@ router.get(
       notas: Math.round(((jogador.nota_interna || 0) / 5) * 100),
     };
 
-    const { data: fotos } = await supabase
-      .from('champion_photos')
-      .select('*')
-      .eq('team_id', team.id)
-      .eq('user_id', jogador.user_id)
-      .order('created_at', { ascending: false });
     const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url, tipo: f.tipo || 'vitoria' }));
 
-    const userId = req.params.userId;
-
-    // Logo/cor de fundo da equipa (não vêm do requireTeamMember).
-    const { data: teamExtra } = await supabase
-      .from('teams')
-      .select('logo_url, cor_fundo, mostrar_gols')
-      .eq('id', team.id)
-      .maybeSingle();
-    const mostrarGols = teamExtra?.mostrar_gols !== false; // default TRUE
+    const mostrarGols = team.mostrar_gols !== false; // default TRUE
     // Flag OFF (equipa casual): gols+artilharia saem do radar → o polígono adapta-se
     // (5→3 eixos no front). O tile de Gols e a conquista de Artilheiro escondem-se no
     // front via team.mostrar_gols.
     if (!mostrarGols) { radar.gols = null; radar.artilharia = null; }
 
-    // Jogos da equipa (com campos de resultado) + participações do jogador.
-    const { data: teamGames } = await supabase
-      .from('games')
-      .select('id, data, status, cancelado, times_resultado, campeao_time_index, artilheiro_user_id, destaque_user_id, rodada_user_id')
-      .eq('team_id', team.id);
-    const games = teamGames || [];
-    const gameIds = games.map((g) => g.id);
-
     const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
     const agora = Date.now();
     const partSet = new Set();
     let jogosConfirmados = 0;
-    if (gameIds.length) {
-      const { data: parts } = await supabase
-        .from('game_players')
-        .select('game_id, confirmado')
-        .eq('user_id', userId)
-        .in('game_id', gameIds);
-      for (const p of parts || []) {
-        partSet.add(p.game_id);
-        // Achado 10: só conta jogos já ENCERRADOS — presença num jogo futuro não
-        // infla a estatística "jogos".
-        const g = gameById[p.game_id];
-        const cancelado = !!g?.cancelado || g?.status === 'cancelado';
-        const encerrado = !!g && !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-        if (p.confirmado && encerrado) jogosConfirmados += 1;
-      }
+    for (const p of parts || []) {
+      partSet.add(p.game_id);
+      // Achado 10: só conta jogos já ENCERRADOS — presença num jogo futuro não
+      // infla a estatística "jogos".
+      const g = gameById[p.game_id];
+      const cancelado = !!g?.cancelado || g?.status === 'cancelado';
+      const encerrado = !!g && !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
+      if (p.confirmado && encerrado) jogosConfirmados += 1;
     }
 
     const noTimeCampeao = (g) => {
@@ -259,12 +323,6 @@ router.get(
         foi_rodada: g.rodada_user_id === userId,
       }));
 
-    // Evolução: média progressiva dos votos recebidos (escala exibida via notaParaExibir).
-    const { data: votosRecebidos } = await supabase
-      .from('votes')
-      .select('nota, updated_at, created_at')
-      .eq('team_id', team.id)
-      .eq('para_user_id', userId);
     const ordenados = (votosRecebidos || [])
       .map((v) => ({ ts: v.updated_at || v.created_at, nota: Number(v.nota) }))
       .filter((v) => v.ts && Number.isFinite(v.nota))
@@ -275,38 +333,24 @@ router.get(
       return { data: v.ts, nota: notaParaExibir(soma / (i + 1)) };
     });
 
-    // Escudos: equipas em comum entre o visitante e o jogador (viewer ∩ jogador).
-    // O acesso a este perfil já exige ser membro de :slug (requireTeamMember), por isso
-    // a actividade mostrada é a desta equipa — quem não partilha equipa nem chega aqui.
-    const { data: minhasEquipas } = await supabase.from('team_members').select('team_id').eq('user_id', req.user.id);
-    const { data: equipasDele } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
-    const meusIds = new Set((minhasEquipas || []).map((m) => m.team_id));
-    const partilhadasIds = [...new Set((equipasDele || []).map((m) => m.team_id).filter((id) => meusIds.has(id)))];
-    let equipas_partilhadas = [];
-    if (partilhadasIds.length) {
-      const { data: eqs } = await supabase.from('teams').select('id, nome, slug, cor').in('id', partilhadasIds);
-      equipas_partilhadas = eqs || [];
-    }
+    const equipas_partilhadas = partilhadasIds.length ? (eqs || []) : [];
 
-    // Actividade social: posts do jogador NAS equipas partilhadas (+ fotos + nº comentários).
+    // ── ONDA 4 — fotos e comentários dos posts; só os postIds (onda 3) as abrem.
+    const postIds = (posts || []).map((p) => p.id);
+    const mediaByPost = {};
+    const comCount = {};
+    if (postIds.length) {
+      const [{ data: media }, { data: coms }] = await Promise.all([
+        supabase.from('feed_post_media').select('post_id, url, media_type, position').in('post_id', postIds),
+        supabase.from('comentarios').select('parent_id').eq('parent_type', 'post').in('parent_id', postIds).is('deleted_at', null),
+      ]);
+      for (const m of media || []) (mediaByPost[m.post_id] ||= []).push(m);
+      for (const c of coms || []) comCount[c.parent_id] = (comCount[c.parent_id] || 0) + 1;
+    }
+    marcarFase(res, 'onda4');
+
     let atividade = [];
     if (partilhadasIds.length) {
-      const { data: posts } = await supabase
-        .from('feed_posts')
-        .select('id, team_id, body, created_at')
-        .eq('author_id', userId)
-        .in('team_id', partilhadasIds)
-        .order('created_at', { ascending: false })
-        .limit(5);
-      const postIds = (posts || []).map((p) => p.id);
-      const mediaByPost = {};
-      const comCount = {};
-      if (postIds.length) {
-        const { data: media } = await supabase.from('feed_post_media').select('post_id, url, media_type, position').in('post_id', postIds);
-        for (const m of media || []) (mediaByPost[m.post_id] ||= []).push(m);
-        const { data: coms } = await supabase.from('comentarios').select('parent_id').eq('parent_type', 'post').in('parent_id', postIds).is('deleted_at', null);
-        for (const c of coms || []) comCount[c.parent_id] = (comCount[c.parent_id] || 0) + 1;
-      }
       const nomeEq = Object.fromEntries(equipas_partilhadas.map((e) => [e.id, e.nome]));
       atividade = (posts || []).map((p) => ({
         id: p.id,
@@ -319,7 +363,7 @@ router.get(
     }
 
     res.json({
-      team: { ...team, ...(teamExtra || {}), role },
+      team: { ...team, role },
       jogador: { ...jogador, posicao, total_com_nota: comNota.length },
       radar,
       jogos_campeao,

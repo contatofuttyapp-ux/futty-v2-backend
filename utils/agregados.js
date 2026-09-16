@@ -5,13 +5,21 @@
 // (gols/vitorias/artilharia/destaque) são VESTIGIAIS — ninguém as lê (ver SPEC-EQUIPAS).
 const { supabase } = require('./db');
 
-/** Mapas {user_id: n} dos 4 eixos, para uma equipa. Devolve também os gameIds. */
-async function agregadosDaEquipa(teamId) {
+// Colunas de `games` que estes agregados precisam. Exportadas porque quem já lê a
+// tabela (o perfil do jogador lê-a para o histórico) manda as linhas em `opts.jogos`
+// em vez de deixar a mesma leitura acontecer duas vezes — `times_resultado` é JSON
+// gordo e viajava a dobrar.
+const COLUNAS_JOGOS = 'id, times_resultado, resultado_nivel, time_vencedor, artilheiro_user_id, destaque_user_id';
+
+/** Mapas {user_id: n} dos 4 eixos, para uma equipa. Devolve também os gameIds.
+ * @param {object} [opts]
+ * @param {object[]} [opts.jogos] linhas de `games` desta equipa já lidas (têm de
+ *   trazer COLUNAS_JOGOS); com elas, não se repete a consulta. */
+async function agregadosDaEquipa(teamId, { jogos } = {}) {
   const golsMap = {}; const vitoriasMap = {}; const artilhariaMap = {}; const destaquesMap = {};
-  const { data: gameRows } = await supabase
-    .from('games')
-    .select('id, times_resultado, resultado_nivel, time_vencedor, artilheiro_user_id, destaque_user_id')
-    .eq('team_id', teamId);
+  const gameRows = Array.isArray(jogos)
+    ? jogos
+    : (await supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId)).data;
   const gameIds = (gameRows || []).map((g) => g.id);
   if (!gameIds.length) return { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds };
 
@@ -35,4 +43,4 @@ async function golosDoJogador(userId) {
   return (data || []).reduce((s, r) => s + (r.gols || 0), 0);
 }
 
-module.exports = { agregadosDaEquipa, golosDoJogador };
+module.exports = { agregadosDaEquipa, golosDoJogador, COLUNAS_JOGOS };
