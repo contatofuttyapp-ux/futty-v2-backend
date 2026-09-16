@@ -553,42 +553,87 @@ async function criarJogoFuturo(ids, teamId, donos) {
 }
 
 // Segundo jogo futuro (Rodada 8B, 15-set): outro dia, outro formato — para o
-// Início mostrar DOIS sorteios ativos ao mesmo tempo (pedido do dono). 5x5,
-// capacidade menor (14), RSVP aberto com prazo mais folgado (5 dias). Idempotente
-// pelo par (team_id, local): rodar de novo (ou a demo inteira de novo) não duplica.
+// Início mostrar DOIS jogos ao mesmo tempo (pedido do dono). 5x5, capacidade
+// menor (14), RSVP aberto com prazo mais folgado (5 dias).
+//
+// FLUIDEZ 2 (16-set): este nasce com o SORTEIO FEITO — o Início mostra-o como
+// "sorteado" e a escalação abre ao toque. O de Alvalade fica por sortear, é o que
+// o dono sorteia ao vivo.
+//
+// 11 confirmados (10 jogadores + o dono), não 9: com 9 pessoas em times de 5 o
+// executarSorteio devolve 1 time só — e nesse caso devolve `times: []`, que
+// gravado com sorteio_realizado = true daria um jogo "sorteado" com escalação
+// vazia. Subir os confirmados (em vez de baixar para 4 por time) mantém o 5x5 da
+// quadra, cabe nos 14 lugares, dá um goleiro por time e ainda deixa 1 no banco —
+// é o único sítio da demo onde se vê a lista de reservas.
 const LOCAL_JOGO_EXTRA = 'Quadra do Guará';
+const POR_TIME_JOGO_EXTRA = 5;
+const SEED_JOGO_EXTRA = 7100; // fixa (os passados usam 7000+i): sorteio sempre igual, animação repetível
+
+/** Monta o resultado do sorteio do jogo extra. Devolve também quem confirmou e
+ *  quem recusou, para as presenças e o RSVP contarem a mesma história. */
+async function sortearJogoExtra(ids, teamId, donos) {
+  const confirmados = JOGADORES.slice(0, 10).map((j) => j.apelido);
+  const recusaram = JOGADORES.slice(10, 12).map((j) => j.apelido);
+
+  const ratings = await computeRatings(teamId, JOGADORES.map((j) => ids[j.apelido]).concat(donos.map((d) => d.id)));
+  const membros = confirmados.map((a) => paraSorteio(porApelido(a), ids, ratings));
+  membros.push({
+    user_id: donos[0].id, nome: donos[0].nome_jogador || donos[0].nome || 'Você', avatar_url: null,
+    rating: round1(ratings[donos[0].id] ?? RATING_DEFAULT), goleiro: false, cabeca_chave: false,
+  });
+
+  const sorteio = executarSorteio(membros, POR_TIME_JOGO_EXTRA, { seed: SEED_JOGO_EXTRA });
+  if (sorteio.numTimes !== 2) throw new Error(`jogo extra: sorteio deu ${sorteio.numTimes} times, era para dar 2`);
+  return { confirmados, recusaram, resultado: montarResultado(sorteio, membros.length, 0) };
+}
+
 async function criarJogoExtra(ids, teamId, donos) {
   const { data: existente } = await supabase.from('games').select('id').eq('team_id', teamId).eq('local', LOCAL_JOGO_EXTRA).maybeSingle();
+  const { confirmados, recusaram, resultado } = await sortearJogoExtra(ids, teamId, donos);
+
+  const campos = {
+    team_id: teamId, data: dias(6), local: LOCAL_JOGO_EXTRA,
+    jogadores_por_time: POR_TIME_JOGO_EXTRA, max_jogadores: 14,
+    rsvp_aberto: true, rsvp_fechado: false, rsvp_prazo: dias(5),
+    // Os mesmos três campos que o POST /sortear escreve (routes/games.js).
+    num_times: resultado.num_times, sorteio_realizado: true, times_resultado: resultado,
+  };
+
+  let gameId;
   if (existente) {
-    info(`jogo em "${LOCAL_JOGO_EXTRA}" já existe (id ${existente.id}) — nada a fazer.`);
-    return { id: existente.id, jaExistia: true };
+    // Idempotente com ATUALIZAÇÃO: um jogo criado por uma corrida antiga (sem
+    // sorteio, com outro elenco) passa a estar sorteado em vez de ficar para trás.
+    const { error } = await supabase.from('games').update(campos).eq('id', existente.id);
+    if (error) throw new Error(`games(extra, update): ${error.message}`);
+    gameId = existente.id;
+    // As presenças e o RSVP são reescritos: o elenco confirmado mudou com o sorteio,
+    // e a contagem do card sai de game_players.
+    await supabase.from('game_players').delete().eq('game_id', gameId);
+    await supabase.from('rsvp_respostas').delete().eq('game_id', gameId);
+  } else {
+    const { data: game, error } = await supabase.from('games').insert(campos).select().single();
+    if (error) throw new Error(`games(extra): ${error.message}`);
+    gameId = game.id;
   }
 
-  const { data: game, error } = await supabase.from('games').insert({
-    team_id: teamId, data: dias(6), local: LOCAL_JOGO_EXTRA,
-    jogadores_por_time: 5, max_jogadores: 14,
-    rsvp_aberto: true, rsvp_fechado: false, rsvp_prazo: dias(5),
-  }).select().single();
-  if (error) throw new Error(`games(extra): ${error.message}`);
-
-  // 8 primeiros JOGADORES confirmados + o 1º dono; os 2 seguintes recusam; o
-  // resto (11 jogadores + o 2º dono, se houver) fica sem resposta.
-  const confirmados = JOGADORES.slice(0, 8).map((j) => j.apelido);
-  const recusaram = JOGADORES.slice(8, 10).map((j) => j.apelido);
-  const linhas = confirmados.map((a) => ({ game_id: game.id, user_id: ids[a], confirmado: true, goleiro: !!porApelido(a).gr, cabeca_chave: !!porApelido(a).cabeca }))
-    .concat(recusaram.map((a) => ({ game_id: game.id, user_id: ids[a], confirmado: false, goleiro: false, cabeca_chave: false })));
-  linhas.push({ game_id: game.id, user_id: donos[0].id, confirmado: true, goleiro: false, cabeca_chave: false });
+  // 10 primeiros JOGADORES confirmados + o 1º dono; os 2 seguintes recusam; o
+  // resto (9 jogadores + o 2º dono, se houver) fica sem resposta.
+  const linhas = confirmados.map((a) => ({ game_id: gameId, user_id: ids[a], confirmado: true, goleiro: !!porApelido(a).gr, cabeca_chave: !!porApelido(a).cabeca }))
+    .concat(recusaram.map((a) => ({ game_id: gameId, user_id: ids[a], confirmado: false, goleiro: false, cabeca_chave: false })));
+  linhas.push({ game_id: gameId, user_id: donos[0].id, confirmado: true, goleiro: false, cabeca_chave: false });
   const { error: e2 } = await supabase.from('game_players').insert(linhas);
   if (e2) throw new Error(`game_players(extra): ${e2.message}`);
 
-  const rsvp = confirmados.map((a) => ({ game_id: game.id, user_id: ids[a], status: 'confirmado' }))
-    .concat(recusaram.map((a) => ({ game_id: game.id, user_id: ids[a], status: 'recusado' })));
-  rsvp.push({ game_id: game.id, user_id: donos[0].id, status: 'confirmado' });
+  const rsvp = confirmados.map((a) => ({ game_id: gameId, user_id: ids[a], status: 'confirmado' }))
+    .concat(recusaram.map((a) => ({ game_id: gameId, user_id: ids[a], status: 'recusado' })));
+  rsvp.push({ game_id: gameId, user_id: donos[0].id, status: 'confirmado' });
   const { error: e3 } = await supabase.from('rsvp_respostas').insert(rsvp);
   if (e3) throw new Error(`rsvp_respostas(extra): ${e3.message}`);
 
-  ok(`jogo daqui a 6 dias em "${LOCAL_JOGO_EXTRA}" (5x5, máx 14): 9 confirmados (8 jogadores + você), 2 recusaram, resto sem resposta`);
-  return { id: game.id, jaExistia: false };
+  const tamanhos = resultado.times.map((t) => t.jogadores.length).join('+');
+  ok(`jogo daqui a 6 dias em "${LOCAL_JOGO_EXTRA}" (5x5, máx 14) JÁ SORTEADO: ${tamanhos} em campo, ${resultado.reservas.length} reserva(s); 11 confirmados (10 jogadores + você), 2 recusaram, resto sem resposta`);
+  return { id: gameId, jaExistia: !!existente };
 }
 
 // Mapa apelido→id a partir de uma demo JÁ CRIADA (--so-jogo-extra corre sobre
@@ -616,9 +661,7 @@ async function criarSoJogoExtra() {
   const donos = await acharDonos();
   const ids = await carregarIdsJogadores();
   const jogo = await criarJogoExtra(ids, time.id, donos);
-  if (!jogo.jaExistia) {
-    ok('Pronto — o Início de quem é dono agora mostra DOIS jogos futuros com RSVP aberto (3 e 6 dias).');
-  }
+  ok(`Pronto — o Início mostra DOIS jogos futuros: o de 3 dias por sortear (Alvalade) e o de 6 dias JÁ SORTEADO (${LOCAL_JOGO_EXTRA}), com a escalação a abrir ao toque.${jogo.jaExistia ? ' O jogo que já existia foi atualizado.' : ''}`);
 }
 
 async function criarResenha(ids, teamId, donos) {
@@ -852,7 +895,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l(`  · time "Vila Olímpica FC" em Lisboa, público com aprovação — você é ADMIN`);
   l(`  · 5 times públicos extra: 3 em Lisboa/Amadora, 2 em Brasília`);
   l(`  · 8 jogos passados com placar, gols, artilheiro e destaque`);
-  l(`  · 2 jogos futuros com RSVP aberto: daqui a 3 dias (9x9) e daqui a 6 dias (5x5)`);
+  l(`  · 2 jogos futuros com RSVP aberto: daqui a 3 dias (9x9, POR SORTEAR) e daqui a 6 dias (5x5, JÁ SORTEADO)`);
   l(`  · 2 campeonatos (1 rolando, 1 terminado) + 1 campeonato de 2 times para o card do Início`);
   l(`  · 12 posts na Resenha + 1 anúncio oficial, com comentários, respostas e reações`);
   l('');
@@ -861,8 +904,8 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('  INÍCIO');
   l('    → "Você tem colegas para avaliar": você ainda não deu nota a ninguém. Toque e avalie.');
   l('    → Card do campeonato "Duelo de Quarta": 3 de 8 jornadas, Coletes 7 x 2 Sem Colete.');
-  l('    → Card do próximo jogo (3 dias) com botão de presença — 18 já confirmaram.');
-  l('    → Segundo card de jogo (6 dias, Quadra do Guará, 5x5) — dois sorteios ativos ao mesmo tempo.');
+  l('    → Card do próximo jogo (3 dias) com botão de presença — 18 já confirmaram. Este é o do sorteio ao vivo.');
+  l('    → Segundo card (6 dias, Quadra do Guará, 5x5) marcado como SORTEADO: toque para abrir a escalação (2 times de 5 + 1 reserva).');
   l('    → Chip do time com BOLINHA DOURADA: 2 pessoas pedindo entrada.');
   l('    → Últimos Jogos: os 3 mais recentes, com placar.');
   l('');
