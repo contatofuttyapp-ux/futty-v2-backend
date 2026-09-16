@@ -102,9 +102,9 @@ async function ensureAvatarsBucket() {
  */
 async function requireTeamMember(slug, userId) {
   const team = await getTeamBySlug(slug, 'id, slug, nome, cor');
-  if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+  if (!team) throw new HttpError(404, 'Time não encontrado.');
   const role = await getRole(team.id, userId);
-  if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+  if (!role) throw new HttpError(403, 'Você não é membro deste time.');
   return { team, role };
 }
 

@@ -29,7 +29,7 @@ const LIMIAR = 0.75; // max(Porn,Hentai) acima disto = recusa. NUNCA se usa Sexy
 // MENSAGEM ÚNICA (decisão Tijolo 2): variar por categoria vazaria o motivo
 // (= detalhe técnico proibido) e podia envergonhar. Uma frase neutra e digna serve
 // todos os casos e não dá pista para "afinar" um upload malicioso.
-const MSG = 'Esta imagem não pode entrar no Futty. Escolhe outra e segue em frente.';
+const MSG = 'Esta imagem não pode entrar no Futty. Escolha outra e siga em frente.';
 // Só sabemos decodificar imagem estática; vídeo/gif passam sem análise (fora do
 // âmbito do NSFWJS — anotado para a fase de vídeo/moderação reativa).
 const IMAGENS = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -125,7 +125,7 @@ async function filtroNSFWFailClosed(req, res, next) {
     return next();
   } catch (e) {
     console.error('[nsfw] erro na análise do logo — BLOQUEIA (fail-closed):', e.message);
-    return next(new HttpError(503, 'Não foi possível validar essa imagem agora. Tenta de novo em instantes.'));
+    return next(new HttpError(503, 'Não foi possível validar essa imagem agora. Tente de novo em instantes.'));
   }
 }
 

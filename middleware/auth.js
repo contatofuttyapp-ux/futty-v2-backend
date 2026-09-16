@@ -7,7 +7,7 @@ const plataforma = require('../utils/plataformaStore');
 
 // Mensagem digna para a conta suspensa (a Super age sobre a PLATAFORMA, nunca sobre
 // o conteúdo). O frontend distingue pelo code 'CONTA_SUSPENSA' e mostra o ecrã próprio.
-const MSG_SUSPENSO = 'A tua conta está suspensa. Se achas que é engano, fala connosco.';
+const MSG_SUSPENSO = 'Sua conta está suspensa. Se você acha que foi engano, fale com a gente.';
 
 /** Extrai o token "Bearer <token>" do header Authorization (ou null). */
 function bearerToken(req) {

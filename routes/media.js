@@ -74,7 +74,7 @@ const mediaLimiter = rateLimit({
   max: 600,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Demasiados pedidos de imagem. Tenta mais tarde.' },
+  message: { error: 'Muitos pedidos de imagem. Tente de novo em alguns minutos.' },
 });
 
 router.get('/api/media/:token', mediaLimiter, async (req, res) => {
@@ -113,7 +113,7 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
 
   try {
     const { data, error } = await supabase.storage.from(alvo.bucket).download(alvo.path);
-    if (error || !data) return res.status(404).json({ error: 'Ficheiro não encontrado.' });
+    if (error || !data) return res.status(404).json({ error: 'Arquivo não encontrado.' });
 
     const original = Buffer.from(await data.arrayBuffer());
     const tipoOriginal = data.type || 'application/octet-stream';
@@ -140,7 +140,7 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
     return res.end(buf);
   } catch (e) {
     console.error('[media] falha a servir a imagem:', e.message);
-    return res.status(500).json({ error: 'Erro a servir a imagem.' });
+    return res.status(500).json({ error: 'Erro ao carregar a imagem.' });
   }
 });
 

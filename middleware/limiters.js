@@ -30,7 +30,7 @@ const HORA = 60 * 60 * 1000;
 const conviteLimiter = criarLimiter({
   windowMs: HORA,
   max: 10,
-  mensagem: 'Demasiados convites gerados. Tenta de novo daqui a uma hora.',
+  mensagem: 'Muitos convites gerados. Tente de novo daqui a uma hora.',
 });
 
 // POST /api/push/equipas/:slug/broadcast e .../membros/:userId/mensagem —
@@ -39,7 +39,7 @@ const conviteLimiter = criarLimiter({
 const pushAdminLimiter = criarLimiter({
   windowMs: HORA,
   max: 20,
-  mensagem: 'Demasiadas notificações enviadas. Tenta de novo daqui a uma hora.',
+  mensagem: 'Muitas notificações enviadas. Tente de novo daqui a uma hora.',
 });
 
 // POST /api/denuncias e /api/feed/denuncias — 20/hora por utilizador, quota
@@ -47,7 +47,7 @@ const pushAdminLimiter = criarLimiter({
 const denunciaLimiter = criarLimiter({
   windowMs: HORA,
   max: 20,
-  mensagem: 'Demasiadas denúncias. Tenta de novo daqui a uma hora.',
+  mensagem: 'Muitas denúncias. Tente de novo daqui a uma hora.',
 });
 
 // DELETE /api/me — 3/hora por usuário. Ação irreversível (LGPD/exigência das
@@ -65,7 +65,7 @@ const excluirContaLimiter = criarLimiter({
 const diagnosticoLimiter = criarLimiter({
   windowMs: HORA,
   max: 10,
-  mensagem: 'Já enviaste relatórios de sobra nesta hora. Tenta de novo mais tarde.',
+  mensagem: 'Você já enviou relatórios de sobra nesta hora. Tente de novo mais tarde.',
 });
 
 module.exports = { criarLimiter, conviteLimiter, pushAdminLimiter, denunciaLimiter, excluirContaLimiter, diagnosticoLimiter };

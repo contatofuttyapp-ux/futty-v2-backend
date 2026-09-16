@@ -171,7 +171,7 @@ const apiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: chaveDoPedido,
-  message: { error: 'Demasiados pedidos. Tenta mais tarde.' },
+  message: { error: 'Muitos pedidos. Tente de novo mais tarde.' },
   // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): /api/media/:token é o proxy
   // de imagem — um feed com muitas fotos faz várias chamadas de uma vez e
   // esgotava os 200/15min do limiter geral por IP. Tem o próprio limiter,
@@ -196,7 +196,7 @@ const strictLimiter = rateLimit({
   max: 20,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Demasiadas tentativas. Tenta em 15 minutos.' },
+  message: { error: 'Muitas tentativas. Tente de novo em 15 minutos.' },
 });
 app.use('/api/me/avatar', strictLimiter); // cobre também /api/me/avatar/ai
 

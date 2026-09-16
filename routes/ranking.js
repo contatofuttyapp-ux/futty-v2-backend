@@ -177,7 +177,7 @@ router.get(
     // na resposta (o PostgREST devolve pela ordem do select) — não mexer sem olhar
     // para o JSON.
     const team = await getTeamBySlug(req.params.slug, 'id, slug, nome, cor, logo_url, cor_fundo, mostrar_gols');
-    if (!team) throw new HttpError(404, 'Equipa não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
     marcarFase(res, 'time');
 
     // ── ONDA 2 — tudo o que só depende do team.id (e de quem pede).
@@ -216,7 +216,7 @@ router.get(
       supabase.from('team_members').select('team_id').eq('user_id', userId),
       jogosP,
     ]);
-    if (!role) throw new HttpError(403, 'Não és membro desta equipa.');
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
     marcarFase(res, 'onda2');
 
     const games = teamGames || [];
