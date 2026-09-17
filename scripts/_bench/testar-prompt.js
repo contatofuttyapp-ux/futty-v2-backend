@@ -127,106 +127,10 @@ function montarP3(p2) {
   return p2.slice(0, ini) + estilo + p2.slice(fim);
 }
 
-const baixar = async (url) => Buffer.from(await (await fetch(url)).arrayBuffer());
-
-// ── medidas e imagem ──────────────────────────────────────────────────────────
-
-/** Achatamento da coroa (CLAUDE.md): ~0 cúpula normal; > 0,5 cabeça comida. */
-async function achatamento(buf) {
-  const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  const { width: w, height: h, channels: c } = info;
-  const larg = (y) => { let n = 0; for (let x = 0; x < w; x += 1) if (data[(y * w + x) * c + 3] > 200) n += 1; return n; };
-  let y0 = -1;
-  for (let y = 0; y < h && y0 < 0; y += 1) if (larg(y) > 0) y0 = y;
-  if (y0 < 0) return { razao: null, cortada: false };
-  const faixa = Math.min(h, y0 + Math.max(8, Math.round(h * 0.10)));
-  let maxima = 0;
-  for (let y = y0; y < faixa; y += 1) maxima = Math.max(maxima, larg(y));
-  const razao = maxima ? larg(y0) / maxima : 0;
-  return { razao, cortada: razao > 0.5 };
-}
-
-// A moldura da casa, na receita do frontend (figurinhaCanvas.js): octógono com
-// corte de 32k nos cantos, corpo dourado de 7k (gradiente) a 3,5k da borda e uma
-// linha fina #f5e070 de 1,2k a 8,5k. Aqui em SVG, porque o backend não tem canvas.
-function molduraSVG(W, H) {
-  const k = W / 400, cut = 32 * k;
-  const octo = (m) => `M${m + cut},${m} L${W - m - cut},${m} L${W - m},${m + cut} L${W - m},${H - m - cut} `
-    + `L${W - m - cut},${H - m} L${m + cut},${H - m} L${m},${H - m - cut} L${m},${m + cut} Z`;
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-  <defs>
-    <linearGradient id="ouro" x1="0" y1="0" x2="${W}" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#f7e08a"/><stop offset="0.3" stop-color="#c8940f"/>
-      <stop offset="0.55" stop-color="#f5d060"/><stop offset="0.8" stop-color="#8a6508"/>
-      <stop offset="1" stop-color="#e8c04a"/>
-    </linearGradient>
-  </defs>
-  <path d="${octo(3.5 * k)}" fill="none" stroke="url(#ouro)" stroke-width="${7 * k}" stroke-linejoin="miter"/>
-  <path d="${octo(8.5 * k)}" fill="none" stroke="#f5e070" stroke-width="${1.2 * k}" stroke-linejoin="miter"/>
-</svg>`);
-}
-
-function fundoSVG(W, H) {
-  return Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-  <defs>
-    <linearGradient id="base" x1="0" y1="0" x2="0" y2="${H}" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#0a0a12"/><stop offset="0.55" stop-color="#070812"/>
-      <stop offset="1" stop-color="#050609"/>
-    </linearGradient>
-    <radialGradient id="aura" cx="0.5" cy="0.44" r="0.62">
-      <stop offset="0" stop-color="#d4a017" stop-opacity="0.34"/>
-      <stop offset="0.55" stop-color="#8b5cf6" stop-opacity="0.12"/>
-      <stop offset="1" stop-color="#050609" stop-opacity="0"/>
-    </radialGradient>
-  </defs>
-  <rect width="${W}" height="${H}" fill="url(#base)"/>
-  <ellipse cx="${W / 2}" cy="${H * 0.44}" rx="${W * 0.46}" ry="${H * 0.38}" fill="url(#aura)"/>
-</svg>`);
-}
-
-/** Recorte trimado → figurinha 512×768 com fundo da casa e moldura Dark Gold. */
-async function montarFigurinha(trimado) {
-  const W = 512, H = 768;
-  const jogador = await sharp(trimado)
-    .resize({ width: Math.round(W * 0.80), height: Math.round(H * 0.80), fit: 'inside' })
-    .png().toBuffer();
-  const m = await sharp(jogador).metadata();
-  return sharp(await sharp(fundoSVG(W, H)).png().toBuffer())
-    .composite([
-      { input: jogador, left: Math.round((W - m.width) / 2), top: Math.round(H * 0.94) - m.height },
-      { input: await sharp(molduraSVG(W, H)).png().toBuffer(), left: 0, top: 0 },
-    ])
-    .png().toBuffer();
-}
-
-/** Folha de contacto: as 5 células lado a lado, rotuladas com as letras cegas. */
-async function folhaDeContato(celulas, destino) {
-  const CW = 300, CH = 450, PAD = 16, TOPO = 44;
-  const W = PAD + celulas.length * (CW + PAD), H = TOPO + CH + PAD;
-  const fundo = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">
-    <rect width="${W}" height="${H}" fill="#0d0d12"/>
-    ${celulas.map((c, i) => `<text x="${PAD + i * (CW + PAD) + CW / 2}" y="30" fill="#d4a017"
-      font-family="Arial,Helvetica,sans-serif" font-size="26" font-weight="bold" text-anchor="middle">${c.letra}</text>`).join('')}
-  </svg>`);
-  const partes = [];
-  for (const [i, c] of celulas.entries()) {
-    partes.push({
-      input: await sharp(c.png).resize({ width: CW, height: CH, fit: 'inside' }).png().toBuffer(),
-      left: PAD + i * (CW + PAD), top: TOPO,
-    });
-  }
-  await sharp(await sharp(fundo).png().toBuffer()).composite(partes).png().toFile(destino);
-}
-
-/** Mulberry32 — o mesmo da casa; embaralha as letras de forma reproduzível. */
-function mulberry32(a) {
-  return function proximo() {
-    a |= 0; a = (a + 0x6D2B79F5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
+// As peças partilhadas pelas bancadas (medir a coroa, recortar o fundo, vestir
+// a moldura, montar a folha) vivem em comum.js desde que a bancada de MODELOS
+// passou a precisar das mesmas — duas cópias mediriam coisas diferentes.
+const { baixar, achatamento, montarFigurinha, folhaDeContato, mulberry32, paraCsv } = require('./comum');
 
 // ── principal ─────────────────────────────────────────────────────────────────
 
@@ -426,8 +330,8 @@ function mulberry32(a) {
 
   fs.writeFileSync(path.join(SAIDA, 'chave.json'), JSON.stringify(chave, null, 2));
   const csv = (linhas) => linhas.map((l) => l.map((c) => (/[",;\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(',')).join('\n');
-  fs.writeFileSync(path.join(SAIDA, 'custos.csv'), csv(custos));
-  fs.writeFileSync(path.join(SAIDA, 'avaliacao.csv'), csv(avaliacao));
+  fs.writeFileSync(path.join(SAIDA, 'custos.csv'), paraCsv(custos));
+  fs.writeFileSync(path.join(SAIDA, 'avaliacao.csv'), paraCsv(avaliacao));
 
   // ── resumo por variante (sem dizer qual é a melhor: a avaliação é do dono) ──
   const linhas = custos.slice(1).filter((l) => l[5] !== 'FALHOU');

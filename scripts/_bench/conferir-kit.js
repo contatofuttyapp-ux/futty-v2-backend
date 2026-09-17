@@ -13,8 +13,11 @@ const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');
 
-const SAIDA = path.join(__dirname, 'saida-prompt');
-const filtro = process.argv[2];
+// --pasta diz qual bancada conferir (saida-prompt, saida-modelos-2, ...).
+const iP = process.argv.indexOf('--pasta');
+const QUAL = iP > 0 && process.argv[iP + 1] ? process.argv[iP + 1] : 'saida-prompt';
+const SAIDA = path.join(__dirname, QUAL);
+const filtro = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : null;
 
 (async () => {
   const pastas = fs.readdirSync(SAIDA)
