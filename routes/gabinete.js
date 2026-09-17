@@ -17,10 +17,11 @@ const router = express.Router();
 const DIA = 86400000;
 const inicioDiaUTC = (d) => { const x = new Date(d); x.setUTCHours(0, 0, 0, 0); return x; };
 
-// Custo por geração de figurinha IA — mesma constante de utils/antiAbusoIA.js
-// (não importada de lá para não puxar routes/push.js, que essa dependência
-// arrasta consigo — o resumo é só leitura).
-const CUSTO_GERACAO_CENTS = 1.7;
+// 17-set: o custo por geração deixou de ser constante aqui. Ele é MEDIDO na fal
+// a cada chamada (header `x-fal-billable-units`, ver utils/falFila.js) e somado
+// em gasto_ia_diario — o Gabinete passa a dividir custo_cents por geracoes do
+// próprio período. A constante antiga (1,7 cêntimos) mostrava ao dono um número
+// 6,6× abaixo do real.
 const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 
 // Rate limiters ativos — manifesto estático, sincronizado à mão com server.js
@@ -285,7 +286,10 @@ router.get(
           gasto_usd: Number((gastoMes.custo_cents / 100).toFixed(2)),
           teto_diario_usd: Number((TETO_DIARIO_CENTS / 100).toFixed(2)),
           gasto_hoje_usd: Number((gastoHoje.custo_cents / 100).toFixed(2)),
-          custo_por_geracao_usd: CUSTO_GERACAO_CENTS / 100,
+          // Custo REAL do período (o que a fal cobrou ÷ o que se gerou), não uma
+          // constante. Sem gerações no mês, mostra 0 — não inventa média.
+          custo_por_geracao_usd: gastoMes.qtd ? Number((gastoMes.custo_cents / gastoMes.qtd / 100).toFixed(4)) : 0,
+          custo_por_geracao_etiqueta: 'custo real (fal)',
           freeze: !!iaFreeze,
         },
       },

@@ -3,7 +3,6 @@
 const express = require('express');
 const multer = require('multer');
 const sharp = require('sharp');
-const fal = require('@fal-ai/serverless-client');
 const { requireAuth, invalidarSessaoDoPedido } = require('../middleware/auth');
 const { marcarFase } = require('../middleware/tempo');
 const { excluirContaLimiter } = require('../middleware/limiters');
@@ -14,9 +13,16 @@ const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
 const { apagarUsuario } = require('../utils/apagarUsuario');
+// A figurinha, em três módulos próprios (17-set, variante 6 da bancada):
+//   prompts/figurinha.js       o texto que vai à IA (a bancada importa o MESMO)
+//   utils/entradaFigurinha.js  a foto que vai com ele (faixa + corte quadrado)
+//   utils/falFila.js           a chamada, e o custo REAL vindo dos headers da fal
+const { montarPrompt } = require('../prompts/figurinha');
+const { preprocessarQuadrado, preprocessarRetrato } = require('../utils/entradaFigurinha');
+const { chamarFal } = require('../utils/falFila');
 
-// fal.ai — credenciais via FAL_KEY (.env).
-fal.config({ credentials: process.env.FAL_KEY });
+// fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
+// que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
 
 const router = express.Router();
 
@@ -83,7 +89,11 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
 const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], royal: ['pro', 'elite'] };
 // Limites de gerações de avatar IA por plano.
-const LIMITES_IA = { free: 2, pro: 50, elite: 100 };
+// 17-set: eram 2 / 50 / 100, escritos quando a casa acreditava que uma figurinha
+// custava US$0,015. O custo REAL medido na fal é US$0,112 — 50 gerações davam
+// US$5,60 de custo contra R$9,90 de receita no Pro, e o Elite ficava pior. Os
+// números novos deixam o Pro em ~US$1,12 e o Elite em ~US$2,24 por mês.
+const LIMITES_IA = { free: 2, pro: 10, elite: 20 };
 // Colunas de perfil devolvidas ao frontend.
 // mostrar_rosto_publico (migração 040) e avatar_generico (migração 044) confirmadas
 // presentes em produção (10-set) — juntas aqui em vez de 2 consultas extra por /api/me.
@@ -337,89 +347,12 @@ router.post(
   })
 );
 
-// Prompt do cromo — receita L2P (bancada 30-jul, achatamento 0,00-0,07 em 6/6 fotos,
-// $0,015/fig). Retrato 1024×1536 em vez de quadrado: dá altura para cabeça + busto sem
-// cortar a coroa (o quadrado forçava achatamento 0,66-0,96 mesmo com ordem de folga no
-// prompt). A secção KIT é injectada por kit ({{KIT}}) — resto é comum a todos os kits.
-// Fonte: scripts/_bench/prompts-low.js (variante L2P = função L2 + ENQ_RETRATO + fundo cinza).
-const PROMPT_BASE = `You are illustrating a premium soccer player sticker card.
-Image 1 = photo of a real person (the player). Image 2 = the exact kit he must wear.
-
-PRIORITY ORDER: 1st face likeness · 2nd complete head with space above it ·
-3rd the kit from Image 2 · 4th style.
-
-FACE — HIGHEST PRIORITY:
-Study Image 1 and preserve exactly: face shape and proportions, eye shape and
-expression, nose, lips, skin tone, hair colour, beard/moustache style.
-Image 1 may be blurry, noisy, dark or low resolution — read the underlying
-facial STRUCTURE and redraw it cleanly and confidently. Do NOT reproduce noise,
-grain or blur.
-Never invent what is not visible in Image 1: no cap, no jewellery,
-no tattoos unless clearly present.
-SUNGLASSES RULE: if the person wears sunglasses or dark glasses in Image 1,
-REMOVE them and paint natural, open eyes that match the face, age and
-expression. NEVER keep sunglasses on the card. (Clear prescription glasses,
-if obviously part of the person's look, may stay.)
-The person must be instantly recognizable by a friend.
-
-HEAD — NEVER CROP:
-Always draw the ENTIRE head with a complete, rounded crown and generous empty
-space above it. If the head is cut by the edge of Image 1, reconstruct it
-plausibly from the visible hair. A flat, truncated or edge-touching top of the
-head is the single worst possible error in this task.
-
-ARMS — COMPLETE FIGURE:
-- BOTH arms fully drawn and complete — shoulder, elbow, forearm and hand
-- NEVER a missing, amputated, hidden or half-drawn limb
-- The figure must NOT touch the LEFT, RIGHT or TOP edges of the image; keep
-  clear margin on both sides (the bottom edge is the natural bust crop)
-- If the pose does not fit, draw the figure SMALLER — never cut an arm
-
-STYLE — SEMI-REALISTIC DIGITAL PAINTING, BROAD BRUSH:
-- Premium sticker card / trading-card painting, painterly but CLEAN
-- Broad confident brushwork; large simple shapes; crisp silhouette
-- HAIR painted as masses with a clear outline — never strand by strand
-- SKIN smooth, sculpted with light and shadow — no pores, no fine texture
-- FABRIC as a few bold folds — NO visible weave or thread texture
-- Rich deep colour, high contrast; must hold up when seen small on a phone
-- NOT photographic, NOT anime, NOT cartoon
-
-LIGHTING:
-- Strong rim/edge light along the top of the head, the shoulders and the arms,
-  clearly separating the figure from whatever is behind it
-- Main light from the front-upper-left, warm; cool fill on the shadow side
-- High contrast, deep blacks, no washed-out greys
-
-BODY: slightly athletic — a little broader in the shoulders, defined arms.
-Still unmistakably the same person. Not a bodybuilder.
-
-POSE: pick ONE that matches the personality visible in Image 1 — arms
-crossed, clenched fist, thumbs up, or pointing up. One pose only, never mixed.
-
-{{KIT}}
-
-{{KIT_CHECKLIST}}
-
-FRAMING — PORTRAIT:
-- Portrait 2:3 composition (taller than wide)
-- Bust only: head down to mid-chest. No legs. No hands below chest level.
-- The figure must occupy only the BOTTOM 80% of the image
-- The TOP 20% of the image must be COMPLETELY EMPTY — no hair, no head, nothing
-- Head horizontally centred; eyes at roughly 40% of the height
-- The figure spans AT MOST 85% of the image width: keep a clearly visible empty
-  margin on BOTH sides — elbows and arms must never come near the left/right edges
-- If in doubt, draw the figure SMALLER and leave MORE empty space above the head
-
-BACKGROUND:
-- Perfectly flat, uniform MID-GREY #8a8a8a. Nothing else.
-- This background is removed automatically afterwards; it exists ONLY so the
-  figure's silhouette — including dark hair — separates cleanly from it.
-- No scenery, no stadium, no crowd, no grass, no gradient, no vignette, no props.
-
-NEVER: photographic realism, anime, chibi, cartoon mascot, any text or
-lettering, watermark, extra logos, more than one person, white or blank kit,
-legs, cropped head.`;
-
+// O PROMPT DA FIGURINHA vive em prompts/figurinha.js (fonte única, 17-set).
+// Aqui ficou só a chamada: montarPrompt(kitId). O prompt antigo (PROMPT_BASE
+// de 5.375 caracteres + kitPrompt em cinco pontos + kitChecklist) foi REPROVADO
+// na bancada de 49 figurinhas — 1,6/5 contra 4,1/5 do que está agora lá. Não
+// voltar a escrever prompt dentro desta rota: a bancada importa do mesmo módulo,
+// e é isso que garante que o que se mede é o que está no ar.
 // Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
 // Assets dos kits em bucket PÚBLICO próprio ('kits') — são assets do app, não PII.
 // (Antes viviam em avatars/Kits/; o tijolo 1C privatizou avatars e partia o fal +
@@ -429,90 +362,45 @@ const KIT_URL =
 const KIT2_URL =
   'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit2-dark-purple.png';
 
-// Secção KIT do prompt, por kit. O texto do dark-gold é o original (não mexer);
-// os restantes derivam dele só trocando as cores.
-const kitPrompt = (nome, base, acento, extra = '') => `KIT — CRITICAL — REPRODUCE IMAGE 2 EXACTLY:
-The kit in Image 2 is the Futty ${nome} jersey. Reproduce it precisely:
-
-JERSEY:
-- Base color: ${base}
-- Large diagonal panel in ${acento}
-  running from upper-left shoulder down to lower-right hem
-- V-neck collar: ${base} with thin ${acento} piping along the edge
-- Short sleeves: ${base} with thin ${acento} trim at cuffs
-- Badge: ONE small, simple, SOLID emblem in ${acento} on the upper-left chest —
-  a bold compact shape, not fine lettering. No text, no thin lines.
-
-SHORTS:
-- Base color: ${base}
-- Diagonal ${acento} stripe on left side
-- Thin ${acento} trim at waistband and leg openings
-${extra}
-CRITICAL KIT RULES:
-- Do NOT change any color, shape or design element
-- Do NOT substitute or invent a different kit
-- Do NOT add extra logos or badges
-- Image 2 is the ground truth — follow it exactly
-- Always use this kit — NEVER generate a white or blank jersey`;
-
-// Ronda 3 (30-jul): no low os detalhes pequenos do kit somem (o friso da manga
-// foi o primeiro visto na prova de produção). Checklist explícito no fim do prompt.
-const kitChecklist = (acento) => `KIT CHECKLIST — before finishing, verify ALL FIVE elements are present:
-1. base colour of the jersey exactly as Image 2
-2. the large diagonal panel in ${acento}
-3. V-neck collar with thin ${acento} piping
-4. thin ${acento} trim at BOTH sleeve cuffs — a plain black cuff with no ${acento} trim line is a kit ERROR
-5. the solid ${acento} emblem on the upper-left chest
-A missing cuff trim or missing piping is a kit ERROR. Image 2 is ground truth.`;
-
 // Catálogo de kits gerávies. `ativo:false` → 400 (ainda sem asset próprio no Storage).
 // `planos` restringe por plano (super-admin é isento). Espelha os 4 ids do frontend.
-// `acento` alimenta o KIT CHECKLIST (promptFutty) — mesma cor passada a kitPrompt().
+// `acento` é a cor de destaque do kit (usada no cartaz e na composição do app).
+// A frase do kit para a IA NÃO vive aqui: está em prompts/figurinha.js, uma por kit.
 const KITS_IA = {
   'dark-gold': {
     ativo: true,
     url: KIT_URL,
     planos: ['free', 'pro', 'elite'],
     acento: 'metallic gold #d4a017',
-    kitPrompt: kitPrompt('Dark Gold', 'deep black #0d0d12', 'metallic gold #d4a017'),
   },
   'dark-purple': {
     ativo: true, // KIT 2 oficial (gerado do dark-gold; roxo #8b5cf6).
     url: KIT2_URL,
     planos: ['pro', 'elite'], // PAGO desde 31-jul (dono): grátis é só o dark-gold
     acento: 'vivid purple #8b5cf6',
-    kitPrompt: kitPrompt('Dark Purple', 'deep black #0d0d12', 'vivid purple #8b5cf6'),
   },
   'white-gold': {
     ativo: true, // asset escolhido pelo dono (31-jul): white-gold-c1 → kit3
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit3-white-gold.png',
     planos: ['pro', 'elite'], // pago — grátis é SÓ o dark-gold (decisão do dono, 31-jul)
     acento: 'metallic gold #d4a017',
-    kitPrompt: kitPrompt('White Gold', 'off-white #f8f5f0', 'metallic gold #d4a017'),
   },
   'elite-gold': {
     ativo: true, // asset escolhido pelo dono (31-jul): elite-gold-c1 → kit4
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit4-elite-gold.png',
     planos: ['pro', 'elite'], // kit pago
     acento: 'deep black #0d0d12', // kit invertido — o acento aqui é o preto, não o ouro
-    kitPrompt: kitPrompt('Elite Gold', 'metallic gold #d4a017', 'deep black #0d0d12', '\nNOTE: this kit is INVERTED — gold is the base, black is the accent.\n'),
   },
   'royal-purple': {
     ativo: true, // 5º kit do lançamento (31-jul): royal-purple-c3 → kit5. Par do Elite Gold.
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit5-royal-purple.png',
     planos: ['pro', 'elite'], // kit pago
     acento: 'deep black #0d0d12', // invertido — roxo é a base, preto é o acento
-    kitPrompt: kitPrompt('Royal Purple', 'vivid purple #8b5cf6', 'deep black #0d0d12', '\nNOTE: this kit is INVERTED — purple is the base, black is the accent.\n'),
   },
 };
 
-// Injecta a secção KIT + o checklist de detalhes no prompt base.
-function promptFutty(kitId) {
-  const kit = KITS_IA[kitId];
-  return PROMPT_BASE
-    .replace('{{KIT}}', kit.kitPrompt)
-    .replace('{{KIT_CHECKLIST}}', kitChecklist(kit.acento));
-}
+// O prompt vem inteiro do módulo — esta rota não monta texto nenhum.
+const promptFutty = (kitId) => montarPrompt(kitId);
 
 // O bucket "avatars" é PRIVADO (Tijolo 1C) — um users.foto_url guardado como URL
 // "público" do Storage já não é descarregável por ninguém de fora (nem a própria fal.ai,
@@ -648,61 +536,62 @@ router.post(
         throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
       }
 
-    // ETAPA 0 — pré-processar a foto de entrada: estende o topo ~18% com a cor de
-    // continuação da faixa superior. A IA ancora ao enquadramento do input; dar-lhe
-    // espaço acima da cabeça faz com que deixe de cortar a coroa na saída (CASO B).
-    // Usa upload Supabase (URL assinado) em vez de data URI, para não arriscar uma
-    // geração paga num formato de input não confirmado no schema do fal.
+    // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
+    // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
+    // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
+    // Porquê quadrado: ganhou em 6 das 7 fotos (4,1/5 contra 4,0 do retrato) e
+    // custa menos — a fal cobra os tokens da imagem de ENTRADA, e o quadrado
+    // baixou a chamada de US$0,132 para US$0,112. A SAÍDA continua 1024×1536.
+    // Upload no Supabase (URL assinado) em vez de data URI: é o formato de input
+    // confirmado no schema do fal — não se arrisca uma geração paga noutro.
     const caminhoFoto = caminhoNoBucket(perfil.foto_url, 'avatars');
     let inputUrl = caminhoFoto ? await assinarUrlAvatars(caminhoFoto) : perfil.foto_url;
+    let formaEntrada = 'foto-crua';
     try {
       if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
       // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
       // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
       const { data: fotoBlob, error: dlErr } = await supabase.storage.from('avatars').download(caminhoFoto);
       if (dlErr) throw new Error(dlErr.message);
-      // .rotate() sem argumentos = auto-orienta pelo EXIF (build 9). O upload
-      // (receberAvatar) já faz isto em fotos NOVAS; aqui cobre também fotos
-      // guardadas ANTES desse fix — sem isto, gerar a partir de uma foto
-      // antiga com EXIF ruim continuava a sair girada.
-      const fotoBuf = await sharp(Buffer.from(await fotoBlob.arrayBuffer())).rotate().toBuffer();
-      const meta = await sharp(fotoBuf).metadata();
-      const stripH = Math.max(8, Math.round((meta.height || 0) * 0.02));
-      // cor média da faixa superior (continuação natural, não uma banda artificial)
-      const { data: avg } = await sharp(fotoBuf)
-        .extract({ left: 0, top: 0, width: meta.width, height: stripH })
-        .resize(1, 1)
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-      const [r, g, b] = avg;
-      const padTop = Math.round((meta.height || 0) * 0.18);
-      const paddedBuf = await sharp(fotoBuf)
-        .extend({ top: padTop, background: { r, g, b, alpha: 1 } })
-        .jpeg({ quality: 90 })
-        .toBuffer();
+      const fotoBuf = Buffer.from(await fotoBlob.arrayBuffer());
+      // O quadrado é a receita de produção; se ele falhar (foto estranha, sharp a
+      // recusar o corte), cai-se no retrato com faixa — NUNCA na foto crua, que
+      // é o que fazia a IA comer a coroa da cabeça.
+      let entradaBuf;
+      try {
+        entradaBuf = await preprocessarQuadrado(fotoBuf);
+        formaEntrada = 'quadrada-1024';
+      } catch (eq) {
+        console.error('[avatar-ai] corte quadrado falhou, uso o retrato com faixa:', eq.message);
+        entradaBuf = await preprocessarRetrato(fotoBuf);
+        formaEntrada = 'retrato-faixa';
+      }
       const caminhoPad = `tmp/${userId}-pad.jpg`;
-      const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, paddedBuf, {
+      const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, entradaBuf, {
         contentType: 'image/jpeg',
         upsert: true,
         cacheControl: '3600',
       });
       if (padErr) throw new Error(padErr.message);
       inputUrl = await assinarUrlAvatars(caminhoPad);
-      console.log('[avatar-ai] etapa 0 - input pré-processado (top pad 18%)', { padTop, cor: { r, g, b } });
+      console.log('[avatar-ai] etapa 0 - entrada pronta', { forma: formaEntrada, bytes: entradaBuf.length });
     } catch (e) {
       console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
     }
-
-    // Lei da casa: grátis = low, pago (pro/elite) = medium — a diferença de
-    // qualidade é a fronteira do produto. Retrato 1024×1536 (receita L2P).
-    // 31-jul (decisão do dono, revoga "grátis=low/pago=medium"): qualidade é UMA
-    // só — low, para todos os planos. Nas comparações o low ganhou ~80% das vezes
-    // (o prompt L2P é afinado para ele); o medium custava 3,5× por nada. O pago
-    // diferencia-se por kits, fundos e créditos, não por qualidade de pintura.
+    // Lei da casa (31-jul, dono): qualidade é UMA só — low, para todos os planos.
+    // O pago diferencia-se por kits, fundos e créditos, não por qualidade de pintura.
     const qualidadeIA = 'low';
+    // A SAÍDA continua em retrato: é o que dá altura para cabeça + busto sem
+    // cortar a coroa (receita de 30-jul; em quadrado o achatamento ia a 0,72).
+    // A ENTRADA é que passou a ser quadrada (17-set) — são coisas diferentes.
+    const tamanhoIA = '1024x1536';
+    // A fal usa fidelidade ALTA por omissão e cobra por isso (3.050 tokens por
+    // imagem de entrada, contra 135 na baixa). Aqui vai EXPLÍCITO, para ninguém
+    // ter de adivinhar o que a fal faz quando o campo não vai — e porque na
+    // bancada a baixa deu 2,7/5 (inconsistente) contra 4,1 da alta. A variável
+    // de ambiente existe para trocar sem deploy, se um dia o preço mandar.
+    const FIDELIDADE_ENTRADA = process.env.FAL_INPUT_FIDELITY || 'high';
 
-    // Edição do input pré-processado → cromo Panini Futty via gpt-image-1.5/edit.
     // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): não logar inputUrl — é um URL
     // ASSINADO (createSignedUrl, 600s) da foto privada do utilizador; quem lesse os
     // logs do servidor conseguia descarregá-la enquanto o token não expirasse.
@@ -712,23 +601,34 @@ router.post(
       origem,
       prompt_length: promptFutty(kitId).length,
       quality: qualidadeIA,
-      image_size: '1024x1536',
+      image_size: tamanhoIA,
+      input_fidelity: FIDELIDADE_ENTRADA,
+      entrada: formaEntrada,
     });
+
+    // O DINHEIRO desta geração, somado de TODAS as tentativas: um retry por
+    // cabeça cortada é uma segunda chamada paga, e até agora não aparecia em
+    // lado nenhum. `semHeader` conta as chamadas em que a fal não mandou custo.
+    const conta = { usd: 0, chamadas: 0, semHeader: 0 };
+    const somarCusto = (custo) => {
+      conta.chamadas += 1;
+      if (custo?.usd != null) conta.usd += custo.usd;
+      else conta.semHeader += 1;
+    };
 
     // ETAPA 1+2 (retriáveis) — geração + remoção de fundo → buffer recortado.
     const gerarERecortar = async () => {
-      let result;
+      let resposta;
       try {
-        result = await fal.subscribe('fal-ai/gpt-image-1.5/edit', {
-          input: {
-            prompt: promptFutty(kitId), // secção KIT injectada do catálogo
-            image_urls: [inputUrl, kit.url], // input pré-processado + asset do kit escolhido
-            quality: qualidadeIA, // low para todos (31-jul)
-            image_size: '1024x1536', // retrato — dá altura à coroa (receita L2P, 30-jul)
-            num_images: 1,
-          },
-          logs: true,
+        resposta = await chamarFal('fal-ai/gpt-image-1.5/edit', {
+          prompt: promptFutty(kitId), // prompt inteiro, de prompts/figurinha.js
+          image_urls: [inputUrl, kit.url], // entrada quadrada + asset do kit escolhido
+          quality: qualidadeIA,
+          image_size: tamanhoIA,
+          input_fidelity: FIDELIDADE_ENTRADA,
+          num_images: 1,
         });
+        somarCusto(resposta.custo);
       } catch (err) {
         // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
         // inteira do fal (body/response, que pode incluir o inputUrl assinado
@@ -755,19 +655,22 @@ router.post(
         }
         throw err;
       }
-      const urlGerada = result?.images?.[0]?.url;
+      const urlGerada = resposta.dados?.images?.[0]?.url;
       if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
-      console.log('[avatar-ai] etapa 1 - GPT Image OK');
-      console.log('[avatar-ai] url gerada pela IA:', urlGerada);
+      console.log('[avatar-ai] etapa 1 - GPT Image OK', {
+        segundos: Math.round(resposta.segundos),
+        custo_usd: resposta.custo.usd ?? 'header ausente',
+      });
 
       // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
-      const removeBgResult = await fal.subscribe('fal-ai/birefnet', {
-        input: { image_url: urlGerada, model: 'General Use (Light)' },
+      const recorte = await chamarFal('fal-ai/birefnet', {
+        image_url: urlGerada,
+        model: 'General Use (Light)',
       });
-      const urlRecortada = removeBgResult?.image?.url;
+      somarCusto(recorte.custo);
+      const urlRecortada = recorte.dados?.image?.url;
       if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
-      console.log('[avatar-ai] etapa 2 - remove bg OK');
-      console.log('[avatar-ai] url após remove bg:', urlRecortada);
+      console.log('[avatar-ai] etapa 2 - remove bg OK', { custo_usd: recorte.custo.usd ?? 'header ausente' });
 
       const respR = await fetch(urlRecortada);
       if (!respR.ok) throw new HttpError(502, 'Falha ao obter a imagem recortada.');
@@ -912,7 +815,16 @@ router.post(
     // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
     // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
     // derruba a resposta — a figurinha já foi entregue ao utilizador).
-    registrarGeracao({ userId, ip: req.ip }).catch(() => {});
+    // 17-set: vai o custo REAL em cêntimos, somado de todas as chamadas desta
+    // geração (retry incluído). `null` só quando a fal não mandou header nenhum
+    // — nesse caso quem decide o valor é o antiAbusoIA, não este sítio.
+    const custoCents = conta.semHeader === conta.chamadas ? null : conta.usd * 100;
+    console.log('[avatar-ai] custo da geração', {
+      chamadas: conta.chamadas,
+      sem_header: conta.semHeader,
+      custo_usd: Number(conta.usd.toFixed(4)),
+    });
+    registrarGeracao({ userId, ip: req.ip, custoCents }).catch(() => {});
 
     res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false });
     } catch (err) {

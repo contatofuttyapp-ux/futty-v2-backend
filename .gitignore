@@ -31,8 +31,13 @@ npm-debug.log*
 .vscode/*
 .idea/
 
-# Spike NSFW — imagens de benchmark nunca entram no git
-scripts/_bench/
+# Bancadas (scripts/_bench): o CÓDIGO entra no git, o resto não — imagens de
+# benchmark, fotos de gente real, saídas e CSV nunca. A dupla de linhas é
+# obrigatória e nesta ordem: com "scripts/_bench/" (a PASTA ignorada) o git nem
+# desce lá dentro, e um "!" depois não reinclui nada; ignorando o CONTEÚDO
+# (/**) a excepção passa a valer.
+scripts/_bench/**
+!scripts/_bench/*.js
 
 # Backup semanal do banco (scripts/backup-banco.js, SEGURANCA-REVISAO-10SET.md
 # secção 4) — vive em C:\Users\phfer\Desktop\FUT\BACKUPS, fora deste repo (que

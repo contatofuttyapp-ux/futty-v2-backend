@@ -18,8 +18,14 @@ const crypto = require('crypto');
 const { supabase } = require('./db');
 const { enviarNotificacao } = require('../routes/push');
 
-const CUSTO_GERACAO_CENTS = 1.7; // estimativa: low ≈ $0,017/figurinha
-const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000; // default $50/dia
+// 17-set: não há mais custo constante. O valor de cada geração vem dos headers
+// da fal (`x-fal-billable-units`, ver utils/falFila.js) e chega aqui em
+// `registrarGeracao({ custoCents })`. A constante antiga dizia 1,7 cêntimos; o
+// real medido na bancada de 49 figurinhas é ~11,2 — a casa andou a subestimar o
+// gasto diário em 6,6×, e era esse número que alimentava os alertas e o teto.
+// Isto é a última linha de defesa quando a fal não manda header nenhum.
+const CUSTO_FALLBACK_CENTS = 11.2;
+const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000; // $50/dia ≈ 446 figurinhas
 const DEGRAUS = [20, 50, 75, 90];
 
 function hojeISO() {
@@ -165,13 +171,30 @@ async function verificarAutoFreeze() {
   }
 }
 
-/** Regista uma geração bem-sucedida: soma o dia, guarda o log, dispara alertas/freeze. */
-async function registrarGeracao({ userId, ip }) {
+/**
+ * Regista uma geração bem-sucedida: soma o dia, guarda o log, dispara alertas/freeze.
+ * `custoCents` é o custo REAL desta geração (todas as chamadas à fal, retry
+ * incluído). Vindo `null` — a fal não mandou header —, usa-se a média do dia
+ * corrente, que é a melhor estimativa disponível, e só na primeira geração do
+ * dia se cai no valor de referência.
+ *
+ * A coluna `custo_cents` é INTEGER (migração 045), por isso arredonda-se A CADA
+ * geração e guarda-se a soma de inteiros: arredondar só no fim perderia os
+ * cêntimos de cada linha.
+ */
+async function registrarGeracao({ userId, ip, custoCents = null }) {
   try {
     const dia = hojeISO();
-    const { data: atual } = await supabase.from('gasto_ia_diario').select('geracoes').eq('dia', dia).maybeSingle();
-    const geracoes = (atual?.geracoes || 0) + 1;
-    const custo_cents = Math.round(geracoes * CUSTO_GERACAO_CENTS);
+    const { data: atual } = await supabase.from('gasto_ia_diario').select('geracoes, custo_cents').eq('dia', dia).maybeSingle();
+    const geracoesAntes = atual?.geracoes || 0;
+    const custoAntes = atual?.custo_cents || 0;
+    let desta = custoCents;
+    if (desta == null) {
+      desta = geracoesAntes > 0 ? custoAntes / geracoesAntes : CUSTO_FALLBACK_CENTS;
+      console.warn('[custo] header ausente — uso', geracoesAntes > 0 ? 'a média do dia' : 'o valor de referência', `(${desta.toFixed(1)} cents)`);
+    }
+    const geracoes = geracoesAntes + 1;
+    const custo_cents = custoAntes + Math.round(desta);
     await supabase.from('gasto_ia_diario').upsert({ dia, geracoes, custo_cents }, { onConflict: 'dia' });
     await supabase.from('geracao_ia_log').insert({ user_id: userId, ip: ip || null });
     await alertarSeNecessario(custo_cents);
