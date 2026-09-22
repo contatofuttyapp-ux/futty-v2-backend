@@ -3,10 +3,12 @@
 // (os paths /api/super/... são definidos aqui).
 //
 // ══ LEI DO DONO ══════════════════════════════════════════════════════════════
-// A Super age sobre a PLATAFORMA (contas, planos, suspensão), NUNCA sobre o
+// A Super age sobre a PLATAFORMA (contas, times, suspensão), NUNCA sobre o
 // CONTEÚDO (notas, votos, fotos). Moderação de conteúdo = SÓ pelo caminho
 // registado (denúncias → triagem → decisão em log append-only). Aqui não se vê
-// nem se edita conteúdo de ninguém: só se suspende/reativa e se muda o plano.
+// nem se edita conteúdo de ninguém: só se suspende/reativa. Créditos e pacote
+// de Brilhante têm rota própria (routes/gabinete.js, aba "Brilhantes") — não
+// se mexe neles por aqui.
 // ═════════════════════════════════════════════════════════════════════════════
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
@@ -16,13 +18,6 @@ const plataforma = require('../utils/plataformaStore');
 const { cotaBytesPorTime, bytesUsadosPorTodosOsTimes } = require('../utils/resenhaCota');
 
 const router = express.Router();
-
-const PLANOS = ['free', 'pro', 'elite'];
-
-// Início do dia de hoje (UTC) em ISO — para contagens "hoje".
-function inicioHojeUTC() {
-  return `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
-}
 
 /**
  * GET /api/super/users?page=1&limit=50 — lista paginada de utilizadores.
@@ -38,14 +33,22 @@ router.get(
 
     const { data, count, error } = await supabase
       .from('users')
-      .select('id, nome, email, plan, is_super_admin, created_at', { count: 'exact' })
+      .select('id, nome, email, brilhante_creditos, avatar_url, foto_url, is_super_admin, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(off, off + limit - 1);
     if (error) throw new HttpError(500, error.message);
 
     // Estado de suspensão (store de plataforma, sem DDL) anexado a cada linha.
     const { users: susUsers } = await plataforma.conjuntos();
-    const users = (data || []).map((u) => ({ ...u, suspenso: susUsers.has(u.id) }));
+    // 22-set (SPEC-FIGURINHA-3): `plan` saiu — o que resta ver aqui é o direito
+    // de Brilhante (créditos e se já tem uma), a mesma desigualdade avatar_url
+    // ≠ foto_url usada no resto do app. Sem foto_url/avatar_url no payload de
+    // volta: são detalhe de implementação, não algo que a tela precise mostrar.
+    const users = (data || []).map(({ avatar_url, foto_url, ...u }) => ({
+      ...u,
+      suspenso: susUsers.has(u.id),
+      tem_brilhante: !!avatar_url && avatar_url !== foto_url,
+    }));
 
     res.json({ users, page, limit, total: count || 0 });
   })
@@ -67,30 +70,6 @@ router.patch(
     }
     await plataforma.definirUser(req.params.id, suspenso);
     res.json({ id: req.params.id, suspenso });
-  })
-);
-
-/**
- * PATCH /api/super/users/:id/plano — muda o plano de qualquer utilizador.
- * Body: { plano: 'free' | 'pro' | 'elite' }.
- */
-router.patch(
-  '/api/super/users/:id/plano',
-  requireSuperAdmin,
-  asyncHandler(async (req, res) => {
-    const plano = req.body?.plano;
-    if (!PLANOS.includes(plano)) throw new HttpError(400, 'Plano inválido (free, pro ou elite).');
-
-    const { data, error } = await supabase
-      .from('users')
-      .update({ plan: plano })
-      .eq('id', req.params.id)
-      .select('id, nome, email, plan, is_super_admin, created_at')
-      .single();
-    if (error) throw new HttpError(500, error.message);
-    if (!data) throw new HttpError(404, 'Usuário não encontrado.');
-
-    res.json({ user: data });
   })
 );
 
@@ -187,41 +166,10 @@ router.delete(
   })
 );
 
-/**
- * GET /api/super/stats — métricas globais para os cards do painel.
- */
-router.get(
-  '/api/super/stats',
-  requireSuperAdmin,
-  asyncHandler(async (req, res) => {
-    const hoje = inicioHojeUTC();
-    const contar = (tabela, aplicar) => {
-      let q = supabase.from(tabela).select('id', { count: 'exact', head: true });
-      if (aplicar) q = aplicar(q);
-      return q;
-    };
-
-    const [totalUsers, totalTeams, usersPro, usersElite, usersHoje, teamsHoje] = await Promise.all([
-      contar('users'),
-      contar('teams'),
-      contar('users', (q) => q.eq('plan', 'pro')),
-      contar('users', (q) => q.eq('plan', 'elite')),
-      contar('users', (q) => q.gte('created_at', hoje)),
-      contar('teams', (q) => q.gte('created_at', hoje)),
-    ]);
-
-    const erro = [totalUsers, totalTeams, usersPro, usersElite, usersHoje, teamsHoje].find((r) => r.error);
-    if (erro) throw new HttpError(500, erro.error.message);
-
-    res.json({
-      total_users: totalUsers.count || 0,
-      total_teams: totalTeams.count || 0,
-      users_pro: usersPro.count || 0,
-      users_elite: usersElite.count || 0,
-      users_hoje: usersHoje.count || 0,
-      teams_hoje: teamsHoje.count || 0,
-    });
-  })
-);
+// GET /api/super/stats existiu para os cards do /super de 16 secções
+// (métricas incluíam users_pro/users_elite). Órfã desde o Gabinete 2.0 (a
+// Visão Geral usa /api/super/gabinete/resumo) — nenhum frontend a chama.
+// Removida nesta varredura em vez de só trocar `plan` por outra coisa:
+// ninguém a lê.
 
 module.exports = router;

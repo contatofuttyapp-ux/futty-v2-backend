@@ -282,6 +282,19 @@ test('o slot-reuse não devolve a Brilhante de OUTRO uniforme', async (t) => {
   assert.equal(r.json.avatar_url, 'https://exemplo.invalid/brilhante-do-time.png', 'devolveu a Brilhante do uniforme errado');
 });
 
+// ─── ACHADO DA VARREDURA PÓS-FIGURINHA 3 (22-set) ───────────────────────────
+test('PUT /api/me/kit veste um kit não-default já gerado, sem gate de plano', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  // Regressão: a rota ainda comparava users.plan (sempre 'free' agora que o
+  // modelo Free/Pro/Elite saiu) contra kit.planos — nenhum kit fora o
+  // dark-gold tinha 'free' na lista, então NINGUÉM conseguia voltar a vestir
+  // uma Brilhante já gerada em qualquer outro uniforme. O membro tem os dois
+  // slots (dark-purple do time, dark-gold de antes) do teste anterior.
+  const r = await pedir('PUT', '/api/me/kit', { token: contas.membro.token, body: { kit: KIT_TIME } });
+  assert.equal(r.status, 200, `vestir um kit já gerado tem de ser sempre livre, deu ${r.status} (${r.json?.error || ''})`);
+  assert.equal(r.json.kit, KIT_TIME);
+});
+
 // ─── 7. SAIR DO TIME ─────────────────────────────────────────────────────────
 test('quem sai do time mantém a Brilhante já gerada', async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');

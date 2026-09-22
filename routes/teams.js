@@ -471,7 +471,7 @@ router.get(
     const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados] = await Promise.all([
       supabase
         .from('team_members')
-        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email, plan )')
+        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, foto_url, avatar_generico, email )')
         .eq('team_id', team.id),
       // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
@@ -543,7 +543,10 @@ router.get(
         presencas_recentes: presencas,
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
         nota_media: notaMedia,
-        plano: m.users?.plan || 'free',
+        // 22-set (SPEC-FIGURINHA-3): `plan` deixou de significar algo pago —
+        // o selo do admin agora é ter a Brilhante (avatar_url ≠ foto_url), a
+        // mesma desigualdade que o resto do app usa (nunca um booleano à parte).
+        tem_brilhante: !!m.users?.avatar_url && m.users.avatar_url !== m.users?.foto_url,
       };
     });
     membros.sort((a, b) => {

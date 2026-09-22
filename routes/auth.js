@@ -81,21 +81,22 @@ const CORES_FRAME = ['dourado', 'verde', 'roxo', 'branco'];
 const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden', 'royal'];
 // Avatar genérico escolhido (migração 044) — masc m1-m3, fem f1-f3. NULL = rodízio.
 const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
-// Fundos PREMIUM (gated no plano) — planos permitidos por fundo, no molde dos kits
-// (White/Elite Gold). GOLDEN, AURA e ROYAL — todos pro/elite. ÉPICO ('gradiente',
-// chave interna) virou GRÁTIS (15-set, decisão do dono) — saiu daqui de propósito.
-// Super-admin passa sempre.
+// Fundos PREMIUM: GOLDEN, AURA e ROYAL. ÉPICO ('gradiente', chave interna) é
+// GRÁTIS (15-set, decisão do dono) — fora desta lista de propósito.
 //
-// LEI DA REGRA JUSTA (sem punição retroativa): o gate só corre AQUI, no PATCH que
-// TROCA fundo_figurinha — nunca em leitura (GET /api/me) nem no render. Quem já
-// tinha Aura equipado antes deste gate MANTÉM (a coluna já gravada nunca é
-// revalidada até o próprio utilizador mexer nela). Só ao tentar EQUIPAR de novo
-// (depois de trocar pra outro fundo) é que o plano passa a ser exigido — ninguém
-// perde o que já tinha, mas ninguém re-adquire de graça. Ver Figurinha.jsx
-// `escolherFundo` (o `if (k === fundo) return` early-return é o que preserva isto:
-// reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
-// Os 3 fundos de cima: desde 22-set vêm com a BRILHANTE, não com um plano
-// (§4/§9 da SPEC-FIGURINHA-3). Lista de ids, já não um mapa de planos.
+// LEI DA REGRA JUSTA (sem punição retroativa): o gate só corre AQUI, no PATCH
+// que TROCA fundo_figurinha — nunca em leitura (GET /api/me) nem no render.
+// Quem já tinha Aura equipado antes deste gate MANTÉM (a coluna já gravada
+// nunca é revalidada até o próprio utilizador mexer nela). Só ao tentar
+// EQUIPAR de novo (depois de trocar pra outro fundo) é que o direito volta a
+// ser exigido — ninguém perde o que já tinha, mas ninguém re-adquire de graça.
+// Ver Figurinha.jsx `escolherFundo` (o `if (k === fundo) return` early-return
+// é o que preserva isto: reabrir a mesma página nunca reenvia o PATCH do
+// fundo já equipado).
+//
+// 22-set (SPEC-FIGURINHA-3): estes 3 fundos vêm com a BRILHANTE, não com um
+// plano — o gate virou DIREITO (ter avatar_url ≠ foto_url), super-admin
+// sempre passa. Lista de ids, já não um mapa de planos.
 const FUNDOS_PREMIUM = ['golden', 'aura', 'royal'];
 // MORTO desde 22-set (SPEC-FIGURINHA-3): quem manda na geração é o DIREITO
 // (utils/direitoBrilhante.js), não o plano. Nada lê esta tabela — nem esta rota,
@@ -408,39 +409,40 @@ const KIT_URL =
 const KIT2_URL =
   'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit2-dark-purple.png';
 
-// Catálogo de kits gerávies. `ativo:false` → 400 (ainda sem asset próprio no Storage).
-// `planos` restringe por plano (super-admin é isento). Espelha os 4 ids do frontend.
-// `acento` é a cor de destaque do kit (usada no cartaz e na composição do app).
-// A frase do kit para a IA NÃO vive aqui: está em prompts/figurinha.js, uma por kit.
+// Catálogo de kits geráveis. `ativo:false` → 400 (ainda sem asset próprio no
+// Storage). Espelha os 5 ids do frontend. `acento` é a cor de destaque do kit
+// (usada no cartaz e na composição do app). A frase do kit para a IA NÃO vive
+// aqui: está em prompts/figurinha.js, uma por kit.
+//
+// 22-set (SPEC-FIGURINHA-3): o campo `planos` (Free/Pro/Elite) saiu — quem
+// pode GERAR um kit novo é o DIREITO (utils/direitoBrilhante.js), não plano
+// nenhum; quem já gerou um kit pode sempre voltar a vesti-lo (PUT /api/me/kit,
+// sem gate nenhum). Nenhum kit é mais "grátis" ou "pago" em si — o que é pago
+// é a Brilhante inteira.
 const KITS_IA = {
   'dark-gold': {
     ativo: true,
     url: KIT_URL,
-    planos: ['free', 'pro', 'elite'],
     acento: 'metallic gold #d4a017',
   },
   'dark-purple': {
     ativo: true, // KIT 2 oficial (gerado do dark-gold; roxo #8b5cf6).
     url: KIT2_URL,
-    planos: ['pro', 'elite'], // PAGO desde 31-jul (dono): grátis é só o dark-gold
     acento: 'vivid purple #8b5cf6',
   },
   'white-gold': {
     ativo: true, // asset escolhido pelo dono (31-jul): white-gold-c1 → kit3
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit3-white-gold.png',
-    planos: ['pro', 'elite'], // pago — grátis é SÓ o dark-gold (decisão do dono, 31-jul)
     acento: 'metallic gold #d4a017',
   },
   'elite-gold': {
     ativo: true, // asset escolhido pelo dono (31-jul): elite-gold-c1 → kit4
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit4-elite-gold.png',
-    planos: ['pro', 'elite'], // kit pago
     acento: 'deep black #0d0d12', // kit invertido — o acento aqui é o preto, não o ouro
   },
   'royal-purple': {
     ativo: true, // 5º kit do lançamento (31-jul): royal-purple-c3 → kit5. Par do Elite Gold.
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit5-royal-purple.png',
-    planos: ['pro', 'elite'], // kit pago
     acento: 'deep black #0d0d12', // invertido — roxo é a base, preto é o acento
   },
 };
@@ -1035,12 +1037,13 @@ router.put(
     const kit = KITS_IA[kitId];
     if (!kit) throw new HttpError(400, 'Kit inexistente.');
 
-    const perfil = await getUserById(userId, 'plan, is_super_admin');
-    const plano = perfil?.plan || 'free';
-    if (!perfil?.is_super_admin && !kit.planos.includes(plano)) {
-      throw new HttpError(403, 'Este kit exige um plano superior.');
-    }
-
+    // ACHADO DA VARREDURA (22-set): esta rota só veste o que JÁ existe num slot
+    // — nunca gera nada, nunca custa direito. O gate de `plan` que havia aqui
+    // era do modelo Free/Pro/Elite (aposentado na SPEC-FIGURINHA-3) e, como
+    // ninguém mais tem `plan` diferente de 'free', barrava QUALQUER kit que não
+    // fosse o dark-gold para todo mundo — mesmo para quem já tinha aquela
+    // Brilhante gerada e só queria voltar a vesti-la. O direito de gerar já foi
+    // gasto quando o slot nasceu; vestir de novo é livre, sempre.
     const { data: slot } = await supabase
       .from('user_avatar_slots')
       .select('avatar_url')
