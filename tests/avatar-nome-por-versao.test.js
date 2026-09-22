@@ -156,11 +156,24 @@ test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o d
   assert.ok(erroAntiga, `a foto anterior (${caminhoA}) devia ter sido apagada depois do update`);
 });
 
-test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e sem quota', async () => {
+test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e sem crédito gasto', async (t) => {
   // Cenário: o objeto no bucket é a foto B, mas `foto_hash` diz outra coisa —
   // é o que se veria se o download trouxesse uma versão que não é a atual.
   // Sem a trava, daqui saía uma figurinha paga da foto errada.
-  const { data: antes } = await supabase.from('users').select('avatar_ia_mes').eq('id', testUserId).maybeSingle();
+  //
+  // SPEC-FIGURINHA-3 (22-set): a rota passou a exigir DIREITO antes de tudo, e
+  // um 403 SEM_DIREITO chegaria primeiro que a trava — o que este teste mede
+  // deixaria de ser medido. Por isso dá-se um crédito à conta de teste. Sem a
+  // migração 054 aplicada não há coluna para o crédito: aí o teste fica
+  // "skipped", não "failed" (mesmo critério do avatar-ai-fingerprint com a
+  // 052 — este arquivo não pode ficar vermelho por um passo que é do Pedro).
+  const { error: erroCredito } = await supabase
+    .from('users').update({ brilhante_creditos: 1 }).eq('id', testUserId);
+  if (erroCredito) {
+    return t.skip('migração 054 (users.brilhante_creditos) ainda não aplicada — ver db/migrations/054_brilhante.sql');
+  }
+
+  const { data: antes } = await supabase.from('users').select('brilhante_creditos').eq('id', testUserId).maybeSingle();
   const { error: erroPrep } = await supabase.from('users').update({ foto_hash: 'nao-e-o-hash-desta-foto' }).eq('id', testUserId);
   if (erroPrep) throw erroPrep;
 
@@ -179,7 +192,7 @@ test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e
   assert.equal(corpo.code, 'FOTO_DESATUALIZADA', 'o código tem de ser FOTO_DESATUALIZADA — é por ele que o app escolhe a mensagem');
   assert.match(corpo.error || '', /ainda está sendo preparada/i, `a mensagem devia ser a digna, veio ${JSON.stringify(corpo)}`);
 
-  // Recusar não pode custar quota: quem não recebeu figurinha não gastou uma.
-  const { data: depois } = await supabase.from('users').select('avatar_ia_mes').eq('id', testUserId).maybeSingle();
-  assert.equal(depois.avatar_ia_mes || 0, antes?.avatar_ia_mes || 0, 'uma recusa por hash desactualizado NÃO pode consumir geração');
+  // Recusar não pode custar o crédito: quem não recebeu figurinha não pagou.
+  const { data: depois } = await supabase.from('users').select('brilhante_creditos').eq('id', testUserId).maybeSingle();
+  assert.equal(depois.brilhante_creditos, antes?.brilhante_creditos, 'uma recusa por hash desactualizado NÃO pode gastar o crédito');
 });

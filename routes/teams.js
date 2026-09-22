@@ -14,6 +14,7 @@ const { geocodar } = require('../utils/geocode');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
+const { presentearCriador } = require('../utils/direitoBrilhante');
 
 const router = express.Router();
 
@@ -127,7 +128,15 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    res.status(201).json({ team });
+    // PRESENTE DO CRIADOR (SPEC-FIGURINHA-3 §2): quem cria o PRIMEIRO time da
+    // sua vida ganha uma Figurinha Brilhante — propaganda que se paga (~R$0,60)
+    // e a forma mais barata de a pessoa ver o produto de perto. Uma vez na
+    // vida, não uma por time: `users.presente_criador_em` é o carimbo.
+    // Best-effort: um time nunca deixa de ser criado porque o presente falhou
+    // (e antes da migração 054 falha sempre, em silêncio, com aviso no log).
+    const presenteBrilhante = await presentearCriador(req.user.id);
+
+    res.status(201).json({ team, presente_brilhante: presenteBrilhante });
   })
 );
 

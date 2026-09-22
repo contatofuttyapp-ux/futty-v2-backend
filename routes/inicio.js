@@ -17,6 +17,7 @@ const { requireAuth } = require('../middleware/auth');
 const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler } = require('../utils/http');
 const inicioService = require('../services/inicio');
+const { temDireito } = require('../utils/direitoBrilhante');
 
 const router = express.Router();
 
@@ -61,7 +62,7 @@ router.get(
       ]));
     });
 
-    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, onda2] = await Promise.all([
+    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, brilhante, onda2] = await Promise.all([
       medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
       convitesP,
@@ -69,6 +70,11 @@ router.get(
       medir(res, 'votacoes', seguro(inicioService.obterVotacoesPendentes(userId))),
       medir(res, 'denuncias', seguro(inicioService.obterDesfechosDenuncias(userId))),
       medir(res, 'ad', seguro(inicioService.obterAd('inicio', userId))),
+      // O direito de gerar Brilhante vem JUNTO (SPEC-FIGURINHA-3 §7): o Início
+      // mostra o cartão dourado "Você tem uma Brilhante para gerar" e dispara a
+      // geração preguiçosa do pacote do time. Um pedido à parte só para isto
+      // seria mais um round-trip na tela que a Velocidade 6A juntou num só.
+      medir(res, 'brilhante', seguro(temDireito(userId))),
       onda2P,
     ]);
     const [votacao_status, campeonato, rsvp] = onda2;
@@ -77,7 +83,12 @@ router.get(
     // qual é a lenta, não para somar.
     marcarFase(res, 'dados');
 
-    res.json({ me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp, ad });
+    res.json({
+      me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp, ad,
+      brilhante: brilhante
+        ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos }
+        : { fonte: null, team_id: null, kit_id: null, creditos: 0 },
+    });
   })
 );
 

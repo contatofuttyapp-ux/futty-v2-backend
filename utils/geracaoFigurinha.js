@@ -1,5 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A FIGURINHA EM DUAS PASSADAS (22-set) — a receita, num sítio só.
+// A RECEITA DA FIGURINHA BRILHANTE — num sítio só. Duas, na verdade:
+//
+//   'v6'            (PADRÃO desde 22-set, SPEC-FIGURINHA-3) — UMA chamada ao
+//                   gpt-image-1.5/edit em low com `input_fidelity: high`, foto
+//                   quadrada + imagem do kit, saída 1024×1536, birefnet no fim.
+//                   US$0,112. É a que o dono avaliou em 4,1/5 na bancada cega
+//                   de 17-set, a melhor de todas as testadas. A Brilhante é
+//                   PAGA — quem paga leva a melhor, não a mais barata.
+//   'duas-passadas' US$0,05, descrita em detalhe abaixo. Continua inteira e
+//                   disponível por `FIGURINHA_RECEITA=duas-passadas`: se um dia
+//                   o custo apertar, a troca é uma variável de ambiente.
+//
+// O QUE SEGUE descreve a receita das duas passadas (18/22-set).
 //
 // Porque duas: nenhum motor sozinho dava as duas coisas que a figurinha precisa.
 // O gpt-image-2.5 acerta a CARA mas entrega um retoque de foto; o gpt-image-1.5
@@ -37,6 +49,15 @@ const PASSADA1_ENDPOINT = process.env.FAL_PASSADA1_ENDPOINT || 'openai/gpt-image
 const PASSADA2_ENDPOINT = process.env.FAL_PASSADA2_ENDPOINT || 'fal-ai/gpt-image-1.5/edit';
 const BIREFNET_ENDPOINT = process.env.FAL_BIREFNET_ENDPOINT || 'fal-ai/birefnet';
 const QUALIDADE = process.env.FAL_QUALITY || 'low';
+// A RECEITA (SPEC-FIGURINHA-3, 22-set): a Brilhante é paga, por isso leva a
+// MELHOR — a V6, que o dono avaliou em 4,1/5 contra as duas passadas. As duas
+// passadas ficam disponíveis por env (`FIGURINHA_RECEITA=duas-passadas`):
+// custam US$0,05 contra US$0,112 e servem se um dia o custo apertar.
+const RECEITA = process.env.FIGURINHA_RECEITA === 'duas-passadas' ? 'duas-passadas' : 'v6';
+// A V6 é o mesmo motor da passada 2, com a fidelidade ALTA e as duas imagens
+// (foto quadrada + kit) numa chamada só — é daí que vem a semelhança.
+const V6_ENDPOINT = process.env.FAL_V6_ENDPOINT || 'fal-ai/gpt-image-1.5/edit';
+const FIDELIDADE_V6 = process.env.FAL_INPUT_FIDELITY || 'high';
 // Fidelidade da imagem de entrada da PASSADA 2. Baixa é a receita aprovada e é
 // onde está a economia; alta aqui devolveria o custo da V6 sem melhorar nada.
 const FIDELIDADE_PASSADA2 = process.env.FAL_INPUT_FIDELITY_PASSADA2 || 'low';
@@ -67,7 +88,7 @@ const baixar = async (url) => Buffer.from(await (await fetch(url)).arrayBuffer()
  *   `recorteBuffer` é o PNG recortado (com alpha), pronto para o auditor de
  *   coroa e para a composição. `custo.usd` é a soma REAL de todas as chamadas.
  */
-async function gerarFigurinha({ fotoUrl, kitUrl, kitId, publicar, etiqueta = 'fig' }) {
+async function gerarFigurinha({ fotoUrl, kitUrl, kitId, publicar, etiqueta = 'fig', receita = RECEITA }) {
   const custo = { usd: 0, chamadas: 0, semHeader: 0, parcelas: {} };
   const tempos = {};
   const somar = (nome, endpoint, resposta) => {
@@ -77,6 +98,36 @@ async function gerarFigurinha({ fotoUrl, kitUrl, kitId, publicar, etiqueta = 'fi
     custo.parcelas[nome] = { usd: conv.usd, nota: conv.nota };
     tempos[nome] = Math.round(resposta.segundos);
   };
+
+  // ── V6: uma chamada só, fidelidade ALTA, foto quadrada + kit ──
+  // A receita que o dono escolheu em 17-set (4,1/5 na avaliação cega das 7
+  // fotos) e que desde 22-set é a da Brilhante, porque a Brilhante é paga.
+  if (receita === 'v6') {
+    const g = await chamarFal(V6_ENDPOINT, {
+      prompt: montarPrompt(kitId),
+      image_urls: [fotoUrl, kitUrl],
+      quality: QUALIDADE,
+      image_size: TAMANHO_1_5,
+      input_fidelity: FIDELIDADE_V6,
+      num_images: 1,
+    });
+    somar('v6', V6_ENDPOINT, g);
+    const urlV6 = g.dados?.images?.[0]?.url;
+    if (!urlV6) throw new Error('a V6 não devolveu imagem');
+
+    const rec = await chamarFal(BIREFNET_ENDPOINT, { image_url: urlV6, model: 'General Use (Light)' });
+    somar('birefnet', BIREFNET_ENDPOINT, rec);
+    const urlRec = rec.dados?.image?.url;
+    if (!urlRec) throw new Error('o birefnet não devolveu imagem');
+
+    return {
+      recorteBuffer: await baixar(urlRec),
+      custo,
+      tempos,
+      receita: 'v6',
+      urls: { v6: urlV6, recorte: urlRec },
+    };
+  }
 
   // ── PASSADA 1: a cara ──
   const p1 = await chamarFal(PASSADA1_ENDPOINT, {
@@ -144,12 +195,16 @@ async function gerarFigurinha({ fotoUrl, kitUrl, kitId, publicar, etiqueta = 'fi
     recorteBuffer: await baixar(urlRec2),
     custo,
     tempos,
+    receita: 'duas-passadas',
     urls: { passada1: urlP1, passada2: urlP2, recorte: urlRec2 },
   };
 }
 
 module.exports = {
   gerarFigurinha,
+  RECEITA,
+  V6_ENDPOINT,
+  FIDELIDADE_V6,
   PASSADA1_ENDPOINT,
   PASSADA2_ENDPOINT,
   BIREFNET_ENDPOINT,

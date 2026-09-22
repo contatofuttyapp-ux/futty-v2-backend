@@ -21,8 +21,12 @@ const { montarPrompt } = require('../prompts/figurinha');
 const { preprocessarQuadrado, preprocessarRetrato } = require('../utils/entradaFigurinha');
 const { chamarFal } = require('../utils/falFila');
 const {
-  gerarFigurinha, PASSADA1_ENDPOINT, PASSADA2_ENDPOINT, QUALIDADE, FIDELIDADE_PASSADA2, TAMANHO_1_5,
+  gerarFigurinha, RECEITA, V6_ENDPOINT, FIDELIDADE_V6,
+  PASSADA1_ENDPOINT, PASSADA2_ENDPOINT, QUALIDADE, FIDELIDADE_PASSADA2, TAMANHO_1_5,
 } = require('../utils/geracaoFigurinha');
+// Quem pode gerar uma Brilhante (SPEC-FIGURINHA-3, §5). Desde 22-set toda
+// geração nasce paga: crédito comprado/presenteado ou pacote do time.
+const { temDireito, debitar } = require('../utils/direitoBrilhante');
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
 // que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
@@ -91,12 +95,13 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // `escolherFundo` (o `if (k === fundo) return` early-return é o que preserva isto:
 // reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
 const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], royal: ['pro', 'elite'] };
-// Limites de gerações de avatar IA por plano.
-// 17-set: eram 2 / 50 / 100, escritos quando a casa acreditava que uma figurinha
-// custava US$0,015. O custo REAL medido na fal é US$0,112 — 50 gerações davam
-// US$5,60 de custo contra R$9,90 de receita no Pro, e o Elite ficava pior. Os
-// números novos deixam o Pro em ~US$1,12 e o Elite em ~US$2,24 por mês.
-const LIMITES_IA = { free: 2, pro: 10, elite: 20 };
+// MORTO desde 22-set (SPEC-FIGURINHA-3): quem manda na geração é o DIREITO
+// (utils/direitoBrilhante.js), não o plano. Nada lê esta tabela — nem esta rota,
+// nem o Gabinete. Fica só como registo do modelo antigo (grátis 2 / Pro 10 /
+// Elite 20 por mês) até a limpeza que também apaga users.avatar_ia_mes/_reset e
+// tira `plan` das telas. Não voltar a ligar sem decisão do dono.
+// eslint-disable-next-line no-unused-vars
+const LIMITES_IA_APOSENTADO = { free: 2, pro: 10, elite: 20 };
 // Colunas de perfil devolvidas ao frontend.
 // mostrar_rosto_publico (migração 040) e avatar_generico (migração 044) confirmadas
 // presentes em produção (10-set) — juntas aqui em vez de 2 consultas extra por /api/me.
@@ -370,6 +375,13 @@ router.post(
     const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
     if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'foto substituída');
 
+    // A FIGURINHA COMUM FICA PRONTA AQUI (SPEC-FIGURINHA-3 §3): ela é a foto na
+    // moldura — assim que há foto, não há nada a esperar. O 'gerando' passa a
+    // existir só para a Brilhante. Sem isto, quem trocasse a foto logo depois
+    // de uma Brilhante falhada ficava preso no "não deu certo" do Início.
+    // Best-effort (coluna da migração 051): nunca derruba o upload.
+    marcarFigurinhaStatus(userId, 'pronta');
+
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
@@ -524,9 +536,14 @@ async function baixarFotoConferida(caminho, hashEsperado) {
 }
 
 /**
- * POST /api/me/avatar/ai — gera um avatar estilo cromo a partir da foto atual,
- * via fal.ai (gpt-image-1.5/edit), e guarda em avatars/public/{userId}-ai.png
- * (separado da foto real).
+ * POST /api/me/avatar/ai — gera a Figurinha BRILHANTE a partir da foto atual
+ * (receita V6 por omissão, ver utils/geracaoFigurinha.js) e guarda em
+ * avatars/public/{userId}-ai-{kit}-{carimbo}.png, separada da foto real.
+ *
+ * SPEC-FIGURINHA-3 (22-set): toda geração nasce PAGA. Sem direito (crédito ou
+ * pacote do time) → 403 SEM_DIREITO. `LIMITES_IA` por plano e
+ * `users.avatar_ia_mes` deixaram de mandar aqui — a figurinha grátis é a
+ * COMUM (a foto na moldura), que não passa por esta rota nem custa nada.
  */
 router.post(
   '/api/me/avatar/ai',
@@ -535,23 +552,38 @@ router.post(
     if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
 
     const userId = req.user.id;
-    const perfil = await getUserById(userId, 'foto_url, foto_hash, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, created_at');
+    const perfil = await getUserById(userId, 'foto_url, foto_hash, is_super_admin, created_at');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
 
-    // Origem (12-set): só para log — o Onboarding dispara isto em fire-and-forget
-    // logo após o upload da foto ('cadastro'); o resto do app chama sem origem.
-    // Nunca muda a geração nem a quota, só ajuda o Gabinete a distinguir no log.
+    // Origem: só para log. O 'cadastro' do Onboarding DEIXOU DE EXISTIR
+    // (SPEC-FIGURINHA-3 §3: o cadastro não gera nada) — se ainda chegar aqui,
+    // vindo de um app antigo que não atualizou, cai no gate do direito como
+    // qualquer outro e recebe 403 SEM_DIREITO. Fica registado para o Gabinete
+    // ver quantos clientes velhos ainda tentam.
     const origem = req.body?.origem === 'cadastro' ? 'cadastro' : null;
 
-    // --- KIT: validação (existe / activo / plano) ---
-    const kitId = String(req.body?.kit || 'dark-gold');
-    const kit = KITS_IA[kitId];
+    // --- DIREITO (§5): crédito comprado/presenteado, ou pacote do time. Só se
+    // LÊ aqui (é o que decide o uniforme por omissão); o 403 vem depois do
+    // slot-reuse, para quem já gerou poder voltar a vestir o que é seu mesmo
+    // com o direito já gasto. ---
+    const direito = await temDireito(userId);
+
+    // --- KIT: quem tem crédito escolhe entre os 5; no pacote do time o
+    // uniforme é o que o dono fixou, e um kit diferente do time só sai se a
+    // pessoa TAMBÉM tiver crédito (aí é o crédito que paga). ---
+    const kitPedido = String(req.body?.kit || direito.kitId || 'dark-gold');
+    const kit = KITS_IA[kitPedido];
     if (!kit) throw new HttpError(400, 'Kit inexistente.');
     if (!kit.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
-    const plano = perfil.plan || 'free';
-    if (!perfil.is_super_admin && !kit.planos.includes(plano)) {
-      throw new HttpError(403, 'Este kit exige um plano superior.');
+
+    let direitoUsado = direito;
+    let kitId = kitPedido;
+    if (direito.fonte === 'time' && kitPedido !== direito.kitId) {
+      const comCredito = direito.opcoes.find((o) => o.fonte === 'credito');
+      if (comCredito) direitoUsado = { ...comCredito, creditos: direito.creditos, opcoes: direito.opcoes };
+      else kitId = direito.kitId; // sem crédito, vale o uniforme do time
     }
+    console.log('[avatar-ai] direito', { userId, fonte: direitoUsado.fonte, teamId: direitoUsado.teamId, kitId, creditos: direito.creditos });
 
     // --- IDEMPOTÊNCIA: se já existe slot deste kit E foi gerado da MESMA foto
     // atual, veste-o e NÃO gera nem gasta quota. (build 9, achado real: uma
@@ -579,31 +611,19 @@ router.post(
       // se ainda não tiver sido migrada.
       marcarFigurinhaStatus(userId, 'pronta');
       invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando' logo abaixo.
-      console.log('[avatar-ai] slot reutilizado (sem geração, sem quota):', { userId, kitId });
+      console.log('[avatar-ai] slot reutilizado (sem geração, sem direito gasto):', { userId, kitId });
       return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true });
     }
 
-    // Quota por plano (com reset mensal). free: 2, pro: 50, elite: 100.
-    const limite = LIMITES_IA[plano] ?? LIMITES_IA.free;
-    const hoje = new Date();
-    const hojeISO = hoje.toISOString().slice(0, 10);
-    const inicioMesISO = `${hoje.getUTCFullYear()}-${String(hoje.getUTCMonth() + 1).padStart(2, '0')}-01`;
-    // Se o último reset foi antes do início do mês atual → zera a contagem.
-    let usados = perfil.avatar_ia_mes || 0;
-    let resetData = perfil.avatar_ia_reset ? String(perfil.avatar_ia_reset) : null;
-    if (!resetData || resetData < inicioMesISO) {
-      usados = 0;
-      resetData = hojeISO;
-    }
-    // Super-admin não tem limite de gerações.
-    if (!perfil.is_super_admin) {
-      if (usados >= limite) {
-        const msg =
-          plano === 'free'
-            ? 'Limite de gerações atingido. Faça upgrade para Pro para continuar.'
-            : 'Limite de gerações deste mês atingido.';
-        throw new HttpError(403, msg);
-      }
+    // Daqui para baixo vai custar dinheiro de verdade: sem direito, para aqui.
+    // (SPEC-FIGURINHA-3 §5. A mensagem é digna e diz o caminho — a pessoa não
+    // fez nada de errado, só ainda não tem Brilhante.)
+    if (!direitoUsado.fonte) {
+      throw new HttpError(
+        403,
+        'A Figurinha Brilhante vem do pacote do time ou da Minha Brilhante. Peça a ativação na aba Brilhantes.',
+        'SEM_DIREITO',
+      );
     }
 
     // Figurinha automática (12-set): marca 'gerando' AQUI — depois de kit/plano/
@@ -720,14 +740,16 @@ router.post(
     // não decide mais nada sobre COMO se gera: só trata da foto, do kit, da
     // rede de segurança e do dinheiro.
     console.log('[avatar-ai] a chamar fal com:', {
-      passada1: PASSADA1_ENDPOINT,
-      passada2: PASSADA2_ENDPOINT,
+      receita: RECEITA,
+      ...(RECEITA === 'v6'
+        ? { endpoint: V6_ENDPOINT, input_fidelity: FIDELIDADE_V6 }
+        : { passada1: PASSADA1_ENDPOINT, passada2: PASSADA2_ENDPOINT, input_fidelity_passada2: FIDELIDADE_PASSADA2 }),
       kit: kitId,
       origem,
+      fonte_do_direito: direitoUsado.fonte,
       prompt_length: promptFutty(kitId).length,
       quality: QUALIDADE,
       image_size: TAMANHO_1_5,
-      input_fidelity_passada2: FIDELIDADE_PASSADA2,
       entrada: formaEntrada,
     });
 
@@ -796,7 +818,7 @@ router.post(
       for (const [nome, p] of Object.entries(saida.custo.parcelas)) {
         conta.parcelas[nome] = (conta.parcelas[nome] || 0) + (p.usd || 0);
       }
-      console.log('[avatar-ai] duas passadas OK', {
+      console.log(`[avatar-ai] ${saida.receita || RECEITA} OK`, {
         segundos: saida.tempos,
         custo_usd: Number(saida.custo.usd.toFixed(4)),
       });
@@ -928,13 +950,10 @@ router.post(
       .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl, foto_fingerprint: perfil.foto_hash || null }, { onConflict: 'user_id,kit_id' });
     if (slotErr) throw new HttpError(500, slotErr.message);
 
-    // Persiste o novo avatar + kit vestido + incrementa a quota (e grava o reset).
-    // Super-admin: só actualiza o avatar/kit, sem mexer na quota.
+    // Persiste o novo avatar + kit vestido. A quota mensal por plano
+    // (avatar_ia_mes/reset) saiu daqui na SPEC-FIGURINHA-3: quem manda agora é
+    // o direito, e ele é debitado mais abaixo — depois de a figurinha existir.
     const dadosUpdate = { avatar_url: avatarUrl, kit_ativo: kitId };
-    if (!perfil.is_super_admin) {
-      dadosUpdate.avatar_ia_mes = usados + 1;
-      dadosUpdate.avatar_ia_reset = resetData;
-    }
     const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
     if (updErr) throw new HttpError(500, updErr.message);
     // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
@@ -966,6 +985,14 @@ router.post(
       parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
     });
     registrarGeracao({ userId, ip: req.ip, custoCents }).catch(() => {});
+
+    // DEBITA O DIREITO — só AGORA, com a figurinha gravada e entregue
+    // (SPEC-FIGURINHA-3 §5). Uma geração que falhou a meio (fal fora do ar,
+    // coroa cortada nas duas tentativas, foto desatualizada) nunca chega
+    // aqui, e por isso nunca custa o crédito de ninguém. `await` de propósito:
+    // a resposta só sai depois de o débito estar decidido, senão um toque
+    // rápido em "Gerar" duas vezes gastaria um direito e cobraria dois.
+    await debitar(direitoUsado, { userId, kitId, avatarUrl, custoCents });
 
     // A imagem do meio (o jogador sobre o cinza, entre as duas passadas) é a
     // cara do utilizador num ficheiro temporário: sai daqui assim que a

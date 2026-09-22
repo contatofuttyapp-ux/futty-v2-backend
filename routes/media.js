@@ -82,10 +82,17 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
   if (!alvo) return res.status(403).json({ error: 'Acesso inválido ou expirado.' });
 
   const largura = normalizarLargura(req.query.w);
+  // `sq=1` — recorte central QUADRADO (SPEC-FIGURINHA-3 §3). A figurinha comum
+  // é a foto 2:3 da pessoa, e os avatares pequenos (ranking, presença, Início)
+  // mostram-na numa moldura quadrada: cortar aqui poupa um terço dos bytes e
+  // garante o enquadramento no servidor em vez de depender do object-fit de
+  // cada tela. É OPT-IN de propósito — o mesmo proxy serve os escudos de time,
+  // e um escudo largo cortado ao meio seria um defeito.
+  const quadrado = req.query.sq === '1';
   // O `v` entra na chave: conteúdo novo nunca é servido a partir de um derivado velho.
   const chave = crypto
     .createHash('sha1')
-    .update(`${alvo.bucket}:${alvo.path}:${alvo.v || ''}:${largura || 'orig'}`)
+    .update(`${alvo.bucket}:${alvo.path}:${alvo.v || ''}:${largura || 'orig'}:${quadrado ? 'sq' : 'livre'}`)
     .digest('hex');
   const etag = `"${chave}"`;
 
@@ -124,9 +131,15 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
     // um GIF para WebP estático mataria a animação.
     if (TIPOS_REDIMENSIONAVEIS.has(tipoOriginal)) {
       const alvoLargura = largura || LARGURA_MAX_SEM_W;
+      // `position: attention` em vez de 'centre': o sharp escolhe a região de
+      // maior entropia, que numa foto de pessoa é a cara. Num retrato 2:3 o
+      // centro geométrico cai no peito.
+      const medida = quadrado
+        ? { width: alvoLargura, height: alvoLargura, fit: 'cover', position: sharp.strategy.attention, withoutEnlargement: true }
+        : { width: alvoLargura, withoutEnlargement: true };
       buf = await sharp(original)
         .rotate() // respeita o EXIF antes de redimensionar
-        .resize({ width: alvoLargura, withoutEnlargement: true })
+        .resize(medida)
         .webp({ quality: alvoLargura <= 256 ? 82 : 88, alphaQuality: 90, effort: 4 })
         .toBuffer();
       tipo = 'image/webp';
