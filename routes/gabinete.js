@@ -10,6 +10,9 @@ const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
+const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
+const { enviarNotificacao } = require('./push');
+const { KITS_IA } = require('./auth');
 const pkg = require('../package.json');
 
 const router = express.Router();
@@ -304,6 +307,302 @@ router.get(
       registros: op.registros || [],
     });
   })
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FIGURINHAS BRILHANTES (SPEC-FIGURINHA-3 §7 — bloco 2, 22-set)
+//
+// Enquanto a compra na loja não existe, é AQUI que o pedido vira produto: a
+// pessoa toca em "Pedir ativação" (Planos/Figurinha), o pedido cai em
+// `pedidos_ativacao`, e o dono ativa à mão nesta aba.
+//
+// Ativar o pacote NÃO gera nada em lote (§5, geração preguiçosa): cada membro
+// gera quando abre o app. É o que impede um time de 25 custar US$2,80 na hora
+// da ativação com metade das pessoas a nunca abrir o Futty outra vez.
+//
+// Depende da migração 054 (tudo) e da 055 (só o motivo da recusa). Sem a 054
+// estas rotas dizem `indisponivel: true` em vez de listas vazias — uma lista
+// vazia afirmaria "não há pedidos", que é uma mentira diferente de "ainda não
+// dá para saber".
+// ═══════════════════════════════════════════════════════════════════════════
+
+const KITS_DISPONIVEIS = Object.entries(KITS_IA || {}).filter(([, k]) => k?.ativo).map(([id]) => id);
+const PRODUTO_LABEL = { pacote: 'Pacote do time', manto: 'Manto próprio', minha: 'Minha Brilhante' };
+
+/** Mapa id → linha, para juntar pedidos a pessoas/times sem embeds do PostgREST. */
+function porId(linhas) {
+  return Object.fromEntries((linhas || []).map((l) => [l.id, l]));
+}
+
+/** Resolve pedidos pendentes (estado 'ativado'). Best-effort: nunca derruba a ativação. */
+async function resolverPedidos(filtro) {
+  try {
+    let q = supabase.from('pedidos_ativacao').update({ estado: 'ativado', resolvido_em: new Date().toISOString() }).eq('estado', 'pendente');
+    for (const [col, val] of Object.entries(filtro)) q = q.eq(col, val);
+    const { error } = await q;
+    if (error) throw new Error(error.message);
+  } catch (e) {
+    console.warn('[gabinete/brilhantes] pedidos não resolvidos:', e.message);
+  }
+}
+
+/**
+ * GET /api/super/gabinete/brilhantes — as três listas da aba:
+ * pedidos pendentes (com quem pediu e de que time), times com pacote ou com
+ * pedido (uso e custo real somado de `brilhantes_time`), e pessoas com crédito.
+ */
+router.get(
+  '/api/super/gabinete/brilhantes',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    try {
+      const { data: pedidosRaw, error: erroPedidos } = await supabase
+        .from('pedidos_ativacao')
+        .select('id, team_id, user_id, produto, estado, criado_em')
+        .eq('estado', 'pendente')
+        .order('criado_em', { ascending: true }); // é uma FILA: o mais velho primeiro
+      if (erroPedidos) throw new Error(erroPedidos.message);
+      const pedidosPendentes = pedidosRaw || [];
+
+      const COLS_TIME = 'id, nome, slug, brilhante_ativo, brilhante_kit, brilhante_ativado_em, brilhante_limite, manto_proprio';
+      const { data: ativos, error: erroAtivos } = await supabase.from('teams').select(COLS_TIME).eq('brilhante_ativo', true);
+      if (erroAtivos) throw new Error(erroAtivos.message);
+
+      // Os times que ainda não têm pacote mas têm pedido em cima da mesa —
+      // sem eles o dono via o pedido sem saber de que time está a falar.
+      const jaListados = new Set((ativos || []).map((t) => t.id));
+      const idsPorPedido = [...new Set(pedidosPendentes.map((p) => p.team_id).filter((id) => id && !jaListados.has(id)))];
+      let comPedido = [];
+      if (idsPorPedido.length) {
+        const { data } = await supabase.from('teams').select(COLS_TIME).in('id', idsPorPedido);
+        comPedido = data || [];
+      }
+      const timesTodos = [...(ativos || []), ...comPedido];
+      const idsTimes = timesTodos.map((t) => t.id);
+
+      // Uso e custo REAL por time (a mesma verdade do gasto_ia_diario: o que a
+      // fal cobrou, gravado por geração). `sem_custo` conta as linhas antigas
+      // sem custo gravado, para o total não se fazer passar por completo.
+      const uso = {};
+      const membros = {};
+      if (idsTimes.length) {
+        const [{ data: linhas }, { data: equipas }] = await Promise.all([
+          supabase.from('brilhantes_time').select('team_id, custo_cents').in('team_id', idsTimes),
+          supabase.from('team_members').select('team_id, user_id').in('team_id', idsTimes),
+        ]);
+        for (const l of linhas || []) {
+          const u = uso[l.team_id] || (uso[l.team_id] = { geradas: 0, custo_cents: 0, sem_custo: 0 });
+          u.geradas += 1;
+          if (l.custo_cents == null) u.sem_custo += 1;
+          else u.custo_cents += Number(l.custo_cents) || 0;
+        }
+        for (const m of equipas || []) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
+      }
+
+      // Quem pediu (nome/e-mail) — lookup direto, sem embed: o Gabinete já lê
+      // assim nas outras abas e um embed errado devolve lista vazia em silêncio.
+      const idsPessoas = [...new Set(pedidosPendentes.map((p) => p.user_id).filter(Boolean))];
+      let donos = {};
+      if (idsPessoas.length) {
+        const { data } = await supabase.from('users').select('id, nome_jogador, email').in('id', idsPessoas);
+        donos = porId(data);
+      }
+      const timesPorId = porId(timesTodos);
+
+      const { data: comCredito, error: erroCredito } = await supabase
+        .from('users')
+        .select('id, nome_jogador, email, brilhante_creditos, presente_criador_em')
+        .gt('brilhante_creditos', 0)
+        .order('brilhante_creditos', { ascending: false });
+      if (erroCredito) throw new Error(erroCredito.message);
+
+      res.json({
+        indisponivel: false,
+        kits: KITS_DISPONIVEIS,
+        pedidos: pedidosPendentes.map((p) => ({
+          id: p.id,
+          produto: p.produto,
+          produto_label: PRODUTO_LABEL[p.produto] || p.produto,
+          // O manto é fase 2 (§8): aparece na fila com etiqueta e SEM botão de
+          // ativar. Nada que finja funcionar — regra da casa.
+          fase2: p.produto === 'manto',
+          estado: p.estado,
+          criado_em: p.criado_em,
+          user_id: p.user_id,
+          nome: donos[p.user_id]?.nome_jogador || null,
+          email: donos[p.user_id]?.email || null,
+          team_id: p.team_id,
+          time: timesPorId[p.team_id]?.nome || null,
+          time_slug: timesPorId[p.team_id]?.slug || null,
+        })),
+        times: timesTodos.map((t) => {
+          const u = uso[t.id] || { geradas: 0, custo_cents: 0, sem_custo: 0 };
+          return {
+            id: t.id,
+            nome: t.nome,
+            slug: t.slug,
+            brilhante_ativo: !!t.brilhante_ativo,
+            brilhante_kit: t.brilhante_kit || null,
+            brilhante_ativado_em: t.brilhante_ativado_em || null,
+            limite: Number(t.brilhante_limite) || 25,
+            manto_proprio: !!t.manto_proprio,
+            membros: membros[t.id] || 0,
+            geradas: u.geradas,
+            custo_usd: Number((u.custo_cents / 100).toFixed(2)),
+            geradas_sem_custo: u.sem_custo,
+            tem_pedido: pedidosPendentes.some((p) => p.team_id === t.id),
+          };
+        }),
+        pessoas: (comCredito || []).map((u) => ({
+          id: u.id,
+          nome: u.nome_jogador || null,
+          email: u.email,
+          creditos: Number(u.brilhante_creditos) || 0,
+          presente_criador_em: u.presente_criador_em || null,
+        })),
+      });
+    } catch (e) {
+      if (!ehMigracaoEmFalta(e.message)) throw e;
+      console.warn('[gabinete/brilhantes] migração 054 em falta:', e.message);
+      res.json({ indisponivel: true, motivo: 'A migração 054 ainda não foi corrida no Supabase.', kits: KITS_DISPONIVEIS, pedidos: [], times: [], pessoas: [] });
+    }
+  }),
+);
+
+/**
+ * POST /api/super/gabinete/brilhantes/ativar-pacote { teamId, kitId } — liga o
+ * pacote do time no uniforme escolhido, resolve os pedidos 'pacote' pendentes
+ * desse time e avisa os membros. Ninguém é gerado aqui (geração preguiçosa).
+ */
+router.post(
+  '/api/super/gabinete/brilhantes/ativar-pacote',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const teamId = String(req.body?.teamId || '');
+    const kitId = String(req.body?.kitId || '');
+    if (!teamId) throw new HttpError(400, 'Escolha o time.');
+    if (!KITS_DISPONIVEIS.includes(kitId)) throw new HttpError(400, `Uniforme inválido. Um de: ${KITS_DISPONIVEIS.join(', ')}.`);
+
+    try {
+      const { data: time, error: erroLer } = await supabase.from('teams').select('id, nome, slug, brilhante_ativo').eq('id', teamId).maybeSingle();
+      if (erroLer) throw new Error(erroLer.message);
+      if (!time) throw new HttpError(404, 'Time não encontrado.');
+
+      const { error } = await supabase
+        .from('teams')
+        .update({ brilhante_ativo: true, brilhante_kit: kitId, brilhante_ativado_em: new Date().toISOString() })
+        .eq('id', teamId);
+      if (error) throw new Error(error.message);
+
+      await resolverPedidos({ team_id: teamId, produto: 'pacote' });
+
+      // Aviso aos membros: o cartão dourado já está lá quando abrirem, mas é o
+      // push que os faz abrir. Fire-and-forget — nunca derruba a ativação.
+      const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
+      const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
+      enviarNotificacao(ids, {
+        title: 'Sua Figurinha Brilhante foi liberada ✨',
+        body: `O ${time.nome} ativou as Brilhantes. Abra e gere a sua.`,
+        url: '/figurinha',
+      });
+
+      console.log('[gabinete/brilhantes] pacote ativado', { teamId, kitId, membros: ids.length });
+      res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: ids.length });
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
+      throw new HttpError(500, e.message);
+    }
+  }),
+);
+
+/**
+ * POST /api/super/gabinete/brilhantes/creditos { userId, quantidade } — soma
+ * créditos à pessoa (a "Minha Brilhante" dá 2), resolve o pedido 'minha'
+ * pendente dela e avisa.
+ */
+router.post(
+  '/api/super/gabinete/brilhantes/creditos',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const userId = String(req.body?.userId || '');
+    const quantidade = Number(req.body?.quantidade);
+    if (!userId) throw new HttpError(400, 'Escolha a pessoa.');
+    if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 25) {
+      throw new HttpError(400, 'Quantidade tem de ser um número inteiro de 1 a 25.');
+    }
+
+    try {
+      const { data: pessoa, error: erroLer } = await supabase
+        .from('users').select('id, email, nome_jogador, brilhante_creditos').eq('id', userId).maybeSingle();
+      if (erroLer) throw new Error(erroLer.message);
+      if (!pessoa) throw new HttpError(404, 'Pessoa não encontrada.');
+
+      // Soma lida-e-escrita, como o debitar(): o PostgREST não faz `x = x + n`
+      // sem uma função no banco, e duas mãos de dono na mesma conta ao mesmo
+      // segundo não é um cenário real.
+      const novo = (Number(pessoa.brilhante_creditos) || 0) + quantidade;
+      const { error } = await supabase.from('users').update({ brilhante_creditos: novo }).eq('id', userId);
+      if (error) throw new Error(error.message);
+
+      await resolverPedidos({ user_id: userId, produto: 'minha' });
+
+      enviarNotificacao([userId], {
+        title: 'Sua Figurinha Brilhante foi liberada ✨',
+        body: novo === 1 ? 'Você tem 1 geração. Abra e faça a sua.' : `Você tem ${novo} gerações. Abra e faça a sua.`,
+        url: '/figurinha',
+      });
+
+      console.log('[gabinete/brilhantes] créditos dados', { userId, quantidade, total: novo });
+      res.json({ ok: true, user_id: userId, creditos: novo });
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
+      throw new HttpError(500, e.message);
+    }
+  }),
+);
+
+/**
+ * POST /api/super/gabinete/brilhantes/recusar { pedidoId, motivo } — fecha o
+ * pedido com o motivo, que volta para a tela de quem pediu. Sem a migração 055
+ * o estado é gravado na mesma e a resposta diz que o motivo não ficou
+ * (`motivo_guardado: false`) — o Gabinete mostra isso em vez de fingir.
+ */
+router.post(
+  '/api/super/gabinete/brilhantes/recusar',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const pedidoId = String(req.body?.pedidoId || '');
+    const motivo = String(req.body?.motivo || '').trim().slice(0, 280);
+    if (!pedidoId) throw new HttpError(400, 'Pedido em falta.');
+    if (!motivo) throw new HttpError(400, 'Escreva o motivo — quem pediu vai ler isto.');
+
+    const base = { estado: 'recusado', resolvido_em: new Date().toISOString() };
+    try {
+      const { data, error } = await supabase
+        .from('pedidos_ativacao').update({ ...base, motivo }).eq('id', pedidoId).select('id, user_id, produto').maybeSingle();
+      if (error) throw Object.assign(new Error(error.message), { semColuna: /motivo/i.test(error.message) });
+      if (!data) throw new HttpError(404, 'Pedido não encontrado.');
+      console.log('[gabinete/brilhantes] pedido recusado', { pedidoId });
+      return res.json({ ok: true, pedido_id: pedidoId, motivo_guardado: true });
+    } catch (e) {
+      if (e instanceof HttpError) throw e;
+      // A 055 (coluna `motivo`) ainda não foi corrida: recusa na mesma — deixar
+      // o pedido eternamente pendente seria pior do que perder o texto — e diz
+      // a verdade a quem chamou.
+      if (e.semColuna) {
+        const { data, error } = await supabase
+          .from('pedidos_ativacao').update(base).eq('id', pedidoId).select('id').maybeSingle();
+        if (error) throw new HttpError(500, error.message);
+        if (!data) throw new HttpError(404, 'Pedido não encontrado.');
+        console.warn('[gabinete/brilhantes] recusado SEM motivo (migração 055 em falta)', { pedidoId });
+        return res.json({ ok: true, pedido_id: pedidoId, motivo_guardado: false });
+      }
+      if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
+      throw new HttpError(500, e.message);
+    }
+  }),
 );
 
 module.exports = router;

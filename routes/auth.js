@@ -94,7 +94,9 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // perde o que já tinha, mas ninguém re-adquire de graça. Ver Figurinha.jsx
 // `escolherFundo` (o `if (k === fundo) return` early-return é o que preserva isto:
 // reabrir a mesma página nunca reenvia o PATCH do fundo já equipado).
-const FUNDOS_PREMIUM = { golden: ['pro', 'elite'], aura: ['pro', 'elite'], royal: ['pro', 'elite'] };
+// Os 3 fundos de cima: desde 22-set vêm com a BRILHANTE, não com um plano
+// (§4/§9 da SPEC-FIGURINHA-3). Lista de ids, já não um mapa de planos.
+const FUNDOS_PREMIUM = ['golden', 'aura', 'royal'];
 // MORTO desde 22-set (SPEC-FIGURINHA-3): quem manda na geração é o DIREITO
 // (utils/direitoBrilhante.js), não o plano. Nada lê esta tabela — nem esta rota,
 // nem o Gabinete. Fica só como registo do modelo antigo (grátis 2 / Pro 10 /
@@ -165,13 +167,17 @@ router.patch(
     if ('fundo_figurinha' in b) {
       const v = String(b.fundo_figurinha);
       if (!FUNDOS_FIGURINHA.includes(v)) throw new HttpError(400, 'Fundo de figurinha inválido.');
-      // GATE PREMIUM (servidor é a fonte da verdade — sem truque de frontend): um fundo
-      // premium só entra se o plano o permitir (ou super-admin).
-      if (FUNDOS_PREMIUM[v]) {
-        const perfil = await getUserById(req.user.id, 'plan, is_super_admin');
-        const plano = perfil?.plan || 'free';
-        if (!perfil?.is_super_admin && !FUNDOS_PREMIUM[v].includes(plano)) {
-          throw new HttpError(403, 'Este fundo exige um plano superior.');
+      // GATE (servidor é a fonte da verdade — sem truque de frontend). 22-set,
+      // SPEC-FIGURINHA-3 §4/§9: os 3 fundos de cima deixaram de ser por PLANO e
+      // passaram a vir COM a Brilhante. Os planos saíram das telas e um membro
+      // do pacote via o Aura trancado no card que o time tinha acabado de
+      // pagar. Quem não tem Brilhante não tem sequer seletor de fundo — este
+      // gate é a defesa em profundidade para um pedido montado à mão.
+      if (FUNDOS_PREMIUM.includes(v)) {
+        const perfil = await getUserById(req.user.id, 'avatar_url, foto_url, is_super_admin');
+        const temBrilhante = !!perfil?.avatar_url && perfil.avatar_url !== perfil.foto_url;
+        if (!perfil?.is_super_admin && !temBrilhante) {
+          throw new HttpError(403, 'Os 6 fundos vêm com a Figurinha Brilhante.', 'SEM_BRILHANTE');
         }
       }
       patch.fundo_figurinha = v;
@@ -1055,5 +1061,11 @@ router.put(
     res.json({ avatar_url: slot.avatar_url, kit: kitId });
   })
 );
+
+// O catálogo de kits é daqui (é esta rota que valida `ativo` antes de gerar).
+// O Gabinete precisa da mesma lista para o dono escolher o uniforme do pacote
+// do time — pendurado no router como o enviarNotificacao de routes/push.js,
+// para não haver uma segunda lista a envelhecer sozinha.
+router.KITS_IA = KITS_IA;
 
 module.exports = router;

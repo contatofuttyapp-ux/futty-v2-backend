@@ -18,6 +18,7 @@ const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler } = require('../utils/http');
 const inicioService = require('../services/inicio');
 const { temDireito } = require('../utils/direitoBrilhante');
+const { pedidosVivos } = require('./brilhantes');
 
 const router = express.Router();
 
@@ -62,7 +63,7 @@ router.get(
       ]));
     });
 
-    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, brilhante, onda2] = await Promise.all([
+    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, brilhante, pedidos_brilhante, onda2] = await Promise.all([
       medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
       convitesP,
@@ -75,6 +76,11 @@ router.get(
       // geração preguiçosa do pacote do time. Um pedido à parte só para isto
       // seria mais um round-trip na tela que a Velocidade 6A juntou num só.
       medir(res, 'brilhante', seguro(temDireito(userId))),
+      // Os pedidos de ativação vivos (pendente/recusado recente) — bloco 2. O
+      // Início tem de saber dizer "a gente ativa e avisa" e o motivo de uma
+      // recusa; sem isto a pessoa pedia e a tela ficava igual a antes de pedir.
+      // Query indexada por user_id, na mesma leva das outras.
+      medir(res, 'pedidos_brilhante', seguro(pedidosVivos(userId))),
       onda2P,
     ]);
     const [votacao_status, campeonato, rsvp] = onda2;
@@ -88,6 +94,9 @@ router.get(
       brilhante: brilhante
         ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos }
         : { fonte: null, team_id: null, kit_id: null, creditos: 0 },
+      // Nome próprio: `pedidos` (acima) são os pedidos de ENTRADA em times —
+      // coisa completamente diferente.
+      pedidos_brilhante: pedidos_brilhante || [],
     });
   })
 );

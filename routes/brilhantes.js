@@ -20,6 +20,19 @@ const PRODUTOS = ['pacote', 'manto', 'minha'];
 // Vazio do team_id no índice único parcial da 054 (NULL não colide com NULL).
 const SEM_TIME = '00000000-0000-0000-0000-000000000000';
 
+/** Pedidos vivos da pessoa: as pendentes de sempre + as recusas recentes. */
+async function lerPedidos(userId, desdeISO, comMotivo) {
+  const { data, error } = await supabase
+    .from('pedidos_ativacao')
+    .select(`id, team_id, produto, estado, criado_em, resolvido_em${comMotivo ? ', motivo' : ''}`)
+    .eq('user_id', userId)
+    .in('estado', ['pendente', 'recusado'])
+    .or(`estado.eq.pendente,resolvido_em.gte.${desdeISO}`)
+    .order('criado_em', { ascending: false });
+  if (error) throw new Error(error.message);
+  return data || [];
+}
+
 /**
  * GET /api/brilhantes/estado — tudo o que as telas precisam saber numa vez:
  * o direito atual, os créditos, os times onde a pessoa é dona (para oferecer o
@@ -54,20 +67,11 @@ router.get(
       if (!ehMigracaoEmFalta(e.message)) throw e;
     }
 
-    let pedidos = [];
-    try {
-      const { data, error } = await supabase
-        .from('pedidos_ativacao')
-        .select('id, team_id, produto, estado, criado_em')
-        .eq('user_id', userId)
-        .eq('estado', 'pendente')
-        .order('criado_em', { ascending: false });
-      if (error) throw new Error(error.message);
-      pedidos = data || [];
-    } catch (e) {
-      console.warn('[brilhantes] pedidos indisponíveis (migração 054 aplicada?):', e.message);
-      if (!ehMigracaoEmFalta(e.message)) throw e;
-    }
+    // Pendentes E recusados: a tela tem de saber dizer as duas coisas
+    // ("a gente ativa e avisa" / o motivo da recusa). Os 'ativado' não vêm —
+    // quem foi ativado já tem o direito, e o recado some sozinho, que é o
+    // comportamento certo.
+    const pedidos = await pedidosVivos(userId);
 
     res.json({
       direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId },
@@ -138,4 +142,24 @@ router.post(
   }),
 );
 
+/**
+ * Os pedidos vivos da pessoa, já com o fail-safe das migrações em falta.
+ * O Início usa isto para o recado do pedido (pendente/recusado) sem ter de
+ * repetir a query nem o tratamento de erro. Nunca lança: sem as migrações,
+ * devolve lista vazia e a tela simplesmente não mostra recado nenhum.
+ */
+async function pedidosVivos(userId, dias = 30) {
+  const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
+  try {
+    return await lerPedidos(userId, desdeISO, true);
+  } catch (e) {
+    if (/motivo/i.test(e.message)) {
+      try { return await lerPedidos(userId, desdeISO, false); } catch { return []; }
+    }
+    if (!ehMigracaoEmFalta(e.message)) console.warn('[brilhantes] pedidos vivos:', e.message);
+    return [];
+  }
+}
+
+router.pedidosVivos = pedidosVivos;
 module.exports = router;
