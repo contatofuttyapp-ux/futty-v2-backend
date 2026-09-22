@@ -1,6 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // BANCADA DA ECONOMIA (18-set) — baratear a V6 sem trocar de motor.
 //
+// ┌────────────────────────────────────────────────────────────────────────┐
+// │ A VARIANTE 3 É A PRODUÇÃO desde 22-set (decisão do dono, 7 folhas).    │
+// │ US$0,049 reais contra US$0,112 da V6, 0/7 cabeças cortadas, 0/7        │
+// │ uniformes errados. A receita dela vive agora em                        │
+// │ utils/geracaoFigurinha.js e é de lá que esta bancada a chama — correr  │
+// │ isto outra vez compara sempre contra o que está mesmo no ar.          │
+// └────────────────────────────────────────────────────────────────────────┘
+//
 // Onde estamos: a V6 (gpt-image-1.5/edit + P2 + entrada quadrada + fidelidade
 // alta) é a única receita aprovada, e custa US$0,112. Duas bancadas já tentaram
 // baratear trocando de motor (todos reprovados) e pintando o 2.5 por prompt
@@ -43,9 +51,9 @@ const path = require('path');
 const sharp = require('sharp');
 const { supabase } = require('../../utils/db');
 // Módulos de PRODUÇÃO — o que se mede é o que está no ar.
-const { montarPrompt } = require('../../prompts/figurinha');
+const { montarPrompt, promptRepintura } = require('../../prompts/figurinha');
 const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
-const { chamarFal } = require('../../utils/falFila');
+const { chamarFal, emDolares } = require('../../utils/falFila');
 const { baixar, recortarFundo, achatamento, montarFigurinha, folhaDeContato, paraCsv, lerKit } = require('./comum');
 
 const SAIDA = path.join(__dirname, 'saida-economia');
@@ -75,30 +83,15 @@ const CUSTO_BIREFNET = 0.002;
 const CUSTO_PASSADA1 = 0.025; // o 2.5 low que já foi pago na bancada de modelos
 const ESTIMATIVA = { 1: 0.095, 2: 0.085, 3: 0.055, 4: 0.075 };
 
-// A conversão do header por endpoint (achado da bancada de modelos): no
-// gpt-image vem em dólares; no flux vem a CONTAGEM de megapixels.
-const PRECO_UNIDADE = {
-  [V6_ENDPOINT]: { unidade: 1, oQueE: 'dólares (cobrado por tokens)' },
-  [FLUX_ENDPOINT]: { unidade: 0.011, oQueE: 'megapixels (entrada + saída)' },
-};
-function emDolares(endpoint, custo) {
-  if (custo?.usd == null) return { usd: null, nota: 'sem header' };
-  const t = PRECO_UNIDADE[endpoint];
-  if (!t || t.unidade === 1) return { usd: custo.usd, nota: 'header em dólares' };
-  return { usd: custo.usd * t.unidade, nota: `${custo.usd} ${t.oQueE} x $${t.unidade}` };
-}
+// A conversão do header por endpoint vive em utils/falFila.js (módulo único):
+// produção e bancadas convertem pelo mesmo sítio, senão medem coisas diferentes.
 
 const P2 = montarPrompt(KIT_ID);
 
-// O prompt da passada 2. A ordem "não mudes nada" vem antes de qualquer coisa
-// que possa ser lida como liberdade criativa — é ela que protege a cara que o
-// 2.5 já acertou. Repete o que tem de ficar igual item a item, porque "keep the
-// same" sozinho não segura nem o emblema nem o enquadramento.
-const PROMPT_REPINTAR = 'Repaint this exact image as a polished semi-realistic digital painting in the style '
-  + 'of a premium collectible football sticker card: smooth painterly skin with soft clean brushwork, '
-  + 'simplified but faithful features, gentle studio rim light, crisp clean edges on the kit. '
-  + 'Change NOTHING else: same person, same face and expression, same pose, same kit with the same emblem, '
-  + 'same framing, same flat grey background. No photographic grain.';
+// O prompt da passada 2 vem do módulo de produção (prompts/figurinha.js):
+// foi esta bancada que o escreveu, e quando a variante 3 virou produção ele
+// mudou-se para lá. Aqui fica só a chamada — nada de cópia.
+const PROMPT_REPINTAR = promptRepintura();
 
 /** Sobe um buffer ao bucket público e devolve o URL. */
 async function subir(caminho, buffer, tipo, temporarios) {

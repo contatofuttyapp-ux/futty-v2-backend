@@ -20,6 +20,9 @@ const { apagarUsuario } = require('../utils/apagarUsuario');
 const { montarPrompt } = require('../prompts/figurinha');
 const { preprocessarQuadrado, preprocessarRetrato } = require('../utils/entradaFigurinha');
 const { chamarFal } = require('../utils/falFila');
+const {
+  gerarFigurinha, PASSADA1_ENDPOINT, PASSADA2_ENDPOINT, QUALIDADE, FIDELIDADE_PASSADA2, TAMANHO_1_5,
+} = require('../utils/geracaoFigurinha');
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
 // que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
@@ -578,57 +581,54 @@ router.post(
     } catch (e) {
       console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
     }
-    // Lei da casa (31-jul, dono): qualidade é UMA só — low, para todos os planos.
-    // O pago diferencia-se por kits, fundos e créditos, não por qualidade de pintura.
-    const qualidadeIA = 'low';
-    // A SAÍDA continua em retrato: é o que dá altura para cabeça + busto sem
-    // cortar a coroa (receita de 30-jul; em quadrado o achatamento ia a 0,72).
-    // A ENTRADA é que passou a ser quadrada (17-set) — são coisas diferentes.
-    const tamanhoIA = '1024x1536';
-    // A fal usa fidelidade ALTA por omissão e cobra por isso (3.050 tokens por
-    // imagem de entrada, contra 135 na baixa). Aqui vai EXPLÍCITO, para ninguém
-    // ter de adivinhar o que a fal faz quando o campo não vai — e porque na
-    // bancada a baixa deu 2,7/5 (inconsistente) contra 4,1 da alta. A variável
-    // de ambiente existe para trocar sem deploy, se um dia o preço mandar.
-    const FIDELIDADE_ENTRADA = process.env.FAL_INPUT_FIDELITY || 'high';
-
-    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): não logar inputUrl — é um URL
-    // ASSINADO (createSignedUrl, 600s) da foto privada do utilizador; quem lesse os
-    // logs do servidor conseguia descarregá-la enquanto o token não expirasse.
+    // A RECEITA vive em utils/geracaoFigurinha.js — endpoints, qualidades e
+    // fidelidade são constantes de lá, com override por ambiente. Esta rota
+    // não decide mais nada sobre COMO se gera: só trata da foto, do kit, da
+    // rede de segurança e do dinheiro.
     console.log('[avatar-ai] a chamar fal com:', {
-      modelo: 'fal-ai/gpt-image-1.5/edit',
+      passada1: PASSADA1_ENDPOINT,
+      passada2: PASSADA2_ENDPOINT,
       kit: kitId,
       origem,
       prompt_length: promptFutty(kitId).length,
-      quality: qualidadeIA,
-      image_size: tamanhoIA,
-      input_fidelity: FIDELIDADE_ENTRADA,
+      quality: QUALIDADE,
+      image_size: TAMANHO_1_5,
+      input_fidelity_passada2: FIDELIDADE_PASSADA2,
       entrada: formaEntrada,
     });
 
     // O DINHEIRO desta geração, somado de TODAS as tentativas: um retry por
-    // cabeça cortada é uma segunda chamada paga, e até agora não aparecia em
-    // lado nenhum. `semHeader` conta as chamadas em que a fal não mandou custo.
-    const conta = { usd: 0, chamadas: 0, semHeader: 0 };
-    const somarCusto = (custo) => {
-      conta.chamadas += 1;
-      if (custo?.usd != null) conta.usd += custo.usd;
-      else conta.semHeader += 1;
+    // cabeça cortada são DUAS passadas novas, e isso é dinheiro que tem de
+    // aparecer no contador do dia. `parcelas` guarda quanto custou cada etapa,
+    // para o log dizer de onde veio o total.
+    const conta = { usd: 0, chamadas: 0, semHeader: 0, parcelas: {} };
+
+    // A fal só lê URLs públicos. A imagem do meio (o jogador sobre o cinza,
+    // entre as duas passadas) vai para o bucket privado `avatars` com URL
+    // ASSINADO de vida curta — nunca para um bucket público, porque é a cara
+    // do utilizador. É apagada no fim, dê no que der.
+    const temporarios = [];
+    const publicar = async (nomeFicheiro, buffer, tipo) => {
+      const caminho = `tmp/${userId}-${nomeFicheiro}`;
+      const { error } = await supabase.storage.from('avatars').upload(caminho, buffer, {
+        contentType: tipo, upsert: true, cacheControl: '3600',
+      });
+      if (error) throw new Error(`upload do passo intermédio: ${error.message}`);
+      temporarios.push(caminho);
+      return assinarUrlAvatars(caminho);
     };
 
-    // ETAPA 1+2 (retriáveis) — geração + remoção de fundo → buffer recortado.
+    // ETAPA 1+2 (retriáveis) — as duas passadas + birefnet → buffer recortado.
     const gerarERecortar = async () => {
-      let resposta;
+      let saida;
       try {
-        resposta = await chamarFal('fal-ai/gpt-image-1.5/edit', {
-          prompt: promptFutty(kitId), // prompt inteiro, de prompts/figurinha.js
-          image_urls: [inputUrl, kit.url], // entrada quadrada + asset do kit escolhido
-          quality: qualidadeIA,
-          image_size: tamanhoIA,
-          input_fidelity: FIDELIDADE_ENTRADA,
-          num_images: 1,
+        saida = await gerarFigurinha({
+          fotoUrl: inputUrl,
+          kitUrl: kit.url,
+          kitId,
+          publicar,
+          etiqueta: 'fig',
         });
-        somarCusto(resposta.custo);
       } catch (err) {
         // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
         // inteira do fal (body/response, que pode incluir o inputUrl assinado
@@ -655,28 +655,20 @@ router.post(
         }
         throw err;
       }
-      const urlGerada = resposta.dados?.images?.[0]?.url;
-      if (!urlGerada) throw new HttpError(502, 'A IA não devolveu imagem.');
-      console.log('[avatar-ai] etapa 1 - GPT Image OK', {
-        segundos: Math.round(resposta.segundos),
-        custo_usd: resposta.custo.usd ?? 'header ausente',
-      });
 
-      // ETAPA 2 — remoção de fundo (birefnet) → jogador recortado (PNG transparente).
-      const recorte = await chamarFal('fal-ai/birefnet', {
-        image_url: urlGerada,
-        model: 'General Use (Light)',
+      // O custo desta tentativa entra na conta da geração (o retry soma por cima).
+      conta.usd += saida.custo.usd;
+      conta.chamadas += saida.custo.chamadas;
+      conta.semHeader += saida.custo.semHeader;
+      for (const [nome, p] of Object.entries(saida.custo.parcelas)) {
+        conta.parcelas[nome] = (conta.parcelas[nome] || 0) + (p.usd || 0);
+      }
+      console.log('[avatar-ai] duas passadas OK', {
+        segundos: saida.tempos,
+        custo_usd: Number(saida.custo.usd.toFixed(4)),
       });
-      somarCusto(recorte.custo);
-      const urlRecortada = recorte.dados?.image?.url;
-      if (!urlRecortada) throw new HttpError(502, 'Falha na remoção de fundo.');
-      console.log('[avatar-ai] etapa 2 - remove bg OK', { custo_usd: recorte.custo.usd ?? 'header ausente' });
-
-      const respR = await fetch(urlRecortada);
-      if (!respR.ok) throw new HttpError(502, 'Falha ao obter a imagem recortada.');
-      return { urlGerada, urlRecortada, recorteBuffer: Buffer.from(await respR.arrayBuffer()) };
+      return { recorteBuffer: saida.recorteBuffer };
     };
-
     // REDE DE DETECÇÃO 1 — contacto com a borda, ANTES do trim. Topo (linhas
     // y=0..2, como antes): cabeça cortada. Laterais (colunas x=0..2 e
     // x=w-3..w-1, opacos > 15% da ALTURA): braço cortado pela borda.
@@ -823,8 +815,20 @@ router.post(
       chamadas: conta.chamadas,
       sem_header: conta.semHeader,
       custo_usd: Number(conta.usd.toFixed(4)),
+      // De onde veio o total: se um dia a conta disparar, é aqui que se vê qual
+      // das quatro chamadas mudou de preço.
+      parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
     });
     registrarGeracao({ userId, ip: req.ip, custoCents }).catch(() => {});
+
+    // A imagem do meio (o jogador sobre o cinza, entre as duas passadas) é a
+    // cara do utilizador num ficheiro temporário: sai daqui assim que a
+    // figurinha está entregue. Fire-and-forget — falhar a limpeza não pode
+    // derrubar a resposta, e o pior caso é um ficheiro a mais no tmp/.
+    if (temporarios.length) {
+      supabase.storage.from('avatars').remove(temporarios)
+        .catch((e) => console.error('[avatar-ai] limpeza do tmp falhou:', e.message));
+    }
 
     res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false });
     } catch (err) {

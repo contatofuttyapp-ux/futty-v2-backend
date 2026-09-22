@@ -24,10 +24,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 
 // A regra dos óculos vive numa LINHA PRÓPRIA, no início do FACE FIRST. Na
-// bancada ela estava entre parênteses no fim do parágrafo e três figurinhas do
-// Gui saíram com os óculos escuros na cara — a versão entre parênteses perde-se
-// no meio do texto.
-const REGRA_OCULOS = 'SUNGLASSES: if Image 1 shows sunglasses, remove them and paint natural open eyes that fit this face — never keep dark lenses.';
+// bancada de 17-set ela estava entre parênteses no fim do parágrafo e três
+// figurinhas do Gui saíram com os óculos escuros na cara — a versão entre
+// parênteses perde-se no meio do texto.
+// 22-set, forma FORTE: "remove them" sozinho deixava o modelo trocar lentes
+// escuras por óculos de grau, que também não é o que se pede. Agora não há
+// espaço: tira tudo e pinta os olhos.
+const REGRA_OCULOS = 'SUNGLASSES: if Image 1 shows sunglasses, remove them completely — no glasses of any kind — and paint natural open eyes that fit this face.';
 
 /**
  * O kit em UMA frase, por kit. Mesma estrutura para todos (foi a que a bancada
@@ -75,4 +78,25 @@ function montarPrompt(kitId) {
   return MOLDE.replace('{{KIT_CURTO}}', curto).replace('{{KIT_CHECK}}', KIT_CHECK);
 }
 
-module.exports = { montarPrompt, KITS_CURTOS, KIT_CHECK, REGRA_OCULOS };
+// ── A SEGUNDA PASSADA (22-set) ────────────────────────────────────────────────
+//
+// Desde 22-set a figurinha nasce em duas passadas: o gpt-image-2.5 dá a CARA
+// (foi a que o dono aprovou) e o gpt-image-1.5 repinta no acabamento da casa.
+// Este é o prompt da segunda — ele NÃO descreve a pessoa nem o kit, porque não
+// precisa: a imagem que recebe já tem tudo. A única coisa que ele faz é trocar
+// o acabamento sem deixar nada mais mudar.
+//
+// A ordem "Change NOTHING else" vem à frente de qualquer coisa que se possa ler
+// como liberdade criativa, e repete item a item o que tem de ficar igual — na
+// bancada, "keep the same" sozinho não segurava nem o emblema nem o
+// enquadramento. É esta frase que protege a cara que a passada 1 acertou.
+const PROMPT_REPINTURA = 'Repaint this exact image as a polished semi-realistic digital painting in the style '
+  + 'of a premium collectible football sticker card: smooth painterly skin with soft clean brushwork, '
+  + 'simplified but faithful features, gentle studio rim light, crisp clean edges on the kit. '
+  + 'Change NOTHING else: same person, same face and expression, same pose, same kit with the same emblem, '
+  + 'same framing, same flat grey background. No photographic grain.';
+
+/** O prompt da passada 2. Não depende do kit — a imagem que ele recebe já o veste. */
+const promptRepintura = () => PROMPT_REPINTURA;
+
+module.exports = { montarPrompt, promptRepintura, KITS_CURTOS, KIT_CHECK, REGRA_OCULOS };
