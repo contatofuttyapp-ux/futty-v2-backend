@@ -282,8 +282,10 @@ router.post(
 
 /**
  * POST /api/me/avatar — upload da foto de perfil (multipart, campo "avatar").
- * Vai para o Supabase Storage (bucket "avatars", path public/{userId}.{ext},
- * sobrescreve) e guarda o URL público em users.avatar_url.
+ * Vai para o Supabase Storage (bucket "avatars", caminho
+ * `public/{userId}-{carimbo}.{ext}`) e guarda o URL em users.foto_url — e o
+ * sha256 dos bytes em users.foto_hash, no MESMO update. Cada foto é um objeto
+ * NOVO; a anterior é apagada depois de o banco estar gravado.
  */
 router.post(
   '/api/me/avatar',
@@ -303,12 +305,18 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    const caminho = `public/${userId}.${ext}`;
-    // 2. Upload para o Supabase Storage (bucket "avatars").
+    // Nome POR VERSÃO (22-set): cada foto é um objeto novo. Ver a nota em
+    // `caminhoFotoNovo` — caminho que muda de conteúdo é caminho que alguém,
+    // algures, serve desactualizado.
+    const caminho = caminhoFotoNovo(userId, ext);
+    // 2. Upload para o Supabase Storage (bucket "avatars"). Sem upsert: o
+    // carimbo de tempo já torna o nome único, e se por absurdo colidisse, o
+    // certo é falhar aqui em vez de escrever por cima do objeto de outra
+    // chamada — que é precisamente o hábito que esta rodada veio tirar.
     console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho });
     const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
       contentType: file.mimetype,
-      upsert: true,
+      upsert: false,
       cacheControl: '3600',
     });
     if (upErr) {
@@ -317,7 +325,9 @@ router.post(
     }
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
-    // ?v= força o browser a recarregar (o path é fixo porque sobrescreve).
+    // O ?v= já não é o que garante a actualização (o caminho é novo a cada
+    // foto), mas fica: é o que distingue versões no proxy de mídia, que usa o
+    // `v` na chave de cache dos derivados.
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
     // URL público — deve usar o domínio do Supabase, não localhost.
     console.log('[avatar] URL público:', avatarUrl);
@@ -330,20 +340,35 @@ router.post(
     const temAvatarIA = !!atual?.avatar_url && atual.avatar_url !== atual.foto_url;
     const novoAvatarUrl = temAvatarIA ? atual.avatar_url : avatarUrl;
     console.log('[avatar] UPDATE users:', { userId, temAvatarIA });
-    const { error: updErr } = await supabase.from('users').update({ foto_url: avatarUrl, avatar_url: novoAvatarUrl }).eq('id', userId);
+
+    // O HASH VAI NO MESMO UPDATE que o URL (22-set). Antes era gravado a
+    // seguir, num update próprio, e isso abria uma janela de milissegundos em
+    // que `foto_url` já era a foto NOVA e `foto_hash` ainda era o da ANTIGA.
+    // Quem pedisse figurinha dentro dessa janela caía no reuso de slot — que
+    // compara o fingerprint do slot com o `foto_hash` — e recebia a figurinha
+    // velha de volta. Uma linha só fecha a janela: ou grava tudo, ou nada.
+    const patchFoto = { foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_hash: sha256Hex(file.buffer) };
+    let { error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId);
+    if (updErr && /foto_hash/i.test(updErr.message || '')) {
+      // Migração 048 por correr: grava o resto, avisa, e segue. O anti-abuso
+      // perde um sinal; o upload não pode cair por causa disso.
+      console.error('[avatar] foto_hash não existe nesta base (migração 048 por correr?) — gravo sem ele');
+      delete patchFoto.foto_hash;
+      ({ error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId));
+    }
     if (updErr) {
       console.error('[avatar] erro no UPDATE:', updErr.message);
       throw new HttpError(500, updErr.message);
     }
 
-    // Hash da foto (pacote anti-abuso, 11-ago) — matéria-prima do sinal de farm
-    // de contas. Best-effort e SEPARADO do update principal: se a coluna ainda
-    // não existir (migração 048 por correr), nunca pode derrubar o upload.
-    try {
-      await supabase.from('users').update({ foto_hash: sha256Hex(file.buffer) }).eq('id', userId);
-    } catch (e) {
-      console.error('[avatar] foto_hash não gravado (migração 048 por correr?):', e.message);
-    }
+    // A foto anterior deixou de ser referenciada por `users.foto_url` — sai do
+    // bucket. Só DEPOIS do update: se apagasse antes e o update falhasse, o
+    // utilizador ficava sem foto nenhuma. Não se apaga quando o caminho é o
+    // mesmo (conta antiga, nome fixo) nem quando o avatar_url ainda aponta
+    // para ela (quem nunca gerou figurinha vê a própria foto no card).
+    const caminhoAntigo = caminhoNoBucket(atual?.foto_url, 'avatars');
+    const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
+    if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'foto substituída');
 
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
@@ -420,6 +445,82 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
   const { data, error } = await supabase.storage.from('avatars').createSignedUrl(caminho, ttlSeg);
   if (error) throw new Error(`Falha ao assinar URL do avatar: ${error.message}`);
   return data.signedUrl;
+}
+
+// ── Nomes de ficheiro POR VERSÃO (22-set) ────────────────────────────────────
+//
+// Antes, a foto ia sempre para `public/<userId>.<ext>` e a figurinha para
+// `public/<userId>-ai-<kit>.png`, com upsert por cima. Um caminho que muda de
+// conteúdo é um convite a cache velho: navegador, WebView, CDN e qualquer
+// proxy pelo caminho podem servir a versão anterior, e não há como pedir para
+// esquecerem. Com o carimbo de tempo no nome, cada versão é um OBJETO NOVO —
+// URL diferente, cache sem nada a dizer.
+//
+// Quem já tem ficheiro no nome antigo fica como está até trocar de foto: a
+// LEITURA sai sempre de `users.foto_url` / `avatar_url`, que guardam o caminho
+// completo, e por isso aceita os dois padrões sem saber a diferença.
+const caminhoFotoNovo = (userId, ext) => `public/${userId}-${Date.now()}.${ext}`;
+const caminhoFigurinhaNova = (userId, kitId) => `public/${userId}-ai-${kitId}-${Date.now()}.png`;
+
+/**
+ * Apaga um objeto do bucket `avatars` que deixou de ser usado.
+ * Best-effort de propósito: falhar a limpeza nunca pode derrubar um upload ou
+ * uma geração que já correram bem — o pior caso é um ficheiro órfão, e isso
+ * conta-se no log em vez de se atirar para cima do utilizador.
+ */
+async function apagarAntigo(caminho, motivo) {
+  if (!caminho) return;
+  try {
+    const { error } = await supabase.storage.from('avatars').remove([caminho]);
+    if (error) throw new Error(error.message);
+    console.log('[avatar] versão anterior apagada', { caminho, motivo });
+  } catch (e) {
+    console.warn('[avatar] não consegui apagar a versão anterior (fica órfã):', { caminho, motivo, erro: e.message });
+  }
+}
+
+/**
+ * Baixa a foto e confirma que é a que a tabela diz ser a atual.
+ *
+ * Existe por causa do relato de 22-set (foto nova, figurinha da foto antiga).
+ * A causa nunca se reproduziu em bancada — o download autenticado devolveu
+ * sempre a versão certa —, mas a verificação é barata e o que ela evita é caro:
+ * uma figurinha da foto errada com o dinheiro já gasto. Se o hash não bater,
+ * tenta de novo (pode ser propagação), e ao fim de três tentativas recusa sem
+ * chamar a fal e sem contar quota.
+ */
+async function baixarFotoConferida(caminho, hashEsperado) {
+  let ultimoHash = null;
+  for (let tentativa = 1; tentativa <= 3; tentativa += 1) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data: blob, error } = await supabase.storage.from('avatars').download(caminho);
+    if (error) throw new Error(error.message);
+    // eslint-disable-next-line no-await-in-loop
+    const buf = Buffer.from(await blob.arrayBuffer());
+    ultimoHash = sha256Hex(buf);
+    const confere = !hashEsperado || ultimoHash === hashEsperado;
+    console.log('[avatar-ai] etapa 0 - foto baixada', {
+      caminho,
+      tentativa,
+      sha256: ultimoHash.slice(0, 12),
+      esperado: (hashEsperado || '(sem hash gravado)').slice(0, 12),
+      confere,
+    });
+    if (confere) return buf;
+    if (tentativa < 3) {
+      console.warn('[avatar-ai] a foto baixada não é a atual — espero 2 s e tento de novo');
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+  }
+  console.error('[avatar-ai] RECUSADO: a foto baixada continua diferente da atual', {
+    caminho, baixado: ultimoHash?.slice(0, 12), esperado: hashEsperado?.slice(0, 12),
+  });
+  throw new HttpError(
+    409,
+    'Sua foto ainda está sendo preparada — tente de novo em instantes',
+    'FOTO_DESATUALIZADA',
+  );
 }
 
 /**
@@ -547,6 +648,10 @@ router.post(
     // baixou a chamada de US$0,132 para US$0,112. A SAÍDA continua 1024×1536.
     // Upload no Supabase (URL assinado) em vez de data URI: é o formato de input
     // confirmado no schema do fal — não se arrisca uma geração paga noutro.
+    // Tudo o que é temporário nesta geração (o pad e a imagem entre passadas)
+    // fica aqui para ser apagado no fim — com nomes por versão, ninguém os
+    // sobrescreve, portanto é a limpeza que tem de os levar.
+    const temporarios = [];
     const caminhoFoto = caminhoNoBucket(perfil.foto_url, 'avatars');
     let inputUrl = caminhoFoto ? await assinarUrlAvatars(caminhoFoto) : perfil.foto_url;
     let formaEntrada = 'foto-crua';
@@ -554,9 +659,15 @@ router.post(
       if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
       // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
       // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
-      const { data: fotoBlob, error: dlErr } = await supabase.storage.from('avatars').download(caminhoFoto);
-      if (dlErr) throw new Error(dlErr.message);
-      const fotoBuf = Buffer.from(await fotoBlob.arrayBuffer());
+      // TRAVA ANTES DE GASTAR (22-set). A foto que se baixou tem de ser a que a
+      // tabela diz ser a atual — senão a figurinha sairia da foto errada e o
+      // dinheiro já estaria gasto quando alguém percebesse. Três tentativas com
+      // 2 s de intervalo: se for atraso de propagação, passa; se for outra
+      // coisa, ninguém paga por ela.
+      //
+      // Só corre quando há `foto_hash` gravado: contas antigas (antes da
+      // migração 048) não têm, e barrá-las seria inventar um defeito.
+      const fotoBuf = await baixarFotoConferida(caminhoFoto, perfil.foto_hash);
       // O quadrado é a receita de produção; se ele falhar (foto estranha, sharp a
       // recusar o corte), cai-se no retrato com faixa — NUNCA na foto crua, que
       // é o que fazia a IA comer a coroa da cabeça.
@@ -569,7 +680,11 @@ router.post(
         entradaBuf = await preprocessarRetrato(fotoBuf);
         formaEntrada = 'retrato-faixa';
       }
-      const caminhoPad = `tmp/${userId}-pad.jpg`;
+      // Nome por versão também aqui: esta é a imagem que a fal vai BUSCAR por
+      // URL. Um caminho reutilizado é a única peça do caminho que um cache
+      // externo poderia servir velha — e a fal está do outro lado do mundo.
+      const caminhoPad = `tmp/${userId}-${Date.now()}-pad.jpg`;
+      temporarios.push(caminhoPad);
       const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, entradaBuf, {
         contentType: 'image/jpeg',
         upsert: true,
@@ -579,6 +694,11 @@ router.post(
       inputUrl = await assinarUrlAvatars(caminhoPad);
       console.log('[avatar-ai] etapa 0 - entrada pronta', { forma: formaEntrada, bytes: entradaBuf.length });
     } catch (e) {
+      // A trava do hash (FOTO_DESATUALIZADA) é uma RECUSA, não uma falha de
+      // preparação: tem de subir inteira até ao cliente. Cair para a foto crua
+      // aqui seria gerar exactamente a figurinha errada que ela existe para
+      // impedir — e cobrar por ela.
+      if (e instanceof HttpError) throw e;
       console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
     }
     // A RECEITA vive em utils/geracaoFigurinha.js — endpoints, qualidades e
@@ -607,9 +727,8 @@ router.post(
     // entre as duas passadas) vai para o bucket privado `avatars` com URL
     // ASSINADO de vida curta — nunca para um bucket público, porque é a cara
     // do utilizador. É apagada no fim, dê no que der.
-    const temporarios = [];
     const publicar = async (nomeFicheiro, buffer, tipo) => {
-      const caminho = `tmp/${userId}-${nomeFicheiro}`;
+      const caminho = `tmp/${userId}-${Date.now()}-${nomeFicheiro}`;
       const { error } = await supabase.storage.from('avatars').upload(caminho, buffer, {
         contentType: tipo, upsert: true, cacheControl: '3600',
       });
@@ -771,11 +890,14 @@ router.post(
     console.log('[avatar-ai] etapa 3 - resize OK');
 
     await ensureUserRow(req.user);
-    // Um ficheiro POR KIT → os slots não se sobrepõem.
-    const caminho = `public/${userId}-ai-${kitId}.png`;
+    // Um ficheiro POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
+    // a figurinha nova não escreve por cima da velha (22-set). Sem upsert: o
+    // carimbo de tempo torna colisão impossível, e se algum dia houvesse, o
+    // certo é rebentar aqui em vez de apagar o trabalho de outra chamada.
+    const caminho = caminhoFigurinhaNova(userId, kitId);
     const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
       contentType: 'image/png',
-      upsert: true,
+      upsert: false,
       cacheControl: '3600',
     });
     if (upErr) throw new HttpError(500, upErr.message);
@@ -803,6 +925,15 @@ router.post(
     if (updErr) throw new HttpError(500, updErr.message);
     // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
     marcarFigurinhaStatus(userId, 'pronta');
+
+    // A figurinha anterior DESTE kit já não é apontada por ninguém (o slot e o
+    // users.avatar_url acabaram de mudar) — sai do bucket. Só agora, depois de
+    // os dois updates terem passado: se apagasse antes e o update falhasse, o
+    // utilizador ficava com um avatar_url a apontar para o nada.
+    const figurinhaAntiga = caminhoNoBucket(slot?.avatar_url, 'avatars');
+    if (figurinhaAntiga && figurinhaAntiga !== caminho) {
+      await apagarAntigo(figurinhaAntiga, `figurinha ${kitId} regerada`);
+    }
 
     // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
     // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca

@@ -113,7 +113,18 @@ const lerGasto = async () => {
 
   // A figurinha em si: baixar, medir, guardar.
   fs.mkdirSync(SAIDA, { recursive: true });
-  const caminho = `public/${userId}-ai-${kitId}.png`;
+  // O caminho vem do `avatar_url` que a rota devolveu — desde 22-set o nome do
+  // ficheiro leva carimbo de tempo (`public/<id>-ai-<kit>-<carimbo>.png`) e já
+  // não dá para o adivinhar aqui. Este é também o caminho que o resto do app
+  // usa: se a prova o lê do mesmo sítio, prova a mesma coisa que o app vê.
+  const marcador = '/object/public/avatars/';
+  const caminho = String(corpo.avatar_url || '').includes(marcador)
+    ? corpo.avatar_url.slice(corpo.avatar_url.indexOf(marcador) + marcador.length).split('?')[0]
+    : null;
+  if (!caminho) {
+    console.error('a resposta não trouxe um avatar_url do bucket avatars:', corpo.avatar_url);
+    process.exit(1);
+  }
   const { data: blob, error: errDl } = await supabase.storage.from('avatars').download(caminho);
   let ach = { razao: null };
   let destino = '(não baixada)';

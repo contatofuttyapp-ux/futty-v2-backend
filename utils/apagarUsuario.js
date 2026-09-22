@@ -159,10 +159,33 @@ async function apagarUsuario(userId) {
     fotosRemovidas += r.removidos;
     if (r.erro) console.warn(`[apagarUsuario] Storage (${bucket}): ${r.erro}`);
   }
-  // Ficheiro temporário determinístico (routes/auth.js: tmp/${userId}-pad.jpg,
-  // gerado durante a geração de avatar IA) — best-effort, é efêmero.
-  const { error: tmpErr } = await supabase.storage.from('avatars').remove([`tmp/${userId}-pad.jpg`]);
-  if (tmpErr) console.warn('[apagarUsuario] avatars/tmp (aviso, efêmero):', tmpErr.message);
+  // VARRIMENTO POR PREFIXO (22-set). Os ficheiros do utilizador passaram a ter
+  // carimbo de tempo no nome (`public/<userId>-<carimbo>.jpg`,
+  // `public/<userId>-ai-<kit>-<carimbo>.png`, `tmp/<userId>-<carimbo>-*`), por
+  // duas razões: cache nenhum serve versão velha, e cada geração é um objeto
+  // novo. O efeito colateral é que o banco já não conhece TODOS os ficheiros —
+  // uma versão anterior cuja limpeza tenha falhado fica órfã e sem ninguém a
+  // apontar para ela. Por isso, além das URLs de cima, varre-se as duas pastas
+  // pelo prefixo do id. Best-effort: uma sobra no bucket nunca pode impedir a
+  // conta de ser apagada.
+  for (const pasta of ['public', 'tmp']) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const { data: sobras, error: listErr } = await supabase.storage
+        .from('avatars')
+        .list(pasta, { limit: 1000, search: userId });
+      if (listErr) throw new Error(listErr.message);
+      const alvos = (sobras || []).filter((f) => f.name.startsWith(userId)).map((f) => `${pasta}/${f.name}`);
+      if (!alvos.length) continue;
+      // eslint-disable-next-line no-await-in-loop
+      const { error: rmErr } = await supabase.storage.from('avatars').remove(alvos);
+      if (rmErr) throw new Error(rmErr.message);
+      fotosRemovidas += alvos.length;
+      console.log(`[apagarUsuario] avatars/${pasta}: ${alvos.length} ficheiro(s) do prefixo removido(s)`);
+    } catch (e) {
+      console.warn(`[apagarUsuario] avatars/${pasta} (aviso, varrimento por prefixo):`, e.message);
+    }
+  }
 
   const { error: logErr } = await supabase.from('geracao_ia_log').delete().eq('user_id', userId);
   if (logErr) throw new Error(`geracao_ia_log: ${logErr.message}`);
