@@ -29,5 +29,9 @@
     "nsfwjs": "^4.3.0",
     "sharp": "^0.35.2",
     "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "@tensorflow/tfjs-backend-wasm": "^4.22.0",
+    "@vladmandic/face-api": "^1.7.15"
   }
 }
