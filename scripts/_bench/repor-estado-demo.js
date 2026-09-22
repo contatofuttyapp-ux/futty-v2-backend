@@ -13,9 +13,17 @@
 // não são escritos por ninguém.
 //
 //   node scripts/_bench/repor-estado-demo.js --porta 3014
-//   --sem-gerar   repõe só a foto e limpa o bucket (US$0,00)
+//   --sem-gerar             repõe só a foto e limpa o bucket (US$0,00)
+//   --figurinha-de <arquivo> em vez de GERAR (rota paga), publica esse PNG já
+//                            existente como a figurinha do kit — mesmo efeito
+//                            final (bucket, users, slot), custo zero. Serve
+//                            para repor depois de uma bancada que já pagou por
+//                            uma figurinha boa da MESMA foto (ex.: a prova da
+//                            Rodada 17) e não precisa pagar outra vez só para
+//                            devolver a conta ao estado da loja. Ignorado
+//                            junto com --sem-gerar.
 //
-// Custo: uma geração (~US$0,05), ou zero com --sem-gerar.
+// Custo: uma geração (~US$0,05); zero com --sem-gerar ou --figurinha-de.
 // Não é para correr contra produção: pede a um servidor LOCAL.
 // ═══════════════════════════════════════════════════════════════════════════════
 require('dotenv').config();
@@ -23,6 +31,7 @@ const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const { supabase } = require('../../utils/db');
+const { sha256Hex } = require('../../utils/antiAbusoIA');
 
 const EMAIL = 'demo-loja@futtymock.com';
 const KIT = 'dark-gold';
@@ -41,8 +50,10 @@ const caminhoDe = (url) => {
 (async () => {
   const base = `http://localhost:${arg('porta', '3014')}`;
   const semGerar = tem('sem-gerar');
+  const figurinhaDe = arg('figurinha-de', null);
 
   if (!fs.existsSync(FOTO)) { console.error(`falta a foto guardada: ${FOTO}`); process.exit(1); }
+  if (figurinhaDe && !fs.existsSync(figurinhaDe)) { console.error(`--figurinha-de: arquivo não existe: ${figurinhaDe}`); process.exit(1); }
   const saude = await fetch(`${base}/api/health`).catch(() => null);
   if (!saude?.ok) { console.error(`Servidor não responde em ${base}.`); process.exit(1); }
 
@@ -65,9 +76,33 @@ const caminhoDe = (url) => {
   if (!rUp.ok) { console.error(`upload ${rUp.status}:`, (await rUp.text()).slice(0, 200)); process.exit(1); }
   console.log('foto da loja reposta.');
 
-  // 2) A figurinha. O slot antigo é de outra foto, por isso não serve de
-  //    atalho — mas apaga-se na mesma para a geração ser mesmo uma geração.
-  if (!semGerar) {
+  // 2) A figurinha.
+  if (figurinhaDe) {
+    // PUBLICA sem gerar: escreve o PNG já pago no caminho por versão (mesmo
+    // padrão de caminhoFigurinhaNova em routes/auth.js), aponta users/slot
+    // para ele e apaga a versão anterior — o mesmo resultado final de uma
+    // geração real, sem chamar a fal.
+    const { data: antes } = await supabase.from('users').select('foto_hash').eq('id', userId).maybeSingle();
+    const { data: slotAntes } = await supabase.from('user_avatar_slots').select('avatar_url').eq('user_id', userId).eq('kit_id', KIT).maybeSingle();
+    const pngBuf = fs.readFileSync(figurinhaDe);
+    const caminhoFig = `public/${userId}-ai-${KIT}-${Date.now()}.png`;
+    const { error: upFigErr } = await supabase.storage.from('avatars').upload(caminhoFig, pngBuf, {
+      contentType: 'image/png', upsert: false, cacheControl: '3600',
+    });
+    if (upFigErr) { console.error('upload da figurinha falhou:', upFigErr.message); process.exit(1); }
+    const { data: pubFig } = supabase.storage.from('avatars').getPublicUrl(caminhoFig);
+    const avatarUrl = `${pubFig.publicUrl}?v=${Date.now()}`;
+    const { error: slotErr } = await supabase.from('user_avatar_slots')
+      .upsert({ user_id: userId, kit_id: KIT, avatar_url: avatarUrl, foto_fingerprint: antes?.foto_hash || null }, { onConflict: 'user_id,kit_id' });
+    if (slotErr) { console.error('slot falhou:', slotErr.message); process.exit(1); }
+    const { error: userErr } = await supabase.from('users').update({ avatar_url: avatarUrl, kit_ativo: KIT }).eq('id', userId);
+    if (userErr) { console.error('update users falhou:', userErr.message); process.exit(1); }
+    const antigoFig = caminhoDe(slotAntes?.avatar_url);
+    if (antigoFig && antigoFig !== caminhoFig) await supabase.storage.from('avatars').remove([antigoFig]).catch(() => {});
+    console.log(`figurinha ${KIT} publicada de ${path.basename(figurinhaDe)} (sha256 ${sha256Hex(pngBuf).slice(0, 12)}, sem gerar — US$0,00)`);
+  } else if (!semGerar) {
+    // O slot antigo é de outra foto, por isso não serve de atalho — mas
+    // apaga-se na mesma para a geração ser mesmo uma geração.
     await supabase.from('user_avatar_slots').delete().eq('user_id', userId).eq('kit_id', KIT);
     const t0 = Date.now();
     const rGer = await fetch(`${base}/api/me/avatar/ai`, {

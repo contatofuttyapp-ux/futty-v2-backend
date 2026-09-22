@@ -578,6 +578,7 @@ router.post(
       // nova (migração 051) e nunca pode derrubar o essencial (avatar_url/kit_ativo)
       // se ainda não tiver sido migrada.
       marcarFigurinhaStatus(userId, 'pronta');
+      invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando' logo abaixo.
       console.log('[avatar-ai] slot reutilizado (sem geração, sem quota):', { userId, kitId });
       return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true });
     }
@@ -614,6 +615,19 @@ router.post(
     // fica preso mostrando "criando..." para sempre. Try/catch amplo a partir
     // daqui (não só ao redor da geração): qualquer gate reprovado também conta.
     await marcarFigurinhaStatus(userId, 'gerando');
+    // RODADA 17 — invalida o cache de sessão (60s, middleware/auth.js) nas 4
+    // marcações de figurinha_status (aqui e as 'pronta'/'falhou' mais abaixo).
+    // Investigado antes de adicionar: HOJE isto não muda nada sozinho — esse
+    // cache guarda o USER do Supabase Auth (id/email/user_metadata), nunca as
+    // colunas de `users`, e obterMe() lê figurinha_status com uma query
+    // própria e SEMPRE fresca (obterPerfilResiliente), sem cache nenhum por
+    // cima. GET /api/me e /api/inicio já respondem "na hora" sem esta linha.
+    // Fica mesmo assim por pedido explícito e por ser grátis: mesmo padrão já
+    // usado para onboarding-completo/tour-visto (linhas ~237-278), e barato
+    // o suficiente para não pesar a decisão — se um dia figurinha_status
+    // entrar em req.user (ex.: um JWT custom claim), esta chamada já está no
+    // sítio certo em vez de ser mais uma coisa a lembrar depois.
+    invalidarSessaoDoPedido(req);
 
     try {
       // PACOTE ANTI-ABUSO DE CUSTO (11-ago) — três gates, só a partir daqui (uma
@@ -925,6 +939,7 @@ router.post(
     if (updErr) throw new HttpError(500, updErr.message);
     // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
     marcarFigurinhaStatus(userId, 'pronta');
+    invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
 
     // A figurinha anterior DESTE kit já não é apontada por ninguém (o slot e o
     // users.avatar_url acabaram de mudar) — sai do bucket. Só agora, depois de
@@ -968,6 +983,7 @@ router.post(
       // foto. Ver nota no início do try: o e-mail-gate é o caso mais provável
       // no fluxo do cadastro.
       await marcarFigurinhaStatus(userId, 'falhou');
+      invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
       throw err;
     }
   })
