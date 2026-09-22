@@ -38,12 +38,16 @@ npm-debug.log*
 # (/**) a excepção passa a valer.
 scripts/_bench/**
 !scripts/_bench/*.js
-# O busto do kit sem cabeça (22-set, bancada do recorte) é um ASSET que a
-# bancada precisa e que custou uma geração real — entra. Reincluir um ficheiro
-# dentro de pasta ignorada pede as duas linhas: a pasta e o ficheiro. O
-# `busto-dark-gold-prova.png` (guia visual) continua fora.
+# Os bustos dos kits sem cabeça (22-set, bancada do recorte) são ASSETS que a
+# bancada precisa e que custaram uma geração real cada — entram, com a máscara
+# de pele e as medidas. Reincluir dentro de pasta ignorada pede a pasta e os
+# ficheiros. As provas visuais (-prova) e as fontes com cabeça (-fonte, o
+# modelo fictício) continuam fora.
 !scripts/_bench/assets/
-!scripts/_bench/assets/busto-dark-gold.png
+!scripts/_bench/assets/busto-*.png
+!scripts/_bench/assets/busto-*.json
+scripts/_bench/assets/busto-*-prova.png
+scripts/_bench/assets/busto-*-fonte.png
 
 # Backup semanal do banco (scripts/backup-banco.js, SEGURANCA-REVISAO-10SET.md
 # secção 4) — vive em C:\Users\phfer\Desktop\FUT\BACKUPS, fora deste repo (que

@@ -17,10 +17,19 @@
 //   3  "pintura"    + o mais perto que o sharp chega da V6 sem IA (mediana,
 //                   unsharp forte, posterização 8, rim light pelo alpha, vinheta)
 //   4  "cabeça no busto": a cabeça da pessoa sobre o busto sem cabeça do kit
-//                   dark-gold (assets/busto-dark-gold.png), emenda em pluma,
-//                   acabamento 3 sobre o conjunto
+//                   (assets/busto-<kit>.png), emenda em pluma, a gola por cima,
+//                   a pele do busto (braços e V, assets/busto-<kit>-pele.png)
+//                   tingida para a mediana da pele do rosto da pessoa com luz e
+//                   sombra preservadas, acabamento 3 sobre o conjunto. Com
+//                   --dois-kits sai também no dark-purple (4-<kit>.png +
+//                   uniformes.png lado a lado): o busto de um kit gera-se UMA
+//                   vez (US$0,05, do modelo fictício) e trocar depois custa zero.
 //   5  (cópia) V6, de saida-prompt/<foto>/6.png
 //   6  (cópia) duas passadas — a produção de hoje, de saida-economia/<foto>/3.png
+//   As cópias 5/6 escolhem a pasta pelo CONTEÚDO (assinatura da foto para a
+//   saida-prompt, descritor de rosto contra o 3.png para a saida-economia):
+//   duas fotos partilham o nome de pasta e as bancadas anteriores deram o
+//   sufixo _2 por outra ordem.
 //
 // ONDE ESTÁ O PESCOÇO. Sem IA, o pescoço acha-se pela geometria do alpha: a
 // cabeça é a parte mais larga no topo e o pescoço é o mínimo de largura logo
@@ -33,12 +42,14 @@
 // CORRER (a partir de FUTTY-V2/backend):
 //   node scripts/_bench/testar-recorte.js --so-um             só o Gui
 //   node scripts/_bench/testar-recorte.js --resto             as outras 6
-//   --foto <prefixo>   só a foto cujo nome começa assim
+//   --foto a,b         só as fotos cujo nome começa por um destes prefixos
+//   --dois-kits        célula 4 em dark-gold E dark-purple (+ uniformes.png)
 //   --teto 0.20        tecto de gasto (omissão US$0,20)
 //   --sem-rosto        não usa o detector de rosto (só geometria do alpha)
-//   --refazer-busto    regenera assets/busto-dark-gold.png
+//   --refazer-busto    regenera assets/busto-<kit>.png (+ -pele.png, .json)
 //
-// Custo: US$0,002 por foto (um birefnet). Nada mais paga.
+// Custo: US$0,002 por foto (um birefnet). O busto de um kit pago custa US$0,05
+// UMA vez (fica em assets/); correr de novo não paga nada por ele.
 // ═══════════════════════════════════════════════════════════════════════════════
 require('dotenv').config();
 const fs = require('fs');
@@ -46,15 +57,25 @@ const path = require('path');
 const sharp = require('sharp');
 const { supabase } = require('../../utils/db');
 const { chamarFal, emDolares } = require('../../utils/falFila');
-const { topoDaPele } = require('../../utils/entradaFigurinha');
-const { baixar, achatamento, molduraSVG, folhaDeContato, mulberry32, paraCsv } = require('./comum');
+const { topoDaPele, preprocessarQuadrado } = require('../../utils/entradaFigurinha');
+// A receita de produção, só para gerar UMA vez o busto de cada kit pago
+// (US$0,05 cada) a partir do modelo fictício da conta demo — nunca de uma
+// pessoa real, para não contaminar a cara (regra de 17-set).
+const { gerarFigurinha } = require('../../utils/geracaoFigurinha');
+const { baixar, achatamento, molduraSVG, folhaDeContato, mulberry32, paraCsv, lerKit } = require('./comum');
 
 const SAIDA = path.join(__dirname, 'saida-recorte');
 const DA_V6 = path.join(__dirname, 'saida-prompt');       // 6.png = V6
 const DAS_2P = path.join(__dirname, 'saida-economia');    // 3.png = duas passadas (produção)
 const ASSETS = path.join(__dirname, 'assets');
-const BUSTO_FONTE = path.join(__dirname, 'saida-producao', 'prova-real-2026-09-17-dark-gold.png');
-const BUSTO = path.join(ASSETS, 'busto-dark-gold.png');
+const BUSTO_FONTE_GOLD = path.join(__dirname, 'saida-producao', 'prova-real-2026-09-17-dark-gold.png');
+// O modelo fictício da conta demo: é dele que se gera o busto dos kits que
+// ainda não têm figurinha guardada (adendo b: dark-purple).
+const FOTO_MODELO = path.join(__dirname, 'estado-demo', 'foto-silhueta-original.jpg');
+const caminhoAsset = (kit, sufixo = '') => path.join(ASSETS, `busto-${kit}${sufixo}`);
+// Todos os bustos à mesma altura: o de 17-set tem 680 px, e é essa a escala
+// em que as medidas (pescoço, gola, pluma) foram afinadas.
+const ALTURA_BUSTO = 680;
 const FOTOS = path.join(__dirname, '..', '..', '..', '..', 'BANCADA-FOTOS');
 const ESTADIO = path.join(__dirname, '..', '..', '..', 'frontend', 'public', 'stadium_bg.webp');
 const MODELOS_ROSTO = path.join(__dirname, '..', '..', 'node_modules', '@vladmandic', 'face-api', 'model');
@@ -238,9 +259,46 @@ async function detectarRosto(fa, orientado) {
  * primeira linha abaixo com largura > 1,5× o pescoço. Devolve as medidas que a
  * emenda precisa (linha e largura do pescoço, centro, linha da gola).
  */
-async function garantirBusto() {
+/**
+ * Pele com regra ESTRITA — a `ehPele` de utils/entradaFigurinha.js aceita o
+ * dourado do kit (r > g > b, saturado): para a máscara de pele do busto e para
+ * a amostra do rosto exige-se ainda azul relativo (b/r > 0,42) e saturação
+ * abaixo de 0,62. Dourado (200,160,40) fica de fora; pele clara (220,170,140)
+ * e pele escura (140,90,60) entram.
+ */
+const ehPeleEstrita = (r, g, b) => {
+  if (!ehPele(r, g, b)) return false;
+  const mx = Math.max(r, g, b); const mn = Math.min(r, g, b);
+  // O que separa pele de dourado é o MATIZ, não a saturação: os realces do
+  // painel dourado (230,190,120) são tão pouco saturados como pele clara.
+  // Medido no busto: pele 18-22° (braço 193,118,81 → 19°; V 216,155,121 →
+  // 21°), dourado 36-38° (188,130,43 → 36°). Corte a 30°.
+  const matiz = 60 * (g - b) / Math.max(1, r - b); // r > g > b garantido pela ehPele
+  return matiz < 30 && (mx - mn) / mx < 0.70;
+};
+
+/**
+ * O busto de um kit, sem cabeça, com a máscara de pele (braços + V) e as
+ * medidas guardadas ao lado: assets/busto-<kit>.png, -pele.png, .json. Só se
+ * gera quando falta ou com --refazer-busto; `obterFonte()` devolve a figurinha
+ * COM cabeça (PNG com alpha) — do ficheiro de 17-set no dark-gold, de uma
+ * geração real no resto. Todas as fontes são trimadas e postas a 680 px de
+ * altura, a escala em que as medidas foram afinadas.
+ */
+async function garantirBusto(kit, obterFonte) {
   fs.mkdirSync(ASSETS, { recursive: true });
-  const fonte = await sharp(BUSTO_FONTE).ensureAlpha().png().toBuffer();
+  const BUSTO = caminhoAsset(kit, '.png'); const PELE = caminhoAsset(kit, '-pele.png'); const JSON_ = caminhoAsset(kit, '.json');
+  if (fs.existsSync(BUSTO) && fs.existsSync(PELE) && fs.existsSync(JSON_) && !tem('refazer-busto')) {
+    const medidas = JSON.parse(fs.readFileSync(JSON_, 'utf8'));
+    // A máscara lê-se pelo 1º canal, seja qual for o número de canais do PNG.
+    const { data, info } = await sharp(PELE).raw().toBuffer({ resolveWithObject: true });
+    const mascara = Buffer.alloc(info.width * info.height);
+    for (let i = 0; i < mascara.length; i += 1) mascara[i] = data[i * info.channels];
+    return { kit, buf: fs.readFileSync(BUSTO), mascara, ...medidas };
+  }
+  const fonteCrua = await obterFonte();
+  const fonte = await sharp(fonteCrua).ensureAlpha().trim({ threshold: 10 }).resize({ height: ALTURA_BUSTO }).png().toBuffer();
+  fs.writeFileSync(caminhoAsset(kit, '-fonte.png'), fonte);
   const p = await perfil(fonte);
   const { w, h, linhas } = p;
   let yPescoco = Math.round(h * 0.2);
@@ -251,29 +309,115 @@ async function garantirBusto() {
   while (yGola < h - 1 && linhas[yGola].n < largPescoco * 1.5) yGola += 1;
   const medidas = { w, h, yPescoco, largPescoco, cxPescoco, yGola, pluma: EMENDA.pluma };
 
-  if (!fs.existsSync(BUSTO) || tem('refazer-busto')) {
-    // Tudo acima da gola sai (cabeça E pescoço do modelo): alpha 0 até 2 px
-    // acima da gola, rampa de `pluma` px a partir daí. Multiplicado em JS — um
-    // composite 'multiply' de 1 canal no libvips não fez nada na 1ª corrida.
-    const alphaNovo = await sharp(fonte).extractChannel(3).raw().toBuffer();
-    for (let y = 0; y < h; y += 1) {
-      const t = Math.max(0, Math.min(1, (y - (yGola - 2)) / EMENDA.pluma));
-      if (t < 1) for (let x = 0; x < w; x += 1) alphaNovo[y * w + x] = Math.round(alphaNovo[y * w + x] * t);
-    }
-    const busto = await comAlpha(fonte, alphaNovo, w, h);
-    fs.writeFileSync(BUSTO, busto);
-    // Prova visual: o busto sobre cinza, com as linhas do pescoço e da gola.
-    const guia = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
-      <line x1="0" y1="${yPescoco}" x2="${w}" y2="${yPescoco}" stroke="#ff4d4d" stroke-width="1"/>
-      <line x1="0" y1="${yGola}" x2="${w}" y2="${yGola}" stroke="#4dff88" stroke-width="1"/>
-      <text x="4" y="${yPescoco - 4}" fill="#ff4d4d" font-size="11" font-family="Arial">pescoço ${largPescoco}px</text>
-      <text x="4" y="${yGola + 12}" fill="#4dff88" font-size="11" font-family="Arial">gola (pluma ${EMENDA.pluma}px)</text>
-    </svg>`);
-    await sharp({ create: { width: w, height: h, channels: 3, background: '#8a8a8a' } })
-      .composite([{ input: busto }, { input: guia }]).png().toFile(path.join(ASSETS, 'busto-dark-gold-prova.png'));
-    console.log(`busto: ${path.relative(process.cwd(), BUSTO)} · pescoço y=${yPescoco} (${largPescoco}px, cx ${cxPescoco.toFixed(0)}) · gola y=${yGola} · pluma ${EMENDA.pluma}px`);
+  // Tudo acima da gola sai (cabeça E pescoço do modelo): alpha 0 até 2 px
+  // acima da gola, rampa de `pluma` px a partir daí. Multiplicado em JS — um
+  // composite 'multiply' de 1 canal no libvips não fez nada na 1ª corrida.
+  const alphaNovo = await sharp(fonte).extractChannel(3).raw().toBuffer();
+  for (let y = 0; y < h; y += 1) {
+    const t = Math.max(0, Math.min(1, (y - (yGola - 2)) / EMENDA.pluma));
+    if (t < 1) for (let x = 0; x < w; x += 1) alphaNovo[y * w + x] = Math.round(alphaNovo[y * w + x] * t);
   }
-  return { buf: fs.readFileSync(BUSTO), ...medidas };
+  const busto = await comAlpha(fonte, alphaNovo, w, h);
+  fs.writeFileSync(BUSTO, busto);
+
+  // Máscara de pele do busto (braços e o V da gola): pele estrita sobre o
+  // busto já sem cabeça, limpa de salpicos (desfoque + limiar) e com borda
+  // macia de ~1,5 px para o tingimento não cortar a seco.
+  const pb = await perfil(busto);
+  const bruta = Buffer.alloc(w * h);
+  let nBruta = 0;
+  for (let i = 0; i < w * h; i += 1) {
+    if (pb.data[i * 4 + 3] > 128 && ehPeleEstrita(pb.data[i * 4], pb.data[i * 4 + 1], pb.data[i * 4 + 2])) { bruta[i] = 255; nBruta += 1; }
+  }
+  // Limiar em JS: o .threshold() do sharp sobre um raw de 1 canal devolveu
+  // zero (achado do adendo, "pele 0 px"); o desfoque de 1 canal funciona.
+  const cinza = (buf) => sharp(buf, { raw: { width: w, height: h, channels: 1 } });
+  const desfocada = await cinza(bruta).blur(1.2).raw().toBuffer();
+  const limpa = Buffer.alloc(w * h);
+  for (let i = 0; i < w * h; i += 1) limpa[i] = desfocada[i] >= 120 ? 255 : 0;
+  let mascara = await cinza(limpa).blur(1.5).raw().toBuffer();
+  if (nBruta && !mascara.some((v) => v > 128)) mascara = bruta; // rede: se a limpeza comer tudo, fica a bruta
+  await cinza(mascara).toColourspace('b-w').png().toFile(PELE);
+  fs.writeFileSync(JSON_, JSON.stringify(medidas, null, 2));
+
+  // Prova visual: o busto sobre cinza, as linhas do pescoço e da gola, e a
+  // máscara de pele a vermelho translúcido.
+  const vermelho = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < w * h; i += 1) { vermelho[i * 4] = 255; vermelho[i * 4 + 1] = 40; vermelho[i * 4 + 2] = 40; vermelho[i * 4 + 3] = Math.round(mascara[i] * 0.45); }
+  const guia = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">
+    <line x1="0" y1="${yPescoco}" x2="${w}" y2="${yPescoco}" stroke="#ff4d4d" stroke-width="1"/>
+    <line x1="0" y1="${yGola}" x2="${w}" y2="${yGola}" stroke="#4dff88" stroke-width="1"/>
+    <text x="4" y="${yPescoco - 4}" fill="#ff4d4d" font-size="11" font-family="Arial">pescoço ${largPescoco}px</text>
+    <text x="4" y="${yGola + 12}" fill="#4dff88" font-size="11" font-family="Arial">gola (pluma ${EMENDA.pluma}px) · vermelho = máscara de pele</text>
+  </svg>`);
+  await sharp({ create: { width: w, height: h, channels: 3, background: '#8a8a8a' } })
+    .composite([{ input: busto }, { input: vermelho, raw: { width: w, height: h, channels: 4 } }, { input: guia }])
+    .png().toFile(caminhoAsset(kit, '-prova.png'));
+  const pelePx = mascara.reduce((s, v) => s + (v > 128 ? 1 : 0), 0);
+  console.log(`busto ${kit}: ${path.relative(process.cwd(), BUSTO)} · ${w}x${h} · pescoço y=${yPescoco} (${largPescoco}px, cx ${cxPescoco.toFixed(0)}) · gola y=${yGola} · pele ${pelePx} px`);
+  return { kit, buf: busto, mascara, ...medidas };
+}
+
+/** A fonte do busto dark-purple: UMA geração real (receita de produção) do modelo fictício. */
+async function gerarFonteDoKit(kit, temporarios, custos) {
+  const k = lerKit(kit);
+  const quadrada = await preprocessarQuadrado(fs.readFileSync(FOTO_MODELO));
+  const fotoUrl = await subir(`tmp-recorte/busto-modelo-${kit}.jpg`, quadrada, 'image/jpeg', temporarios);
+  const t0 = Date.now();
+  const r = await gerarFigurinha({
+    fotoUrl, kitUrl: k.url, kitId: kit, etiqueta: `busto-${kit}`,
+    publicar: (nome, buf, tipo) => subir(`tmp-recorte/${nome}`, buf, tipo, temporarios),
+  });
+  custos.push({ o: `busto ${kit} (geração real)`, usd: r.custo.usd, segundos: Math.round((Date.now() - t0) / 1000) });
+  console.log(`busto ${kit}: figurinha gerada em ${Math.round((Date.now() - t0) / 1000)}s · US$${r.custo.usd.toFixed(4)} (${r.custo.chamadas} chamadas)`);
+  return r.recorteBuffer;
+}
+
+/**
+ * Tom de pele da pessoa: MEDIANA por canal dos pixels de pele estrita no rosto
+ * (a caixa do detector; sem ela, a cabeça até ao pescoço). null se houver
+ * menos de 100 amostras — não se tinge com um palpite.
+ */
+async function tomDePele(recorte, rosto, yPescoco) {
+  const p = await perfil(recorte);
+  const x0 = rosto ? Math.max(0, Math.round(rosto.x)) : 0;
+  const x1 = rosto ? Math.min(p.w, Math.round(rosto.x + rosto.w)) : p.w;
+  const y0 = rosto ? Math.max(0, Math.round(rosto.y)) : 0;
+  const y1 = rosto ? Math.min(p.h, Math.round(rosto.y + rosto.h)) : Math.min(p.h, yPescoco);
+  // Na caixa do rosto não há camisa: chega a ehPele normal (a estrita, por
+  // matiz, deixaria de fora peles mais amareladas e a mediana ficava enviesada).
+  const R = []; const G = []; const B = [];
+  for (let y = y0; y < y1; y += 1) for (let x = x0; x < x1; x += 1) {
+    const i = (y * p.w + x) * 4;
+    if (p.data[i + 3] > 200 && ehPele(p.data[i], p.data[i + 1], p.data[i + 2])) { R.push(p.data[i]); G.push(p.data[i + 1]); B.push(p.data[i + 2]); }
+  }
+  if (R.length < 100) return null;
+  const med = (a) => { a.sort((u, v) => u - v); return a[a.length >> 1]; };
+  return { r: med(R), g: med(G), b: med(B), amostras: R.length };
+}
+
+/**
+ * Tinge a pele do busto (braços e V) para o tom da pessoa PRESERVANDO luz e
+ * sombra: cada pixel de pele mantém a razão entre a sua luminância e a
+ * luminância média da pele do busto, e recebe a cor da pessoa multiplicada por
+ * essa razão — muda o matiz e a luminosidade média, não o relevo.
+ */
+async function tingirPele(busto, cor) {
+  const { w, h, mascara } = busto;
+  const p = await perfil(busto.buf);
+  const lum = (r, g, b) => 0.299 * r + 0.587 * g + 0.114 * b;
+  let soma = 0; let peso = 0;
+  for (let i = 0; i < w * h; i += 1) if (mascara[i] > 0) { soma += lum(p.data[i * 4], p.data[i * 4 + 1], p.data[i * 4 + 2]) * mascara[i]; peso += mascara[i]; }
+  const lumBusto = peso ? soma / peso : 128;
+  const out = Buffer.from(p.data);
+  for (let i = 0; i < w * h; i += 1) {
+    const m = mascara[i] / 255;
+    if (m <= 0) continue;
+    const f = lum(p.data[i * 4], p.data[i * 4 + 1], p.data[i * 4 + 2]) / Math.max(1, lumBusto);
+    const alvo = [cor.r * f, cor.g * f, cor.b * f];
+    for (let c = 0; c < 3; c += 1) out[i * 4 + c] = Math.round(Math.max(0, Math.min(255, p.data[i * 4 + c] * (1 - m) + alvo[c] * m)));
+  }
+  return sharp(out, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
 }
 
 // ─── Enquadramento de busto no canvas 1024×1536 ──────────────────────────────
@@ -445,7 +589,7 @@ const ehPele = (r, g, b) => {
  * para baixo), que esconde a pluma como um decote esconde o pescoço. A pele do
  * modelo que sobra dentro do V é recolorida com a pele média da pessoa.
  */
-async function cabecaNoBusto(recorte, neck, busto) {
+async function cabecaNoBusto(recorte, neck, busto, pele) {
   const m = await sharp(recorte).metadata();
   const esc = busto.largPescoco / Math.max(8, neck.largPescoco);
   const yCorte = Math.min(m.height, Math.round(neck.yPescoco + (busto.yGola + EMENDA.sobGola - busto.yPescoco) / esc));
@@ -496,35 +640,17 @@ async function cabecaNoBusto(recorte, neck, busto) {
   const left = Math.round(busto.cxPescoco - neck.cxPescoco * esc);
   const top = Math.round(busto.yPescoco - neck.yPescoco * esc);
 
-  // Pele média do pescoço da pessoa (já na escala do busto): as linhas entre o
-  // queixo e a pluma, só pixels de pele.
-  const pc = await perfil(cabecaEsc);
-  let sr = 0; let sg = 0; let sb = 0; let n = 0;
-  const yDe = Math.max(0, Math.round(neck.yPescoco * esc - 0.12 * cabH));
-  const yAte = Math.max(yDe + 1, cabH - EMENDA.pluma);
-  for (let y = yDe; y < yAte; y += 1) {
-    for (let x = 0; x < pc.w; x += 1) {
-      const i = (y * pc.w + x) * 4;
-      if (pc.data[i + 3] > 200 && ehPele(pc.data[i], pc.data[i + 1], pc.data[i + 2])) { sr += pc.data[i]; sg += pc.data[i + 1]; sb += pc.data[i + 2]; n += 1; }
-    }
-  }
-  const pele = n > 50 ? { r: sr / n, g: sg / n, b: sb / n } : null;
+  // Adendo a: o busto inteiro (braços e V) tingido para o tom de pele da pessoa,
+  // luz e sombra preservadas. Sem tom (pele não achada) fica o busto como está.
+  const bustoBuf = pele ? await tingirPele(busto, pele) : busto.buf;
 
-  // A GOLA por cima: o busto só da linha da gola para baixo (rampa de 4 px), com
-  // a pele do modelo dentro do V puxada 70% para a pele da pessoa.
-  const pb = await perfil(busto.buf);
+  // A GOLA por cima: o busto (já tingido) só da linha da gola para baixo,
+  // rampa de 4 px — esconde a pluma da pessoa como um decote esconde o pescoço.
+  const pb = await perfil(bustoBuf);
   const gola = Buffer.from(pb.data);
-  for (let y = 0; y < pb.h; y += 1) {
+  for (let y = 0; y < Math.min(pb.h, busto.yGola + 2); y += 1) {
     const t = Math.max(0, Math.min(1, (y - (busto.yGola - 2)) / 4));
-    for (let x = 0; x < pb.w; x += 1) {
-      const i = (y * pb.w + x) * 4;
-      if (t < 1) gola[i + 3] = Math.round(gola[i + 3] * t);
-      if (pele && y >= busto.yGola - 2 && y < busto.yGola + EMENDA.vAltura && gola[i + 3] > 0 && ehPele(gola[i], gola[i + 1], gola[i + 2])) {
-        gola[i] = Math.round(gola[i] * 0.3 + pele.r * 0.7);
-        gola[i + 1] = Math.round(gola[i + 1] * 0.3 + pele.g * 0.7);
-        gola[i + 2] = Math.round(gola[i + 2] * 0.3 + pele.b * 0.7);
-      }
-    }
+    for (let x = 0; x < pb.w; x += 1) gola[(y * pb.w + x) * 4 + 3] = Math.round(gola[(y * pb.w + x) * 4 + 3] * t);
   }
   const golaBuf = await sharp(gola, { raw: { width: pb.w, height: pb.h, channels: 4 } }).png().toBuffer();
 
@@ -536,11 +662,11 @@ async function cabecaNoBusto(recorte, neck, busto) {
   const extraDir = Math.max(0, left + cabW - busto.w);
   const conjunto = await sharp({ create: { width: busto.w + extraEsq + extraDir, height: busto.h + extra, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } })
     .composite([
-      { input: busto.buf, left: extraEsq, top: extra },
+      { input: bustoBuf, left: extraEsq, top: extra },
       { input: cabecaEsc, left: left + extraEsq, top: top + extra },
       { input: golaBuf, left: extraEsq, top: extra },
     ]).png().toBuffer();
-  return { conjunto, escala: esc, left, top, extra, extraEsq, peleRecolorida: !!pele };
+  return { conjunto, escala: esc, left, top, extra, extraEsq, tingido: !!pele };
 }
 
 // ─── O card, como o app desenha ──────────────────────────────────────────────
@@ -678,7 +804,9 @@ function nomeDoJogador(foto) {
   const teto = Number(arg('teto', '0.20'));
   let fotos = fs.readdirSync(FOTOS).filter((f) => /\.(jpe?g|png|webp)$/i.test(f)).sort();
   const soFoto = arg('foto', '');
-  if (soFoto) fotos = fotos.filter((f) => f.toLowerCase().startsWith(soFoto.toLowerCase()));
+  // --foto aceita vários prefixos separados por vírgula (adendo: "Gui,Renato").
+  const prefixos = soFoto.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  if (prefixos.length) fotos = fotos.filter((f) => prefixos.some((p) => f.toLowerCase().startsWith(p)));
   else if (tem('so-um')) fotos = fotos.filter((f) => f === FOTO_TRIAGEM);
   else if (tem('resto')) fotos = fotos.filter((f) => f !== FOTO_TRIAGEM);
   if (!fotos.length) { console.error('nenhuma foto para correr.'); process.exit(1); }
@@ -686,11 +814,22 @@ function nomeDoJogador(foto) {
   console.log('\nBANCADA "FIGURINHA GRÁTIS SEM IA" · recorte + sharp');
   console.log(`Fotos: ${fotos.length} · custo estimado: $${(fotos.length * 0.002).toFixed(3)} (um birefnet por foto) · tecto $${teto.toFixed(2)}\n`);
 
-  const busto = await garantirBusto();
   const fa = await carregarRosto();
+  const temporarios = [];
+  const custosExtra = []; // gerações reais fora do laço (bustos dos kits pagos)
+  // Adendo b: --dois-kits produz a célula 4 também no dark-purple — o busto
+  // desse kit gera-se UMA vez (US$0,05) e fica em assets/; trocar de uniforme
+  // depois disso custa zero.
+  const kits = tem('dois-kits') ? ['dark-gold', 'dark-purple'] : ['dark-gold'];
+  const bustos = {};
+  for (const kit of kits) {
+    bustos[kit] = await garantirBusto(kit, kit === 'dark-gold'
+      ? async () => fs.readFileSync(BUSTO_FONTE_GOLD)
+      : () => gerarFonteDoKit(kit, temporarios, custosExtra));
+  }
   fs.mkdirSync(SAIDA, { recursive: true });
   const ficheiroCsv = path.join(SAIDA, 'custos.csv');
-  const CABECALHO = ['foto', 'variante', 'receita', 'custo_usd', 'detalhe_custo', 's_birefnet', 'ms_rosto', 'ms_cpu_rosto', 'ms_sharp', 'achatamento', 'cabeca_cortada', 'pescoco_alpha_px', 'pescoco_rosto_px', 'parametros'];
+  const CABECALHO = ['foto', 'variante', 'receita', 'custo_usd', 'detalhe_custo', 's_birefnet', 'ms_rosto', 'ms_cpu_rosto', 'ms_sharp', 'achatamento', 'cabeca_cortada', 'pescoco_alpha_px', 'pescoco_rosto_px', 'parametros', 'kit', 'ms_total'];
   // Reload com parser de CSV a sério (campos entre aspas podem ter vírgula —
   // "sem header, tabela $0.002" partiu as colunas na 1ª corrida) e as linhas
   // das fotos desta corrida saem antes de entrar as novas: correr de novo
@@ -722,8 +861,12 @@ function nomeDoJogador(foto) {
   const linhas = fs.existsSync(ficheiroCsv)
     ? fs.readFileSync(ficheiroCsv, 'utf8').trim().split(/\r?\n/).map(deCsv).filter((l, i) => i === 0 || !nomes.includes(l[0]))
     : [CABECALHO];
-  const temporarios = [];
-  let gasto = 0;
+  // Colunas novas (adendo: kit, ms_total): um CSV antigo ganha-as vazias.
+  if (linhas[0].length < CABECALHO.length) {
+    linhas[0] = CABECALHO;
+    for (let i = 1; i < linhas.length; i += 1) while (linhas[i].length < CABECALHO.length) linhas[i].push('');
+  }
+  let gasto = custosExtra.reduce((s, c) => s + c.usd, 0);
 
   // saida-prompt: o entrada.jpg é a foto orientada → assinatura 24×24 da foto
   // crua chega (margens largas). saida-economia: o entrada.jpg e o 3.png nem
@@ -788,10 +931,12 @@ function nomeDoJogador(foto) {
       const bustoCanvas = await enquadrarBusto(recorte, neck);
       const ach = await achatamento(bustoCanvas.canvas);
       const msEnq = ms(t1);
-      const regista = (n, receita, msSharp, achat, extraParams = '') => {
+      // ms_total = o tempo de UMA figurinha desta variante, de ponta a ponta:
+      // birefnet + detector de rosto + sharp (enquadramento, acabamento, card).
+      const regista = (n, receita, msSharp, achat, extraParams = '', kit = '') => {
         linhas.push([nome, n, receita, (conv.usd ?? 0.002).toFixed(4), n === 4 ? `${conv.nota} (mesmo birefnet)` : conv.nota,
           resp.segundos.toFixed(1), infoRosto.ms, infoRosto.cpuMs, msSharp, achat.razao === null ? '' : achat.razao.toFixed(2), achat.cortada ? 'S' : 'N',
-          porAlpha.yPescoco, porRosto ? porRosto.yPescoco : '', extraParams]);
+          porAlpha.yPescoco, porRosto ? porRosto.yPescoco : '', extraParams, kit, Math.round(resp.segundos * 1000) + infoRosto.ms + msSharp]);
       };
 
       // 1 crua
@@ -814,16 +959,26 @@ function nomeDoJogador(foto) {
       regista(3, 'pintura', ms(t) + msEnq, ach, JSON.stringify(PINTURA).replace(/,/g, ';'));
       console.log(`   3 pintura    ${ms(t) + msEnq} ms`);
 
-      // 4 cabeça no busto
-      t = Date.now();
-      const cb = await cabecaNoBusto(recorte, neck, busto);
-      fs.writeFileSync(path.join(pasta, 'cabeca-no-busto.png'), cb.conjunto);
-      const conjuntoCanvas = await enquadrarBusto(cb.conjunto, { yPescoco: busto.yPescoco + cb.extra, largCabeca: busto.largPescoco * 1.6 });
-      const ach4 = await achatamento(conjuntoCanvas.canvas);
-      const pin4 = await acabamentoPintura(conjuntoCanvas.canvas);
-      fs.writeFileSync(path.join(pasta, '4.png'), await montarCard(pin4, nomeJog));
-      regista(4, 'cabeça no busto', ms(t), ach4, `escala cabeça ${cb.escala.toFixed(2)} · pluma ${EMENDA.pluma}px · pessoa até ${EMENDA.sobGola}px sob a gola · gola por cima · V recolorido ${cb.peleRecolorida ? 'sim' : 'não (pele não achada)'} · acabamento 3`);
-      console.log(`   4 cabeça     ${ms(t)} ms · escala ${cb.escala.toFixed(2)} · V recolorido ${cb.peleRecolorida ? 'sim' : 'NÃO'} · achat ${ach4.razao === null ? '—' : ach4.razao.toFixed(2)}${ach4.cortada ? ' CORTADA' : ''}`);
+      // 4 cabeça no busto — um card por kit (adendo b). A pele da pessoa
+      // amostra-se UMA vez (mediana no rosto) e tinge o busto de cada kit.
+      const tom = await tomDePele(recorte, rosto, neck.yPescoco);
+      const celulas4 = [];
+      for (const kit of kits) {
+        t = Date.now();
+        const cb = await cabecaNoBusto(recorte, neck, bustos[kit], tom);
+        fs.writeFileSync(path.join(pasta, `cabeca-no-busto-${kit}.png`), cb.conjunto);
+        const conjuntoCanvas = await enquadrarBusto(cb.conjunto, { yPescoco: bustos[kit].yPescoco + cb.extra, largCabeca: bustos[kit].largPescoco * 1.6 });
+        const ach4 = await achatamento(conjuntoCanvas.canvas);
+        const pin4 = await acabamentoPintura(conjuntoCanvas.canvas);
+        const card4 = await montarCard(pin4, nomeJog);
+        fs.writeFileSync(path.join(pasta, `4-${kit}.png`), card4);
+        if (kit === 'dark-gold') fs.writeFileSync(path.join(pasta, '4.png'), card4); // a célula 4 da folha
+        celulas4.push({ letra: `4 · ${kit}`, png: card4 });
+        regista(4, 'cabeça no busto', ms(t), ach4, `escala cabeça ${cb.escala.toFixed(2)} · pluma ${EMENDA.pluma}px · pessoa até ${EMENDA.sobGola}px sob a gola · gola por cima · pele ${tom ? `tingida (mediana ${tom.r};${tom.g};${tom.b} de ${tom.amostras} px)` : 'NÃO tingida (sem amostra)'} · acabamento 3`, kit);
+        console.log(`   4 ${kit.padEnd(12)} ${ms(t)} ms · escala ${cb.escala.toFixed(2)} · pele ${tom ? `${tom.r},${tom.g},${tom.b}` : 'NÃO tingida'} · achat ${ach4.razao === null ? '—' : ach4.razao.toFixed(2)}${ach4.cortada ? ' CORTADA' : ''}`);
+      }
+      // Os dois uniformes lado a lado: a prova de que trocar de kit custa zero.
+      if (celulas4.length > 1) await folhaDeContato(celulas4, path.join(pasta, 'uniformes.png'));
     } catch (e) {
       console.error(`   FALHOU: ${e.message.slice(0, 160)}`);
       linhas.push([nome, '', 'FALHOU', '', e.message.slice(0, 80).replace(/,/g, ';'), '', '', '', '', '', '', '', '', '']);
@@ -835,7 +990,7 @@ function nomeDoJogador(foto) {
       else console.log(`   ${n} (comparação) não existe em ${path.relative(SAIDA, origem)}`);
     }
 
-    const ROTULO = { 1: 'crua $0,002', 2: 'impressão $0,002', 3: 'pintura $0,002', 4: 'cabeça no busto $0,002', 5: 'V6 $0,112', 6: '2 passadas $0,05' };
+    const ROTULO = { 1: 'crua $0,002', 2: 'impressão $0,002', 3: 'pintura $0,002', 4: 'cabeça no busto (gold) $0,002', 5: 'V6 $0,112', 6: '2 passadas $0,05' };
     const naPasta = fs.readdirSync(pasta).filter((f) => /^[0-9]+\.png$/.test(f)).map((f) => Number(f.replace('.png', ''))).sort((a, b) => a - b);
     if (naPasta.length) {
       await folhaDeContato(
@@ -856,8 +1011,9 @@ function nomeDoJogador(foto) {
     const ls = dados.filter((l) => Number(l[1]) === n);
     if (!ls.length) continue;
     const med = (i) => ls.reduce((s, l) => s + Number(l[i]), 0) / ls.length;
-    console.log(`${String(n).padEnd(4)} ${ls[0][2].padEnd(20)} $${med(3).toFixed(4)}           ${med(5).toFixed(1)}s      ${Math.round(med(8))} ms   ${ls.filter((l) => l[10] === 'S').length}/${ls.length}       ${ls.length}`);
+    console.log(`${String(n).padEnd(4)} ${ls[0][2].padEnd(20)} $${med(3).toFixed(4)}           ${med(5).toFixed(1)}s      ${Math.round(med(8))} ms   ${ls.filter((l) => l[10] === 'S').length}/${ls.length}       ${ls.length}   · total/figurinha ${(med(15) / 1000).toFixed(1)} s`);
   }
+  for (const c of custosExtra) console.log(`extra: ${c.o} — $${c.usd.toFixed(4)} em ${c.segundos}s (uma vez; depois é asset)`);
   console.log(`\nReferências na folha: 5 = V6 ($0,112) · 6 = duas passadas ($0,05, produção)`);
   console.log(`GASTO REAL DESTA CORRIDA: $${gasto.toFixed(3)}`);
   console.log(`Folhas: ${SAIDA}\\<foto>\\folha-de-contato.png · CSV: ${ficheiroCsv}`);
