@@ -287,6 +287,8 @@ function svgAndroidForeground(v) {
   const raioFinal = raioDoF(SIZE / 2, SIZE / 2, altura / bboxH);
   return {
     svg: svg(f.defs, f.corpo),
+    altura, // a altura FINAL (já com o encolhimento, se houve) — quem monta o
+    // monochrome (só o F, sem brilho/gradiente) precisa do mesmo número.
     nota: `F a ${(altura / visivel * 100).toFixed(1)}% dos 72 dp visíveis (${(altura / SIZE * 100).toFixed(1)}% da tela de 108 dp)` +
       `${encolhido ? ' — ENCOLHIDO para caber' : ''}; vértice mais longe a ${raioFinal.toFixed(0)} px do centro, zona segura ${raioSeguro.toFixed(0)} px`,
   };
@@ -470,7 +472,19 @@ async function gerar() {
   console.log(`\n[icone] folha: ${largura}×${altura} — iOS ${IOS_PX} px (rótulo ${IOS_ROTULO} px), Android ${ANDROID_PX} px (rótulo ${ANDROID_ROTULO} px)`);
 }
 
-gerar().catch((e) => {
-  console.error('[testar-icone] falhou:', e.message);
-  process.exit(1);
-});
+// ─── Exports (bloco de aplicação reusa isto — "mesma função, não cópia") ───────
+module.exports = {
+  FRONT, SIZE, ANDROID_VISIVEL, ANDROID_SEGURA, F_ALTURA,
+  F, V, bboxW, bboxH, bcx, bcy,
+  transformF, raioDoF, superelipse, pecaF, fundoVinheta, fundoEstadio, svg,
+  svgIOS, svgAndroidBackground, svgAndroidForeground, VARIANTES,
+  mascara, androidVisivel, papelDeParede,
+  IOS_PX, ANDROID_PX, IOS_ROTULO, ANDROID_ROTULO, FONTE,
+};
+
+if (require.main === module) {
+  gerar().catch((e) => {
+    console.error('[testar-icone] falhou:', e.message);
+    process.exit(1);
+  });
+}
