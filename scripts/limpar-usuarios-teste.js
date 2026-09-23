@@ -40,7 +40,11 @@ const { supabase } = require('../utils/db');
 const { removerFicheirosPorUrl, parseUrlPublico, bucketEcaminho } = require('../utils/storage');
 const { apagarUsuario } = require('../utils/apagarUsuario');
 
-const MANTER_EMAILS = ['phferreiraborgesbackup@gmail.com', 'contatofuttyapp@gmail.com'].map((e) => e.toLowerCase());
+// LIMPEZA TOTAL (23-set, decisão do dono): a lista mudou — phferreiraborgesbackup@
+// (a conta de teste do próprio dono) sai e demo-loja@futtymock.com (o revisor
+// das lojas) entra. Registro histórico: antes disto a dupla era
+// phferreiraborgesbackup@gmail.com + contatofuttyapp@gmail.com.
+const MANTER_EMAILS = ['contatofuttyapp@gmail.com', 'demo-loja@futtymock.com'].map((e) => e.toLowerCase());
 const TAMANHO_LOTE = 200; // PostgREST/.in() em lotes — mesmo espírito do TAMANHO_PAGINA de backup-banco.js
 
 function lotes(arr, n) {

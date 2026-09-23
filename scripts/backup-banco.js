@@ -23,6 +23,10 @@ const { supabase } = require('../utils/db'); // cliente service_role já configu
 // confirmado que ainda não existem (PGRST205), a v1 do campeonato guarda tudo
 // como JSON no Storage. Junta-as aqui no dia em que a 039 for de facto
 // aplicada.
+// LIMPEZA TOTAL (23-set) — achado ao preparar o backup pré-limpeza: a lista
+// abaixo é anterior à migração 054 (Figurinha Brilhante, 22-set) e nunca foi
+// atualizada. pedidos_ativacao e brilhantes_time ficavam de fora em silêncio
+// — exatamente o aviso que o comentário do topo do arquivo pede para evitar.
 const TABELAS = [
   'users', 'teams', 'team_members', 'games', 'votes',
   'comentarios', 'comentario_anexos', 'feed_posts', 'feed_post_media', 'reacoes',
@@ -30,6 +34,7 @@ const TABELAS = [
   'rsvp_espera', 'push_subscriptions', 'campeonatos', 'campeonato_jornadas',
   'gasto_ia_diario', 'gols_jogadores', 'geracao_ia_log', 'app_config', 'user_blocks',
   'share_declarations', 'rsvp_respostas', 'user_avatar_slots',
+  'pedidos_ativacao', 'brilhantes_time',
 ];
 
 const PASTA_BACKUPS = 'C:\\Users\\phfer\\Desktop\\FUT\\BACKUPS';

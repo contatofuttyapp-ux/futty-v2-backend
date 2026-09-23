@@ -120,16 +120,41 @@ const POSTS = [
 // ---------------------------------------------------------------------------
 
 async function jaExiste() {
-  const { data } = await supabase.from('users').select('id').eq('email', EMAIL_BRUNINHO).maybeSingle();
+  // LIMPEZA TOTAL (23-set) — o sinal certo passou a ser o TIME, não a conta
+  // do Bruninho: desde a decisão do dono de manter demo-loja@futtymock.com
+  // como conta MANTER de scripts/limpar-usuarios-teste.js, ela sobrevive a
+  // uma limpeza (--times-tambem) que zera o time dela mas não a conta. "Já
+  // existe" agora quer dizer "o demo já está montado", não "a conta existe"
+  // — ver criarUsuarios() abaixo, que reaproveita a conta em vez de abortar.
+  const { data } = await supabase.from('teams').select('id').eq('slug', SLUG_TIME).maybeSingle();
   return !!data;
 }
 
 async function criarUsuarios() {
   const senhaBruninho = crypto.randomBytes(12).toString('base64url');
   const ids = {};
+  let bruninhoNovo = false;
   for (const j of JOGADORES) {
     const email = emailDe(j);
     const password = j.apelido === 'Bruninho' ? senhaBruninho : crypto.randomBytes(16).toString('base64url');
+
+    // REAPROVEITAMENTO (23-set, limpeza total) — o Bruninho (demo-loja@…) é o
+    // revisor das lojas: uma limpeza que zera o TIME dele não pode zerar a
+    // CONTA, e a figurinha/os créditos dela são dados reais, não maquete de
+    // demo. Se a conta já existe, usa o id dela e não toca no perfil (nem
+    // gera senha nova — a de LOJA/demo-senha.txt continua a ser a que vale;
+    // sobrescrevê-la aqui trocaria a senha registrada pela de uma conta que
+    // nunca foi criada de verdade). Os outros jogadores são sempre
+    // descartáveis e a limpeza já os apaga antes disto correr, mas o mesmo
+    // cuidado serve de rede caso algum sobreviva por engano.
+    // eslint-disable-next-line no-await-in-loop
+    const { data: existente } = await supabase.from('users').select('id').eq('email', email).maybeSingle();
+    if (existente) {
+      ids[j.apelido] = existente.id;
+      info(`${email} já existe — reaproveitando a conta (perfil intocado).`);
+      continue;
+    }
+
     // onboarding_completo no user_metadata: sem isto o frontend manda toda
     // navegação para /onboarding (services/inicio.js:133).
     const id = await tentar(async () => {
@@ -143,6 +168,7 @@ async function criarUsuarios() {
       return data.user.id;
     });
     ids[j.apelido] = id;
+    if (j.apelido === 'Bruninho') bruninhoNovo = true;
     // O trigger já criou a linha em public.users; o upsert garante os campos do card.
     // avatar_url = o mesmo genérico que o app mostraria (kits bucket), para a máquina
     // do sorteio e o ranking mostrarem figurinha em vez de silhueta.
@@ -164,8 +190,12 @@ async function criarUsuarios() {
     });
   }
   fs.mkdirSync(LOJA, { recursive: true });
-  fs.writeFileSync(ARQ_SENHA, `e-mail: ${EMAIL_BRUNINHO}\nsenha: ${senhaBruninho}\n`, 'utf8');
-  ok(`${JOGADORES.length} usuários criados (senha do Bruninho em LOJA/demo-senha.txt)`);
+  if (bruninhoNovo) {
+    fs.writeFileSync(ARQ_SENHA, `e-mail: ${EMAIL_BRUNINHO}\nsenha: ${senhaBruninho}\n`, 'utf8');
+  } else {
+    info(`${EMAIL_BRUNINHO} reaproveitado — LOJA/demo-senha.txt não foi tocado (a senha continua a mesma).`);
+  }
+  ok(`${JOGADORES.length} usuário(s) prontos (Bruninho ${bruninhoNovo ? 'novo' : 'reaproveitado'}).`);
   return ids;
 }
 
@@ -417,7 +447,7 @@ async function gerarFigurinha(senha) {
 
 async function criar() {
   if (await jaExiste()) {
-    aviso(`${EMAIL_BRUNINHO} já existe. Corra primeiro: node scripts/demo-loja.js --limpar`);
+    aviso(`o time ${SLUG_TIME} já existe. Corra primeiro: node scripts/demo-loja.js --limpar`);
     process.exit(1);
   }
   const ids = await criarUsuarios();
