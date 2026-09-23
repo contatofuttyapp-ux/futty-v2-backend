@@ -1,6 +1,9 @@
 // Futty v2.0 — Backend (Express + Supabase)
 // Setup do servidor: middleware, ficheiros estáticos, rotas e tratamento de erros.
-require('dotenv').config();
+// { quiet: true } (23-set): sem isto o dotenv imprime um "tip" promocional
+// próprio a cada arranque (ex.: "auth for agents [vestauth.com]") — propaganda
+// do pacote, não do nosso código. Não muda o carregamento das variáveis.
+require('dotenv').config({ quiet: true });
 
 // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): o token do proxy de imagem
 // (utils/mediaToken.js) caía para a SUPABASE_SERVICE_KEY como segredo de

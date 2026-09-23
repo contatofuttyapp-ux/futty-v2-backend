@@ -92,9 +92,17 @@ async function coletarUrlsStorage(userId) {
   const urls = [];
   const add = (u) => { if (u) urls.push(u); };
 
-  const { data: userRow } = await supabase.from('users').select('avatar_url, foto_url').eq('id', userId).maybeSingle();
+  // Sem a migração 057, foto_original_url não existe e o PostgREST recusa a
+  // query INTEIRA por uma coluna desconhecida (mesma nota do card_modo em
+  // routes/auth.js) — por isso o fallback tenta nas 2 colunas de sempre, para
+  // nunca perder avatar_url/foto_url por causa de uma coluna nova em falta.
+  let { data: userRow } = await supabase.from('users').select('avatar_url, foto_url, foto_original_url').eq('id', userId).maybeSingle();
+  if (!userRow) {
+    ({ data: userRow } = await supabase.from('users').select('avatar_url, foto_url').eq('id', userId).maybeSingle());
+  }
   add(userRow?.avatar_url);
   add(userRow?.foto_url);
+  add(userRow?.foto_original_url);
 
   // user_avatar_slots — sem migração commitada (schema desconhecido); defensivo.
   try {
@@ -103,6 +111,15 @@ async function coletarUrlsStorage(userId) {
     (slots || []).forEach((s) => add(s.avatar_url));
   } catch (e) {
     console.warn('[apagarUsuario] user_avatar_slots (leitura) indisponível:', e.message);
+  }
+
+  // user_avatar_historico — migração 057 (Rodada 19, "Minhas figurinhas"); defensivo.
+  try {
+    const { data: historico, error } = await supabase.from('user_avatar_historico').select('avatar_url').eq('user_id', userId);
+    if (error) throw new Error(error.message);
+    (historico || []).forEach((h) => add(h.avatar_url));
+  } catch (e) {
+    console.warn('[apagarUsuario] user_avatar_historico (leitura) indisponível:', e.message);
   }
 
   const { data: campeao } = await supabase.from('champion_photos').select('url').eq('user_id', userId);
@@ -195,6 +212,13 @@ async function apagarUsuario(userId) {
     if (slotsErr) throw new Error(slotsErr.message);
   } catch (e) {
     console.warn('[apagarUsuario] user_avatar_slots (delete) indisponível:', e.message);
+  }
+
+  try {
+    const { error: historicoErr } = await supabase.from('user_avatar_historico').delete().eq('user_id', userId);
+    if (historicoErr) throw new Error(historicoErr.message);
+  } catch (e) {
+    console.warn('[apagarUsuario] user_avatar_historico (delete) indisponível:', e.message);
   }
 
   const { error: delErr } = await supabase.auth.admin.deleteUser(userId);

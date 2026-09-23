@@ -19,17 +19,31 @@ const PERFIL_COLS_BASE =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 // figurinha_status/_em (migração 051) — colunas novas; ver resiliência em
 // obterPerfilResiliente() abaixo (mesmo padrão de `historico` em games.js).
-const PERFIL_COLS = `${PERFIL_COLS_BASE}, figurinha_status, figurinha_status_em`;
+const PERFIL_COLS_FIGURINHA = `${PERFIL_COLS_BASE}, figurinha_status, figurinha_status_em`;
+// foto_original_url (migração 057, Rodada 19) — "Ajustar enquadramento" (Figurinha.jsx)
+// precisa dela para saber se reabre o CropModal sobre a original ou (fail-safe,
+// sem ela) sobre o recorte atual. Camada própria de resiliência, igual à de cima.
+const PERFIL_COLS = `${PERFIL_COLS_FIGURINHA}, foto_original_url`;
 const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 
 /**
- * Lê o perfil com PERFIL_COLS (inclui figurinha_status/_em); se a migração 051
- * ainda não tiver corrido em produção, repete sem essas 2 colunas — para o
- * deploy do código nunca depender da ordem em que o Pedro corre a migração.
+ * Lê o perfil com PERFIL_COLS (figurinha_status/_em + foto_original_url); se
+ * alguma migração (051, 057) ainda não tiver corrido em produção, repete sem
+ * as colunas dela — para o deploy do código nunca depender da ordem em que o
+ * Pedro corre as migrações, nem de terem corrido as duas.
  */
 async function obterPerfilResiliente(userId) {
   const { data, error } = await supabase.from('users').select(PERFIL_COLS).eq('id', userId).maybeSingle();
   if (!error) return data;
+  if (/foto_original_url/i.test(error.message || '')) {
+    const { data: semOriginal, error: e2 } = await supabase.from('users').select(PERFIL_COLS_FIGURINHA).eq('id', userId).maybeSingle();
+    if (!e2) return semOriginal;
+    if (/figurinha_status/i.test(e2.message || '')) {
+      const { data: semNenhuma } = await supabase.from('users').select(PERFIL_COLS_BASE).eq('id', userId).maybeSingle();
+      return semNenhuma;
+    }
+    return null;
+  }
   if (/figurinha_status/i.test(error.message || '')) {
     const { data: semFigurinha } = await supabase.from('users').select(PERFIL_COLS_BASE).eq('id', userId).maybeSingle();
     return semFigurinha;
@@ -115,6 +129,7 @@ async function obterMe(user) {
       nome: perfil?.nome || null,
       avatar_url: perfil?.avatar_url || null,
       foto_url: perfil?.foto_url || null,
+      foto_original_url: perfil?.foto_original_url || null,
       nome_jogador: perfil?.nome_jogador || null,
       cor_preferida: perfil?.cor_preferida || null,
       telefone: perfil?.telefone || null,

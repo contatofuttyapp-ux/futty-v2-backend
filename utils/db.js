@@ -1,5 +1,7 @@
 // Futty v2.0 — Camada de acesso à base de dados (cliente Supabase + helpers).
-require('dotenv').config();
+// { quiet: true } (23-set): silencia os "tips" promocionais do dotenv nos
+// scripts (utils/db.js é o require mais comum entre eles) — ver server.js.
+require('dotenv').config({ quiet: true });
 
 const { createClient } = require('@supabase/supabase-js');
 const { HttpError } = require('./http');

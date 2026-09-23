@@ -36,6 +36,11 @@ const router = express.Router();
 // Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
 const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+// RODADA 19 — "Escolher outra foto" manda dois ficheiros no mesmo pedido: o
+// recorte 2:3 (campo "avatar", como sempre) e, opcional, a foto ORIGINAL
+// antes do recorte (campo "original", para "Ajustar enquadramento" mais
+// tarde). .fields() em vez de .single(): quem só manda "avatar" (Onboarding,
+// clientes antigos) continua a funcionar sem mudar nada.
 const uploadAvatarMw = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_AVATAR },
@@ -43,10 +48,11 @@ const uploadAvatarMw = multer({
     if (AVATAR_MIME[file.mimetype]) cb(null, true);
     else cb(new HttpError(400, 'Só são aceitas imagens JPEG, PNG ou WebP.'));
   },
-}).single('avatar');
+}).fields([{ name: 'avatar', maxCount: 1 }, { name: 'original', maxCount: 1 }]);
 
 // Wrapper que corre o multer, auto-orienta pelo EXIF e converte os erros dele
-// em HttpError(400).
+// em HttpError(400). Normaliza req.file (o recorte) e req.fileOriginal (a
+// original, se vier) — o resto da rota lê req.file como sempre lia.
 function receberAvatar(req, res, next) {
   uploadAvatarMw(req, res, async (err) => {
     if (err) {
@@ -56,6 +62,8 @@ function receberAvatar(req, res, next) {
       }
       return next(err); // HttpError do fileFilter ou outro
     }
+    req.file = req.files?.avatar?.[0] || null;
+    req.fileOriginal = req.files?.original?.[0] || null;
     // EXIF (build 9, achado real: selfie do iPhone girada 180°). .rotate() sem
     // argumentos lê a tag Orientation, reescreve os pixels já em pé e apaga a
     // tag — ninguém depois (NSFW, Olheiro, Storage, IA) precisa de voltar a
@@ -63,6 +71,45 @@ function receberAvatar(req, res, next) {
     // (utils/normalizarFoto.js) — isto é o cinto e suspensório: cobre
     // qualquer caminho que não passe por lá (API directa, cliente antigo).
     // ANTES de qualquer outra operação: primeira coisa a tocar no buffer.
+    if (req.file) {
+      try {
+        req.file.buffer = await sharp(req.file.buffer).rotate().toBuffer();
+      } catch {
+        return next(new HttpError(400, 'Não foi possível ler essa imagem.'));
+      }
+    }
+    if (req.fileOriginal) {
+      try {
+        req.fileOriginal.buffer = await sharp(req.fileOriginal.buffer).rotate().toBuffer();
+      } catch {
+        return next(new HttpError(400, 'Não foi possível ler a foto original.'));
+      }
+    }
+    next();
+  });
+}
+
+// RODADA 19 — PUT /api/me/avatar/recorte: um ficheiro só (campo "recorte"),
+// o resultado de reabrir o CropModal sobre a original (ou o fallback, sobre
+// o recorte atual). Mesmo teto/mesmos tipos do avatar normal.
+const uploadRecorteMw = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_AVATAR },
+  fileFilter: (req, file, cb) => {
+    if (AVATAR_MIME[file.mimetype]) cb(null, true);
+    else cb(new HttpError(400, 'Só são aceitas imagens JPEG, PNG ou WebP.'));
+  },
+}).single('recorte');
+
+function receberRecorte(req, res, next) {
+  uploadRecorteMw(req, res, async (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        const msg = err.code === 'LIMIT_FILE_SIZE' ? 'A imagem excede o limite de 5MB.' : 'Falha no upload da imagem.';
+        return next(new HttpError(400, msg));
+      }
+      return next(err);
+    }
     if (req.file) {
       try {
         req.file.buffer = await sharp(req.file.buffer).rotate().toBuffer();
@@ -293,7 +340,9 @@ router.post(
 );
 
 /**
- * POST /api/me/avatar — upload da foto de perfil (multipart, campo "avatar").
+ * POST /api/me/avatar — upload da foto de perfil (multipart, campo "avatar";
+ * opcional "original" — RODADA 19, a foto ANTES do recorte 2:3, guardada para
+ * "Ajustar enquadramento" reabrir sem perder área/qualidade).
  * Vai para o Supabase Storage (bucket "avatars", caminho
  * `public/{userId}-{carimbo}.{ext}`) e guarda o URL em users.foto_url — e o
  * sha256 dos bytes em users.foto_hash, no MESMO update. Cada foto é um objeto
@@ -310,22 +359,28 @@ router.post(
     if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "avatar").');
     const ext = AVATAR_MIME[file.mimetype];
     if (!ext) throw new HttpError(400, 'Formato de imagem não suportado.');
+    // A original (se vier) segue o mesmo formato aceite — sem campo próprio de
+    // validação: já passou pelo mesmo fileFilter do multer (AVATAR_MIME).
+    const original = req.fileOriginal;
+    const extOriginal = original ? AVATAR_MIME[original.mimetype] : null;
 
     const userId = req.user.id;
     // 1. Ficheiro recebido (multer).
-    console.log('[avatar] ficheiro recebido:', { userId, mimetype: file.mimetype, ext, size: file.size });
+    console.log('[avatar] ficheiro recebido:', { userId, mimetype: file.mimetype, ext, size: file.size, comOriginal: !!original });
 
     await ensureUserRow(req.user);
 
     // Nome POR VERSÃO (22-set): cada foto é um objeto novo. Ver a nota em
     // `caminhoFotoNovo` — caminho que muda de conteúdo é caminho que alguém,
-    // algures, serve desactualizado.
+    // algures, serve desactualizado. A original leva um caminho PRÓPRIO
+    // (sufixo "-original"), nunca confundível com o recorte.
     const caminho = caminhoFotoNovo(userId, ext);
+    const caminhoOriginal = original && extOriginal ? caminhoFotoOriginalNovo(userId, extOriginal) : null;
     // 2. Upload para o Supabase Storage (bucket "avatars"). Sem upsert: o
     // carimbo de tempo já torna o nome único, e se por absurdo colidisse, o
     // certo é falhar aqui em vez de escrever por cima do objeto de outra
     // chamada — que é precisamente o hábito que esta rodada veio tirar.
-    console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho });
+    console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho, caminhoOriginal });
     const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
       contentType: file.mimetype,
       upsert: false,
@@ -335,12 +390,26 @@ router.post(
       console.error('[avatar] erro no upload:', upErr.message);
       throw new HttpError(500, upErr.message);
     }
+    if (caminhoOriginal) {
+      const { error: upOrigErr } = await supabase.storage.from('avatars').upload(caminhoOriginal, original.buffer, {
+        contentType: original.mimetype,
+        upsert: false,
+        cacheControl: '3600',
+      });
+      // A original é um "nice to have" (Ajustar enquadramento cai no fallback
+      // sem ela) — falhar o upload dela não pode derrubar o recorte, que já
+      // está gravado no Storage e é o que o card usa.
+      if (upOrigErr) console.error('[avatar] upload da original falhou (segue sem ela):', upOrigErr.message);
+    }
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     // O ?v= já não é o que garante a actualização (o caminho é novo a cada
     // foto), mas fica: é o que distingue versões no proxy de mídia, que usa o
     // `v` na chave de cache dos derivados.
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+    const originalUrl = caminhoOriginal
+      ? `${supabase.storage.from('avatars').getPublicUrl(caminhoOriginal).data.publicUrl}?v=${Date.now()}`
+      : null;
     // URL público — deve usar o domínio do Supabase, não localhost.
     console.log('[avatar] URL público:', avatarUrl);
 
@@ -353,14 +422,15 @@ router.post(
     //    actual), preserva-se → o card continua a mostrar o avatar antigo até
     //    o utilizador gerar de novo (nunca a foto crua) — comportamento de
     //    sempre, mantido como fail-safe se a 056 ainda não tiver corrido.
-    let atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
+    let atual = await getUserById(userId, 'foto_url, foto_original_url, avatar_url, card_modo');
     if (!atual) {
-      // Sem a 056, `card_modo` não existe e o select acima falha inteiro
-      // (o PostgREST recusa a query toda por uma coluna desconhecida) — cai
-      // aqui sem ela. `ensureUserRow` já rodou: se ainda vier vazio, é
-      // mesmo a coluna que falta, não a linha.
-      atual = await getUserById(userId, 'foto_url, avatar_url');
+      // Sem a 056/057, as colunas novas não existem e o select acima falha
+      // inteiro (o PostgREST recusa a query toda por uma coluna desconhecida)
+      // — cai aqui sem elas, uma de cada vez. `ensureUserRow` já rodou: se
+      // ainda vier vazio, é mesmo coluna que falta, não a linha.
+      atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
     }
+    if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
     const temAvatarIA = !!atual?.avatar_url && atual.avatar_url !== atual.foto_url;
     const modoFoto = atual?.card_modo === 'foto';
     const novoAvatarUrl = modoFoto ? avatarUrl : (temAvatarIA ? atual.avatar_url : avatarUrl);
@@ -372,13 +442,25 @@ router.post(
     // Quem pedisse figurinha dentro dessa janela caía no reuso de slot — que
     // compara o fingerprint do slot com o `foto_hash` — e recebia a figurinha
     // velha de volta. Uma linha só fecha a janela: ou grava tudo, ou nada.
+    // foto_original_url só entra no patch quando há original nova — sem ela,
+    // uma original antiga (se houver) fica exatamente como está.
     const patchFoto = { foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_hash: sha256Hex(file.buffer) };
+    if (originalUrl) patchFoto.foto_original_url = originalUrl;
     let { error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId);
     if (updErr && /foto_hash/i.test(updErr.message || '')) {
       // Migração 048 por correr: grava o resto, avisa, e segue. O anti-abuso
       // perde um sinal; o upload não pode cair por causa disso.
       console.error('[avatar] foto_hash não existe nesta base (migração 048 por correr?) — gravo sem ele');
       delete patchFoto.foto_hash;
+      ({ error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId));
+    }
+    if (updErr && /foto_original_url/i.test(updErr.message || '')) {
+      // Migração 057 por correr: idêntico ao caso do foto_hash acima — grava
+      // o recorte, que é o que o card usa; a original fica só no Storage
+      // (órfã, mas inofensiva) até a migração correr e a próxima foto gravar
+      // o campo direito.
+      console.error('[avatar] foto_original_url não existe nesta base (migração 057 por correr?) — gravo sem ele');
+      delete patchFoto.foto_original_url;
       ({ error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId));
     }
     if (updErr) {
@@ -394,6 +476,14 @@ router.post(
     const caminhoAntigo = caminhoNoBucket(atual?.foto_url, 'avatars');
     const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
     if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'foto substituída');
+    // A original anterior só sai se esta chamada trouxe uma NOVA (senão não
+    // haveria original nenhuma sobrevivendo no card de ninguém).
+    if (originalUrl) {
+      const caminhoOriginalAntigo = caminhoNoBucket(atual?.foto_original_url, 'avatars');
+      if (caminhoOriginalAntigo && caminhoOriginalAntigo !== caminhoOriginal) {
+        await apagarAntigo(caminhoOriginalAntigo, 'original substituída');
+      }
+    }
 
     // A FIGURINHA COMUM FICA PRONTA AQUI (SPEC-FIGURINHA-3 §3): ela é a foto na
     // moldura — assim que há foto, não há nada a esperar. O 'gerando' passa a
@@ -402,7 +492,68 @@ router.post(
     // Best-effort (coluna da migração 051): nunca derruba o upload.
     marcarFigurinhaStatus(userId, 'pronta');
 
-    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto, modoFoto });
+    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto, modoFoto, comOriginal: !!originalUrl });
+    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null });
+  })
+);
+
+/**
+ * PUT /api/me/avatar/recorte — RODADA 19: "Ajustar enquadramento" regrava só
+ * o recorte 2:3 (multipart, campo "recorte"), sem tocar em foto_original_url.
+ * O CropModal (cliente) já reabriu sobre a foto original guardada — ou, sem
+ * ela (foto antiga, fail-safe), sobre o recorte atual — e manda aqui só o
+ * resultado. A TRAVA DE HASH passa a ser a do recorte novo: é ele que a
+ * geração de figurinha usa.
+ */
+router.put(
+  '/api/me/avatar/recorte',
+  requireAuth,
+  receberRecorte,
+  filtroNSFW,
+  olheiroEntrada,
+  asyncHandler(async (req, res) => {
+    const file = req.file;
+    if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "recorte").');
+    const ext = AVATAR_MIME[file.mimetype];
+    if (!ext) throw new HttpError(400, 'Formato de imagem não suportado.');
+
+    const userId = req.user.id;
+    await ensureUserRow(req.user);
+
+    let atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
+    if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
+    if (!atual?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
+
+    const caminho = caminhoFotoNovo(userId, ext);
+    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
+      contentType: file.mimetype, upsert: false, cacheControl: '3600',
+    });
+    if (upErr) throw new HttpError(500, upErr.message);
+
+    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
+    const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+    // Mesma regra do POST /api/me/avatar: reenquadrar é "uma foto nova" para
+    // efeito de quem manda no card (card_modo/temAvatarIA) — não é um jeito
+    // separado de decidir isso.
+    const temAvatarIA = !!atual.avatar_url && atual.avatar_url !== atual.foto_url;
+    const modoFoto = atual.card_modo === 'foto';
+    const novoAvatarUrl = modoFoto ? avatarUrl : (temAvatarIA ? atual.avatar_url : avatarUrl);
+
+    const patchFoto = { foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_hash: sha256Hex(file.buffer) };
+    let { error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId);
+    if (updErr && /foto_hash/i.test(updErr.message || '')) {
+      delete patchFoto.foto_hash;
+      ({ error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId));
+    }
+    if (updErr) throw new HttpError(500, updErr.message);
+
+    const caminhoAntigo = caminhoNoBucket(atual.foto_url, 'avatars');
+    const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
+    if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'recorte reajustado');
+
+    marcarFigurinhaStatus(userId, 'pronta');
+    console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
 );
@@ -493,6 +644,9 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
 // LEITURA sai sempre de `users.foto_url` / `avatar_url`, que guardam o caminho
 // completo, e por isso aceita os dois padrões sem saber a diferença.
 const caminhoFotoNovo = (userId, ext) => `public/${userId}-${Date.now()}.${ext}`;
+// RODADA 19 — sufixo "-original" para nunca colidir com o nome do recorte
+// (os dois podem nascer no MESMO milissegundo, no mesmo pedido).
+const caminhoFotoOriginalNovo = (userId, ext) => `public/${userId}-original-${Date.now()}.${ext}`;
 const caminhoFigurinhaNova = (userId, kitId) => `public/${userId}-ai-${kitId}-${Date.now()}.png`;
 
 /**
@@ -509,6 +663,45 @@ async function apagarAntigo(caminho, motivo) {
     console.log('[avatar] versão anterior apagada', { caminho, motivo });
   } catch (e) {
     console.warn('[avatar] não consegui apagar a versão anterior (fica órfã):', { caminho, motivo, erro: e.message });
+  }
+}
+
+// RODADA 19 — teto de "Minhas figurinhas" (decisão do dono, 23-set).
+const TETO_HISTORICO_FIGURINHAS = 6;
+
+/**
+ * Arquiva a figurinha que acaba de ser substituída em user_avatar_historico
+ * em vez de a apagar, e aplica o teto de 6 (apaga a mais antiga — linha +
+ * arquivo — quando passa disso). Fail-safe: sem a migração 057, cai no
+ * comportamento de sempre (apaga a antiga na hora) — nunca acumula lixo à
+ * toa só porque o Pedro ainda não correu a migração.
+ */
+async function arquivarFigurinhaAntiga(userId, kitId, avatarUrlAntigo) {
+  const { error: insErr } = await supabase
+    .from('user_avatar_historico')
+    .insert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrlAntigo, custo_cents: null });
+  if (insErr) {
+    console.warn('[avatar-ai] user_avatar_historico indisponível (migração 057 por correr?) — apago a antiga como antes:', insErr.message);
+    await apagarAntigo(caminhoNoBucket(avatarUrlAntigo, 'avatars'), `figurinha ${kitId} regerada (sem histórico)`);
+    return;
+  }
+  try {
+    const { data: linhas, error: selErr } = await supabase
+      .from('user_avatar_historico')
+      .select('id, avatar_url, criado_em')
+      .eq('user_id', userId)
+      .order('criado_em', { ascending: false });
+    if (selErr) throw new Error(selErr.message);
+    const excesso = (linhas || []).slice(TETO_HISTORICO_FIGURINHAS);
+    if (!excesso.length) return;
+    const { error: delErr } = await supabase.from('user_avatar_historico').delete().in('id', excesso.map((l) => l.id));
+    if (delErr) throw new Error(delErr.message);
+    for (const l of excesso) await apagarAntigo(caminhoNoBucket(l.avatar_url, 'avatars'), 'teto de 6 no histórico de figurinhas');
+    console.log('[avatar-ai] histórico acima do teto — removida(s)', { userId, quantas: excesso.length });
+  } catch (e) {
+    // O arquivo da antiga já está seguro (insert acima deu certo); o teto é
+    // limpeza, nunca pode derrubar a geração que acabou de ser entregue.
+    console.warn('[avatar-ai] não consegui aplicar o teto de 6 do histórico:', e.message);
   }
 }
 
@@ -981,13 +1174,15 @@ router.post(
     marcarFigurinhaStatus(userId, 'pronta');
     invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
 
-    // A figurinha anterior DESTE kit já não é apontada por ninguém (o slot e o
-    // users.avatar_url acabaram de mudar) — sai do bucket. Só agora, depois de
-    // os dois updates terem passado: se apagasse antes e o update falhasse, o
-    // utilizador ficava com um avatar_url a apontar para o nada.
+    // RODADA 19 (decisão do dono, 23-set): a figurinha anterior DESTE kit
+    // já não é apontada por ninguém (o slot e o users.avatar_url acabaram de
+    // mudar) — mas em vez de sair do bucket, vai para "Minhas figurinhas"
+    // (user_avatar_historico, migração 057). custo_cents fica null: é o custo
+    // de QUANDO ELA foi gerada, que não foi guardado antes desta rodada — só
+    // passa a existir para gerações futuras (não há como recuperar retroativo).
     const figurinhaAntiga = caminhoNoBucket(slot?.avatar_url, 'avatars');
     if (figurinhaAntiga && figurinhaAntiga !== caminho) {
-      await apagarAntigo(figurinhaAntiga, `figurinha ${kitId} regerada`);
+      await arquivarFigurinhaAntiga(userId, kitId, slot.avatar_url);
     }
 
     // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
@@ -1155,10 +1350,82 @@ router.put(
   })
 );
 
+/**
+ * GET /api/me/avatar/historico — RODADA 19: as últimas 6 figurinhas de
+ * "Minhas figurinhas" (user_avatar_historico, migração 057). Fail-safe: sem
+ * a migração, devolve lista vazia (a galeria some sozinha, sem erro na tela).
+ */
+router.get(
+  '/api/me/avatar/historico',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { data, error } = await supabase
+      .from('user_avatar_historico')
+      .select('id, kit_id, avatar_url, criado_em')
+      .eq('user_id', req.user.id)
+      .order('criado_em', { ascending: false })
+      .limit(TETO_HISTORICO_FIGURINHAS);
+    if (error) {
+      if (!ehMigracaoEmFalta(error.message)) throw new HttpError(500, error.message);
+      console.warn('[avatar/historico] user_avatar_historico indisponível (migração 057 aplicada?):', error.message);
+      return res.json({ items: [] });
+    }
+    res.json({ items: data || [] });
+  })
+);
+
+/**
+ * PUT /api/me/avatar/historico/:id — "Usar esta" numa figurinha antiga:
+ * vira avatar_url + kit_ativo, sem custo (não gera nada, não debita
+ * crédito nem pacote do time) e marca card_modo='figurinha' — a pessoa
+ * está escolhendo, de propósito, mostrar uma figurinha.
+ */
+router.put(
+  '/api/me/avatar/historico/:id',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { data: linha, error: erroLinha } = await supabase
+      .from('user_avatar_historico')
+      .select('id, kit_id, avatar_url, user_id')
+      .eq('id', req.params.id)
+      .maybeSingle();
+    if (erroLinha) {
+      if (ehMigracaoEmFalta(erroLinha.message)) throw new HttpError(400, 'Histórico de figurinhas indisponível.');
+      throw new HttpError(500, erroLinha.message);
+    }
+    if (!linha || linha.user_id !== userId) throw new HttpError(404, 'Figurinha não encontrada no seu histórico.');
+
+    await ensureUserRow(req.user);
+    const { error: updErr } = await supabase
+      .from('users')
+      .update({ avatar_url: linha.avatar_url, kit_ativo: linha.kit_id })
+      .eq('id', userId);
+    if (updErr) throw new HttpError(500, updErr.message);
+
+    // Best-effort, mesmo padrão do PUT /modo acima: escolher uma figurinha do
+    // histórico é uma escolha de card_modo tanto quanto o interruptor é.
+    try {
+      const { error: erroModo } = await supabase.from('users').update({ card_modo: 'figurinha' }).eq('id', userId);
+      if (erroModo) throw new Error(erroModo.message);
+    } catch (e) {
+      if (!ehMigracaoEmFalta(e.message)) throw e;
+      console.warn('[avatar/historico] card_modo indisponível (migração 056 aplicada?):', e.message);
+    }
+
+    invalidarSessaoDoPedido(req);
+    res.json({ avatar_url: linha.avatar_url, kit: linha.kit_id });
+  })
+);
+
 // O catálogo de kits é daqui (é esta rota que valida `ativo` antes de gerar).
 // O Gabinete precisa da mesma lista para o dono escolher o uniforme do pacote
 // do time — pendurado no router como o enviarNotificacao de routes/push.js,
 // para não haver uma segunda lista a envelhecer sozinha.
 router.KITS_IA = KITS_IA;
+// RODADA 19 — testável sem chamar a fal (custaria dinheiro de verdade): os
+// testes de user_avatar_historico chamam arquivarFigurinhaAntiga() direto.
+router.arquivarFigurinhaAntiga = arquivarFigurinhaAntiga;
+router.TETO_HISTORICO_FIGURINHAS = TETO_HISTORICO_FIGURINHAS;
 
 module.exports = router;

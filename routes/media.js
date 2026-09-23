@@ -131,11 +131,15 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
     // um GIF para WebP estático mataria a animação.
     if (TIPOS_REDIMENSIONAVEIS.has(tipoOriginal)) {
       const alvoLargura = largura || LARGURA_MAX_SEM_W;
-      // `position: attention` em vez de 'centre': o sharp escolhe a região de
-      // maior entropia, que numa foto de pessoa é a cara. Num retrato 2:3 o
-      // centro geométrico cai no peito.
+      // RODADA 19 (23-set): 'top' em vez de sharp.strategy.attention. Desde
+      // que o recorte 2:3 existe (CropModal, rosto no terço de cima "por
+      // construção" — SPEC-FIGURINHA-3 §3), o quadrado pequeno não precisa
+      // mais adivinhar onde está a cara: corta sempre do TOPO do recorte. A
+      // 'attention' (maior entropia) falhava em fotos fora do padrão — achado
+      // da bancada "Menor K churras" (corpo inteiro sentado): a região de
+      // maior entropia era o pulso/relógio, não o rosto.
       const medida = quadrado
-        ? { width: alvoLargura, height: alvoLargura, fit: 'cover', position: sharp.strategy.attention, withoutEnlargement: true }
+        ? { width: alvoLargura, height: alvoLargura, fit: 'cover', position: 'top', withoutEnlargement: true }
         : { width: alvoLargura, withoutEnlargement: true };
       buf = await sharp(original)
         .rotate() // respeita o EXIF antes de redimensionar
