@@ -10,7 +10,7 @@
 const express = require('express');
 const { optionalAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/http');
-const { obterAd } = require('../services/inicio');
+const { obterAd, obterAdsSessao } = require('../services/inicio');
 const adsStore = require('../utils/adsStore');
 
 const router = express.Router();
@@ -25,6 +25,19 @@ router.get(
   }),
 );
 
+/**
+ * GET /api/ads/sessao — os slots de TODAS as páginas de uma vez (VELOCIDADE 9).
+ * O app pede isto uma vez por sessão (ou recebe-o dentro do /api/inicio) e
+ * serve as telas a partir dele durante `validadeMs`.
+ */
+router.get(
+  '/api/ads/sessao',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    res.json(await obterAdsSessao(req.user?.id));
+  }),
+);
+
 /** POST /api/ads/evento { id, tipo:'imp'|'cli' } — medição (agregação diária, sem cookies). */
 router.post(
   '/api/ads/evento',
@@ -33,6 +46,31 @@ router.post(
     const { id, tipo } = req.body || {};
     await adsStore.registar(id, tipo === 'cli' ? 'cli' : 'imp');
     res.json({ ok: true });
+  }),
+);
+
+/**
+ * POST /api/ads/eventos { eventos: [{ id, tipo }] } — os mesmos eventos, em
+ * lote (VELOCIDADE 9). O app junta as impressões e manda-as de uma vez, por
+ * `sendBeacon`, quando a tela sai da frente — fora do caminho de pintura.
+ *
+ * Teto de 50 por lote: um beacon é de confiança limitada e isto é contagem
+ * agregada, não contabilidade — melhor recusar um lote absurdo do que deixar
+ * uma chamada escrever mil linhas.
+ */
+router.post(
+  '/api/ads/eventos',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const eventos = Array.isArray(req.body?.eventos) ? req.body.eventos.slice(0, 50) : [];
+    for (const e of eventos) {
+      if (!e?.id) continue;
+      // Em série de propósito: o adsStore agrega no MESMO documento do dia, e
+      // duas escritas em paralelo perderiam uma das contagens.
+      // eslint-disable-next-line no-await-in-loop
+      await adsStore.registar(e.id, e.tipo === 'cli' ? 'cli' : 'imp');
+    }
+    res.json({ ok: true, n: eventos.length });
   }),
 );
 

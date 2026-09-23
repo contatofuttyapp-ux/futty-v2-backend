@@ -63,14 +63,18 @@ router.get(
       ]));
     });
 
-    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ad, brilhante, pedidos_brilhante, onda2] = await Promise.all([
+    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2] = await Promise.all([
       medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
       convitesP,
       medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
       medir(res, 'votacoes', seguro(inicioService.obterVotacoesPendentes(userId))),
       medir(res, 'denuncias', seguro(inicioService.obterDesfechosDenuncias(userId))),
-      medir(res, 'ad', seguro(inicioService.obterAd('inicio', userId))),
+      // VELOCIDADE 9: vêm os slots de TODAS as páginas, não só o do Início. A
+      // conta de servidor é a mesma (uma leitura do store, uma do utilizador) e
+      // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do
+      // percurso que o dono mediu, ~500 ms cada, de Lisboa.
+      medir(res, 'ad', seguro(inicioService.obterAdsSessao(userId))),
       // O direito de gerar Brilhante vem JUNTO (SPEC-FIGURINHA-3 §7): o Início
       // mostra o cartão dourado "Você tem uma Brilhante para gerar" e dispara a
       // geração preguiçosa do pacote do time. Um pedido à parte só para isto
@@ -90,7 +94,12 @@ router.get(
     marcarFase(res, 'dados');
 
     res.json({
-      me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp, ad,
+      me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp,
+      // `ad` continua a ser o slot do Início e com a MESMA forma de antes
+      // ({ ad }) — telas e testes que já o liam não mudam. `ads` é a novidade:
+      // os slots de todas as páginas, para o app não voltar a pedir por tela.
+      ad: { ad: ads?.paginas?.inicio ?? null },
+      ads: ads || null,
       brilhante: brilhante
         ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos }
         : { fonte: null, team_id: null, kit_id: null, creditos: 0 },

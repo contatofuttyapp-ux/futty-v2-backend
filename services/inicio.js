@@ -143,7 +143,12 @@ async function obterMe(user) {
 async function obterTeams(userId) {
   const { data, error } = await supabase
     .from('team_members')
-    .select('role, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade )')
+    // VELOCIDADE 9: as quatro colunas do pacote de figurinhas entram no MESMO
+    // select (não há ida nova). É o que faltava para a Figurinha se abrir a
+    // partir do que o /api/inicio já trouxe, em vez de pedir
+    // /api/brilhantes/estado só para saber se o time tem pacote — 606 ms de
+    // Lisboa, no relatório do dono, por um botão.
+    .select('role, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio )')
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   if (error) throw new HttpError(500, error.message);
@@ -454,19 +459,28 @@ function metadeDasVezes(userId, hoje) {
   return (h >>> 0) % 2 === 0;
 }
 
-async function obterAd(pagina, userId) {
+/**
+ * O que não muda de página para página: o interruptor geral, as campanhas, a
+ * idade e o plano de quem pede. Lido UMA vez (VELOCIDADE 9) — antes, servir as
+ * cinco páginas de uma sessão fazia cinco leituras iguais à tabela `users`.
+ */
+async function contextoDoAnuncio(userId) {
   const store = await gabineteStore.ler();
-  if (store.ads_ativo === false) return { ad: null }; // interruptor geral OFF
-  if (!store.toggles || store.toggles[pagina] !== true) return { ad: null }; // página OFF
-
   let adulto = false;
   let plano = 'free';
-  if (userId) {
+  if (userId && store.ads_ativo !== false) {
     const { data: u } = await supabase.from('users').select('birthdate, plan').eq('id', userId).maybeSingle();
     adulto = ehAdulto(u && u.birthdate);
     plano = u?.plan || 'free';
   }
-  const hoje = hojeStr();
+  return { store, adulto, plano, hoje: hojeStr() };
+}
+
+/** Escolhe o anúncio de UMA página a partir do contexto já lido. */
+function escolherAd(pagina, { store, adulto, plano, hoje }, userId) {
+  if (store.ads_ativo === false) return { ad: null }; // interruptor geral OFF
+  if (!store.toggles || store.toggles[pagina] !== true) return { ad: null }; // página OFF
+
   const elegiveis = (store.campanhas || []).filter(
     (c) => Array.isArray(c.paginas) && c.paginas.includes(pagina) && campanhaAtiva(c, hoje) && podeVerCampanha(c, adulto),
   );
@@ -481,6 +495,36 @@ async function obterAd(pagina, userId) {
   };
 }
 
+async function obterAd(pagina, userId) {
+  return escolherAd(pagina, await contextoDoAnuncio(userId), userId);
+}
+
+// As páginas que têm slot. É a mesma lista dos toggles do Gabinete.
+const PAGINAS_COM_AD = ['inicio', 'resenha', 'ranking', 'figurinha', 'sorteio', 'p'];
+
+/**
+ * TODOS os slots de uma sessão numa resposta (VELOCIDADE 9).
+ *
+ * O relatório do build 28 mostrou 4 `GET /api/ads?pagina=…` (~500 ms cada, de
+ * Lisboa) + 3 `POST /api/ads/evento` num percurso de 20 segundos: 7 dos 22
+ * pedidos da sessão eram publicidade — mais do que qualquer tela. E o trabalho
+ * de servidor era ~0 ms: o custo era só a distância, repetida por tela.
+ *
+ * As campanhas não mudam no meio de uma sessão (a rotação é por minuto), por
+ * isso vêm todas juntas e o app guarda-as por alguns minutos.
+ */
+async function obterAdsSessao(userId) {
+  const contexto = await contextoDoAnuncio(userId);
+  const paginas = {};
+  for (const p of PAGINAS_COM_AD) paginas[p] = escolherAd(p, contexto, userId).ad;
+  return { paginas, validadeMs: VALIDADE_ADS_MS };
+}
+
+// Quanto tempo o app pode servir estes anúncios sem voltar a perguntar. A
+// rotação entre campanhas elegíveis é por minuto; 4 minutos mantém a conta de
+// impressões honesta sem pôr uma ida a São Paulo em cada tela.
+const VALIDADE_ADS_MS = 4 * 60 * 1000;
+
 module.exports = {
   obterMe,
   obterTeams,
@@ -492,5 +536,6 @@ module.exports = {
   obterCampeonato,
   obterRsvp,
   obterAd,
+  obterAdsSessao,
   marcarFigurinhaStatus,
 };
