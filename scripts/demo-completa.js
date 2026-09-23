@@ -835,7 +835,7 @@ async function criarPendencias(ids, time, donos) {
   const { error: e2 } = await supabase.from('team_join_requests').insert(pedidos);
   if (e2) throw new Error(`team_join_requests: ${e2.message}`);
 
-  ok('1 convite por link ativo (7 dias) + 2 pedidos de entrada à espera de aprovação');
+  ok('1 convite por link ativo (30 dias, reutilizável) + 2 pedidos de entrada à espera de aprovação');
   return convite;
 }
 
@@ -940,7 +940,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('');
   l('  TIME → PEDIDOS');
   l(`    → 2 pessoas esperando: ${CANDIDATOS.map((c) => c.apelido).join(' e ')}, com mensagem. Aprove ou recuse.`);
-  l(`    → Convite por link ativo (vale 7 dias): /convite/${convite.token}`);
+  l(`    → Convite por link ativo (vale 30 dias, reutilizável): /convite/${convite.token}`);
   l('');
   l('  GABINETE (só na conta contatofuttyapp, que é super-admin)');
   l('    → Pessoas & times → Denúncias: 1 caso na fila (post do Bigode, categoria assédio).');

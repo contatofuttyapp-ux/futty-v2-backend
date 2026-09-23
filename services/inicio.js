@@ -96,7 +96,7 @@ async function obterMe(user) {
   const userId = user.id;
   await ensureUserRow(user);
 
-  const [perfil, jogosRows, gols, voteRows, slotRows] = await Promise.all([
+  const [perfil, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows] = await Promise.all([
     obterPerfilResiliente(userId),
     supabase
       .from('game_players')
@@ -107,6 +107,11 @@ async function obterMe(user) {
     golosDoJogador(userId),
     supabase.from('votes').select('nota').eq('para_user_id', userId).then((r) => r.data),
     supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
+    // RODADA 20 — tem_figurinha (abaixo): existência basta, .limit(1). r.data
+    // vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
+    // nenhum", nunca erro (mesmo padrão de slotRows acima).
+    supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(1).then((r) => r.data),
+    supabase.from('user_avatar_historico').select('id').eq('user_id', userId).limit(1).then((r) => r.data),
   ]);
 
   const agora = Date.now();
@@ -121,6 +126,17 @@ async function obterMe(user) {
   const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
 
   const slots = (slotRows || []).map((r) => r.kit_id);
+
+  // RODADA 20 — achado da Rodada 19: kit_ativo||'dark-gold' (linha abaixo,
+  // antes desta correção) fazia toda conta nova parecer "já tem figurinha"
+  // pro frontend (Figurinha.jsx usava !!kit_ativo). tem_figurinha agora é
+  // calculado aqui, na fonte, e cobre os 3 sinais reais de "já gerou
+  // alguma": um slot pago (brilhantes_time), uma no histórico
+  // (user_avatar_historico, migração 057) ou o avatar ATUAL sendo IA
+  // pronta (avatar_url ≠ foto_url + figurinha_status 'pronta' — cobre quem
+  // gerou antes da 057 existir e nunca tem linha no histórico).
+  const avatarAtualEhIAPronta = !!perfil?.avatar_url && perfil.avatar_url !== perfil?.foto_url && perfil?.figurinha_status === 'pronta';
+  const temFigurinha = !!(brilhanteRows || []).length || !!(historicoRows || []).length || avatarAtualEhIAPronta;
 
   return {
     user: {
@@ -143,7 +159,8 @@ async function obterMe(user) {
       birthdate: perfil?.birthdate || null,
       is_adult: calcIsAdult(perfil?.birthdate),
       mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
-      kit_ativo: perfil?.kit_ativo || 'dark-gold',
+      kit_ativo: perfil?.kit_ativo || null,
+      tem_figurinha: temFigurinha,
       avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
       figurinha_status: calcFigurinhaStatus(perfil?.figurinha_status, perfil?.figurinha_status_em),
       onboarding_completo: user.user_metadata?.onboarding_completo === true,

@@ -20,7 +20,10 @@ const router = express.Router();
 
 const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
-const CONVITE_DIAS = 7;
+// RODADA 20 (23-set, decisão do dono): o link vira "de grupo" — o MESMO link
+// serve pra todo mundo, vale 30 dias (era 7, uso único), e o admin revoga
+// quando quiser (DELETE /api/teams/:slug/convites/:id, já existia).
+const CONVITE_DIAS = 30;
 
 // Escapa um valor para uso dentro da string de filtro do .or() do PostgREST.
 // Vírgula separa condições, parênteses agrupam, ponto separa
@@ -789,7 +792,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const { data: convite } = await supabase
       .from('convites')
-      .select('id, team_id, criado_por, usado_por, expires_at')
+      .select('id, team_id, criado_por, expires_at')
       .eq('token', req.params.token)
       .maybeSingle();
 
@@ -808,9 +811,12 @@ router.get(
       .eq('id', convite.criado_por)
       .maybeSingle();
 
-    let motivo = null;
-    if (convite.usado_por) motivo = 'usado';
-    else if (new Date(convite.expires_at).getTime() < Date.now()) motivo = 'expirado';
+    // RODADA 20 — 'usado' deixou de existir: o link é reutilizável, só
+    // 'expirado' (ou 'nao_encontrado', acima) barra. `usos` é best-effort
+    // (migração 058); sem ela, 0 — nunca derruba a validação do convite.
+    const motivo = new Date(convite.expires_at).getTime() < Date.now() ? 'expirado' : null;
+    const { data: usosRows } = await supabase.from('convite_usos').select('user_id').eq('convite_id', convite.id);
+    const usos = (usosRows || []).length;
 
     let jaMembro = false;
     if (req.user && team) {
@@ -825,6 +831,7 @@ router.get(
       jaMembro,
       convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
       expires_at: convite.expires_at,
+      usos,
       team: team ? { nome: team.nome, slug: team.slug, cor: team.cor } : null,
     });
   })
@@ -837,7 +844,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { data: convite } = await supabase
       .from('convites')
-      .select('id, team_id, usado_por, expires_at')
+      .select('id, team_id, expires_at')
       .eq('token', req.params.token)
       .maybeSingle();
     if (!convite) throw new HttpError(404, 'Convite não encontrado.');
@@ -859,8 +866,8 @@ router.post(
       return res.json({ jaMembro: true, team: teamResumo });
     }
 
-    // Valida o estado do convite (apenas para novos membros)
-    if (convite.usado_por) throw new HttpError(400, 'Este convite já foi utilizado.');
+    // Valida o estado do convite (apenas para novos membros). RODADA 20 — o
+    // link é reutilizável: só a validade importa, não se já foi usado antes.
     if (new Date(convite.expires_at).getTime() < Date.now()) {
       throw new HttpError(400, 'Este convite expirou.');
     }
@@ -877,8 +884,15 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    // Marca o convite como usado
-    await supabase.from('convites').update({ usado_por: req.user.id }).eq('id', convite.id);
+    // RODADA 20 — regista o uso em vez de marcar o convite como consumido
+    // (migração 058): o link continua válido para a próxima pessoa. Fail-safe
+    // de propósito: tabela ausente ou 23505 (mesma pessoa aceitando de novo,
+    // corrida) nunca podem derrubar uma entrada que já valeu (o INSERT em
+    // team_members acima já commitou).
+    const { error: usoError } = await supabase.from('convite_usos').insert({ convite_id: convite.id, user_id: req.user.id });
+    if (usoError && usoError.code !== '23505') {
+      console.warn('[convite] convite_usos indisponível (migração 058 aplicada?):', usoError.message);
+    }
 
     res.status(201).json({ jaMembro: false, team: teamResumo });
   })
@@ -1076,12 +1090,13 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os convites.');
 
+    // RODADA 20 — sem o .is('usado_por', null): o link reutilizável continua
+    // "ativo" mesmo depois de usado; só a validade (expires_at) tira da lista.
     const nowIso = new Date().toISOString();
     const { data: convites, error } = await supabase
       .from('convites')
       .select('id, token, created_at, expires_at, criado_por')
       .eq('team_id', team.id)
-      .is('usado_por', null)
       .gt('expires_at', nowIso)
       .order('created_at', { ascending: false });
     if (error) throw new HttpError(500, error.message);
@@ -1094,12 +1109,22 @@ router.get(
       for (const u of us || []) nomeMap[u.id] = u.nome_jogador || u.nome || 'Jogador';
     }
 
+    // "N entraram por este link" — uma query só (in convite_id), contada em
+    // memória. Best-effort (migração 058): sem ela, todos ficam em 0.
+    const conviteIds = (convites || []).map((c) => c.id);
+    const usosMap = {};
+    if (conviteIds.length) {
+      const { data: usos } = await supabase.from('convite_usos').select('convite_id').in('convite_id', conviteIds);
+      for (const u of usos || []) usosMap[u.convite_id] = (usosMap[u.convite_id] || 0) + 1;
+    }
+
     const lista = (convites || []).map((c) => ({
       id: c.id,
       token: c.token,
       criado_por_nome: c.criado_por ? nomeMap[c.criado_por] || null : null,
       created_at: c.created_at,
       expires_at: c.expires_at,
+      usos: usosMap[c.id] || 0,
     }));
     res.json({ convites: lista });
   })

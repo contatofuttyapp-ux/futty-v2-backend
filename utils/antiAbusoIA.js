@@ -77,8 +77,24 @@ async function diagnosticar() {
     const total = idsNovos.length;
     if (!total) return 'INCONCLUSIVO — sem contas novas nas últimas 24h.';
 
-    const { data: comConvite } = await supabase.from('convites').select('usado_por').in('usado_por', idsNovos);
-    const pctConvite = Math.round(((comConvite?.length || 0) / total) * 100);
+    // RODADA 20 — convite virou reutilizável (migração 058): quem entrou por
+    // convite agora está em convite_usos, não em convites.usado_por (que só
+    // guarda o legado, de antes da mudança). A pergunta é "entrou por
+    // qualquer um dos dois caminhos" — união dos ids, sem contar duas vezes.
+    // Isolado num try próprio: um tropeço aqui não pode derrubar o resto do
+    // diagnóstico (ataque por IP/hash), que não depende de convite nenhum.
+    let idsPorConvite = new Set();
+    try {
+      const [{ data: usos }, { data: comConviteLegado }] = await Promise.all([
+        supabase.from('convite_usos').select('user_id').in('user_id', idsNovos),
+        supabase.from('convites').select('usado_por').in('usado_por', idsNovos),
+      ]);
+      (usos || []).forEach((u) => idsPorConvite.add(u.user_id));
+      (comConviteLegado || []).forEach((c) => { if (c.usado_por) idsPorConvite.add(c.usado_por); });
+    } catch {
+      /* fail-safe (migração 058 por aplicar?) — pctConvite fica 0 */
+    }
+    const pctConvite = Math.round((idsPorConvite.size / total) * 100);
 
     const { data: logs1h } = await supabase.from('geracao_ia_log').select('ip').gte('created_at', desde1h);
     const ips = (logs1h || []).map((l) => l.ip).filter(Boolean);
