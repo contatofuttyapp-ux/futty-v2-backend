@@ -26,7 +26,7 @@ const {
 } = require('../utils/geracaoFigurinha');
 // Quem pode gerar uma Brilhante (SPEC-FIGURINHA-3, §5). Desde 22-set toda
 // geração nasce paga: crédito comprado/presenteado ou pacote do time.
-const { temDireito, debitar } = require('../utils/direitoBrilhante');
+const { temDireito, debitar, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
 // que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
@@ -178,7 +178,7 @@ router.patch(
         const perfil = await getUserById(req.user.id, 'avatar_url, foto_url, is_super_admin');
         const temBrilhante = !!perfil?.avatar_url && perfil.avatar_url !== perfil.foto_url;
         if (!perfil?.is_super_admin && !temBrilhante) {
-          throw new HttpError(403, 'Os 6 fundos vêm com a Figurinha Brilhante.', 'SEM_BRILHANTE');
+          throw new HttpError(403, 'Os 6 fundos vêm com a figurinha.', 'SEM_BRILHANTE');
         }
       }
       patch.fundo_figurinha = v;
@@ -345,13 +345,26 @@ router.post(
     console.log('[avatar] URL público:', avatarUrl);
 
     // 3. UPDATE na tabela users. foto_url = a nova foto (fonte da geração IA).
-    //    avatar_url (o que o card mostra) SÓ é sobrescrito se ainda NÃO houver avatar
-    //    IA; se já houver (avatar_url ≠ foto_url actual), preserva-se → o card continua
-    //    a mostrar o avatar antigo até o utilizador gerar de novo (nunca a foto crua).
-    const atual = await getUserById(userId, 'foto_url, avatar_url');
+    //    avatar_url (o que o card mostra): no modo 'foto' (Rodada 18,
+    //    users.card_modo, migração 056) segue sempre a foto nova, mesmo
+    //    havendo figurinha — é a escolha explícita da pessoa. Nos demais
+    //    casos (modo 'figurinha' ou ainda sem escolha) SÓ é sobrescrito se
+    //    ainda NÃO houver avatar IA; se já houver (avatar_url ≠ foto_url
+    //    actual), preserva-se → o card continua a mostrar o avatar antigo até
+    //    o utilizador gerar de novo (nunca a foto crua) — comportamento de
+    //    sempre, mantido como fail-safe se a 056 ainda não tiver corrido.
+    let atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
+    if (!atual) {
+      // Sem a 056, `card_modo` não existe e o select acima falha inteiro
+      // (o PostgREST recusa a query toda por uma coluna desconhecida) — cai
+      // aqui sem ela. `ensureUserRow` já rodou: se ainda vier vazio, é
+      // mesmo a coluna que falta, não a linha.
+      atual = await getUserById(userId, 'foto_url, avatar_url');
+    }
     const temAvatarIA = !!atual?.avatar_url && atual.avatar_url !== atual.foto_url;
-    const novoAvatarUrl = temAvatarIA ? atual.avatar_url : avatarUrl;
-    console.log('[avatar] UPDATE users:', { userId, temAvatarIA });
+    const modoFoto = atual?.card_modo === 'foto';
+    const novoAvatarUrl = modoFoto ? avatarUrl : (temAvatarIA ? atual.avatar_url : avatarUrl);
+    console.log('[avatar] UPDATE users:', { userId, temAvatarIA, modoFoto });
 
     // O HASH VAI NO MESMO UPDATE que o URL (22-set). Antes era gravado a
     // seguir, num update próprio, e isso abria uma janela de milissegundos em
@@ -389,7 +402,7 @@ router.post(
     // Best-effort (coluna da migração 051): nunca derruba o upload.
     marcarFigurinhaStatus(userId, 'pronta');
 
-    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA });
+    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto, modoFoto });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
 );
@@ -625,11 +638,11 @@ router.post(
 
     // Daqui para baixo vai custar dinheiro de verdade: sem direito, para aqui.
     // (SPEC-FIGURINHA-3 §5. A mensagem é digna e diz o caminho — a pessoa não
-    // fez nada de errado, só ainda não tem Brilhante.)
+    // fez nada de errado, só ainda não tem a figurinha.)
     if (!direitoUsado.fonte) {
       throw new HttpError(
         403,
-        'A Figurinha Brilhante vem do pacote do time ou da Minha Brilhante. Peça a ativação na aba Brilhantes.',
+        'Sua figurinha vem do pacote do time ou da Minha Figurinha. Peça a ativação na aba Figurinhas.',
         'SEM_DIREITO',
       );
     }
@@ -1062,6 +1075,83 @@ router.put(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ avatar_url: slot.avatar_url, kit: kitId });
+  })
+);
+
+/**
+ * PUT /api/me/avatar/modo { modo: 'foto' | 'figurinha' } — Rodada 18: quem
+ * tem figurinha (IA) escolhe o que o card mostra. 'foto' põe avatar_url =
+ * foto_url (a figurinha continua no slot, nada é apagado); 'figurinha' repõe
+ * o slot do kit ativo (ou outro já gerado, se o ativo não tiver um). Só quem
+ * tem pelo menos um slot pode escolher 'figurinha'. A escolha fica em
+ * users.card_modo (migração 056, fail-safe) para sobreviver à próxima troca
+ * de foto — ver o `modoFoto` em POST /api/me/avatar, acima.
+ */
+router.put(
+  '/api/me/avatar/modo',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const modo = req.body?.modo;
+    if (modo !== 'foto' && modo !== 'figurinha') {
+      throw new HttpError(400, 'modo precisa ser "foto" ou "figurinha".', 'MODO_INVALIDO');
+    }
+
+    const userId = req.user.id;
+    const perfil = await getUserById(userId, 'foto_url, avatar_url, kit_ativo');
+    if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
+
+    let novoAvatarUrl;
+    if (modo === 'foto') {
+      novoAvatarUrl = perfil.foto_url;
+    } else {
+      // O slot do kit ativo primeiro; se não houver (kit_ativo nulo, ou sem
+      // slot gravado para ele), qualquer outro slot já gerado.
+      // user_avatar_slots não tem carimbo de tempo (tabela sem migração
+      // commitada — nota na 052), então "o mais recente" aqui é best-effort:
+      // sem um kit ativo com slot, pegamos QUALQUER slot da pessoa, não
+      // necessariamente o último gerado.
+      let slotUrl = null;
+      if (perfil.kit_ativo) {
+        const { data: slotAtivo, error: erroSlot } = await supabase
+          .from('user_avatar_slots')
+          .select('avatar_url')
+          .eq('user_id', userId)
+          .eq('kit_id', perfil.kit_ativo)
+          .maybeSingle();
+        if (erroSlot) throw new HttpError(500, erroSlot.message);
+        slotUrl = slotAtivo?.avatar_url || null;
+      }
+      if (!slotUrl) {
+        const { data: outroSlot, error: erroOutro } = await supabase
+          .from('user_avatar_slots')
+          .select('avatar_url')
+          .eq('user_id', userId)
+          .limit(1)
+          .maybeSingle();
+        if (erroOutro) throw new HttpError(500, erroOutro.message);
+        slotUrl = outroSlot?.avatar_url || null;
+      }
+      if (!slotUrl) throw new HttpError(400, 'Você ainda não tem uma figurinha gerada.', 'SEM_SLOT');
+      novoAvatarUrl = slotUrl;
+    }
+
+    await ensureUserRow(req.user);
+    const { error: erroAvatar } = await supabase.from('users').update({ avatar_url: novoAvatarUrl }).eq('id', userId);
+    if (erroAvatar) throw new HttpError(500, erroAvatar.message);
+
+    // card_modo é best-effort (migração 056): a troca do card já valeu acima
+    // mesmo que isto falhe — só a persistência para a PRÓXIMA foto se perde
+    // (POST /api/me/avatar cai no comportamento antigo sem ela).
+    try {
+      const { error: erroModo } = await supabase.from('users').update({ card_modo: modo }).eq('id', userId);
+      if (erroModo) throw new Error(erroModo.message);
+    } catch (e) {
+      if (!ehMigracaoEmFalta(e.message)) throw e;
+      console.warn('[avatar/modo] card_modo indisponível (migração 056 aplicada?):', e.message);
+    }
+
+    invalidarSessaoDoPedido(req);
+    res.json({ avatar_url: novoAvatarUrl, modo });
   })
 );
 

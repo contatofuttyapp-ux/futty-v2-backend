@@ -327,7 +327,7 @@ router.get(
 // ═══════════════════════════════════════════════════════════════════════════
 
 const KITS_DISPONIVEIS = Object.entries(KITS_IA || {}).filter(([, k]) => k?.ativo).map(([id]) => id);
-const PRODUTO_LABEL = { pacote: 'Pacote do time', manto: 'Manto próprio', minha: 'Minha Brilhante' };
+const PRODUTO_LABEL = { pacote: 'Pacote do time', manto: 'Manto próprio', minha: 'Minha Figurinha' };
 
 /** Mapa id → linha, para juntar pedidos a pessoas/times sem embeds do PostgREST. */
 function porId(linhas) {
@@ -501,8 +501,8 @@ router.post(
       const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
       const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
       enviarNotificacao(ids, {
-        title: 'Sua Figurinha Brilhante foi liberada ✨',
-        body: `O ${time.nome} ativou as Brilhantes. Abra e gere a sua.`,
+        title: 'Sua figurinha foi liberada ✨',
+        body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`,
         url: '/figurinha',
       });
 
@@ -518,7 +518,7 @@ router.post(
 
 /**
  * POST /api/super/gabinete/brilhantes/creditos { userId, quantidade } — soma
- * créditos à pessoa (a "Minha Brilhante" dá 2), resolve o pedido 'minha'
+ * créditos à pessoa (a "Minha Figurinha" dá 2), resolve o pedido 'minha'
  * pendente dela e avisa.
  */
 router.post(
@@ -548,7 +548,7 @@ router.post(
       await resolverPedidos({ user_id: userId, produto: 'minha' });
 
       enviarNotificacao([userId], {
-        title: 'Sua Figurinha Brilhante foi liberada ✨',
+        title: 'Sua figurinha foi liberada ✨',
         body: novo === 1 ? 'Você tem 1 geração. Abra e faça a sua.' : `Você tem ${novo} gerações. Abra e faça a sua.`,
         url: '/figurinha',
       });
