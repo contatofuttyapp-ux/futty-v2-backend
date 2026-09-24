@@ -111,49 +111,49 @@ test('o time manda à frente do crédito — o direito do time é grátis e tem 
   assert.equal(d.opcoes[1].fonte, 'credito');
 });
 
-// ─── 2B. PACOTE COM SALDO (RODADA 21, migração 059) ──────────────────────────
-// O pacote passou a dar 3 gerações por jogador (era 1): `geracoes` conta
+// ─── 2B. PACOTE COM SALDO (RODADAS 21/22, migração 059) ──────────────────────
+// O pacote passou a dar 5 gerações por jogador (era 1): `geracoes` conta
 // quantas essa pessoa já usou NESTE time, e o direito só acaba quando bate no
 // `teams.brilhante_por_jogador`.
-test('pacote com 2 de 3 gerações usadas → ainda tem direito, restantes=1', async () => {
+test('pacote com 4 de 5 gerações usadas → ainda tem direito, restantes=1', async () => {
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
     if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
     }
     if (tabela === 'brilhantes_time') {
-      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 2 });
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 4 });
     }
     return semErro(null);
   });
   const d = await mod.temDireito(PESSOA);
   assert.equal(d.fonte, 'time');
-  assert.equal(d.restantes, 1, 'usou 2 de 3 — resta 1');
+  assert.equal(d.restantes, 1, 'usou 4 de 5 — resta 1');
 });
 
-test('pacote com as 3 gerações usadas → sem direito (a 4ª é recusada)', async () => {
+test('pacote com as 5 gerações usadas → sem direito (a 6ª é recusada)', async () => {
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
     if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
     }
     if (tabela === 'brilhantes_time') {
-      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 3 });
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 5 });
     }
     return semErro(null);
   });
   const d = await mod.temDireito(PESSOA);
-  assert.equal(d.fonte, null, 'as 3 gerações do pacote já foram usadas — nada de uma 4ª');
+  assert.equal(d.fonte, null, 'as 5 gerações do pacote já foram usadas — nada de uma 6ª');
   assert.equal(d.restantes, 0);
 });
 
-test('refazer (2ª/3ª geração) não esbarra no tecto de 25 JOGADORES — só um jogador novo esbarra', async () => {
+test('refazer (2ª a 5ª geração) não esbarra no tecto de 25 JOGADORES — só um jogador novo esbarra', async () => {
   // Time já tem 25 jogadores (tecto batido), mas a pessoa já é UM DELES (só
-  // usou 1 das 3) — refazer não é "mais um jogador", é a mesma vaga de novo.
+  // usou 1 das 5) — refazer não é "mais um jogador", é a mesma vaga de novo.
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
     if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
     }
     if (tabela === 'brilhantes_time') {
       return estado.count ? semErro(null, { count: 25 }) : semErro({ user_id: PESSOA, geracoes: 1 });
@@ -162,7 +162,7 @@ test('refazer (2ª/3ª geração) não esbarra no tecto de 25 JOGADORES — só 
   });
   const d = await mod.temDireito(PESSOA);
   assert.equal(d.fonte, 'time', 'time cheio não pode travar quem já está dentro dele');
-  assert.equal(d.restantes, 2);
+  assert.equal(d.restantes, 4);
 });
 
 test('migração 059 (coluna geracoes) ainda não rodou → comportamento antigo: 1 linha = já usou a única que se sabia dar', async () => {

@@ -391,17 +391,47 @@ test('GET /api/brilhantes/estado.direito.restantes bate com o saldo do pacote do
     return t.skip('migração 059 (brilhantes_time.geracoes) ainda não aplicada');
   }
   // O membro (do time deste arquivo, pacote no KIT_TIME) ainda não gerou nada
-  // neste bloco — 3 de 3 restantes.
+  // neste bloco — 5 de 5 restantes (RODADA 22: o DEFAULT da 059 é 5).
   await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
   const r0 = await pedir('GET', '/api/brilhantes/estado', { token: contas.membro.token });
   assert.equal(r0.json.direito.fonte, 'time');
-  assert.equal(r0.json.direito.restantes, 3, 'pacote novo: 3 de 3 restantes (migração 059)');
+  assert.equal(r0.json.direito.restantes, 5, 'pacote novo: 5 de 5 restantes (DEFAULT 5 da migração 059 aplicado no banco?)');
 
   await supabase.from('brilhantes_time').upsert({
-    team_id: teamId, user_id: contas.membro.id, kit_id: KIT_TIME, avatar_url: 'https://exemplo.invalid/r21.png', geracoes: 2,
+    team_id: teamId, user_id: contas.membro.id, kit_id: KIT_TIME, avatar_url: 'https://exemplo.invalid/r21.png', geracoes: 4,
   }, { onConflict: 'team_id,user_id' });
   const r2 = await pedir('GET', '/api/brilhantes/estado', { token: contas.membro.token });
-  assert.equal(r2.json.direito.restantes, 1, 'usou 2 de 3 — resta 1, e é o banco que diz isso, não a tela');
+  assert.equal(r2.json.direito.restantes, 1, 'usou 4 de 5 — resta 1, e é o banco que diz isso, não a tela');
+
+  await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
+});
+
+// ─── 6D. CINCO GERAÇÕES, A 6ª RECUSADA — no banco REAL (RODADA 22) ───────────
+// Sem a fal: usa o mesmo temDireito()/debitar() que POST /api/me/avatar/ai
+// chama, contra a coluna de verdade. Prova o ciclo inteiro do pacote: cada
+// geração debita 1, o contador desce de 5 a 1, e a 6ª não tem direito.
+test('pacote de 5: cinco gerações debitam e a 6ª é recusada (banco real)', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  const sonda = await supabase.from('brilhantes_time').select('geracoes').limit(1);
+  if (sonda.error?.code === '42703' || sonda.error?.code === 'PGRST204') {
+    return t.skip('migração 059 (brilhantes_time.geracoes) ainda não aplicada');
+  }
+  const { temDireito, debitar } = require('../utils/direitoBrilhante');
+  await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
+
+  for (let i = 1; i <= 5; i += 1) {
+    const d = await temDireito(contas.membro.id);
+    assert.equal(d.fonte, 'time', `geração ${i}: devia ter direito pelo pacote`);
+    assert.equal(d.restantes, 6 - i, `geração ${i}: o contador devia dizer ${6 - i} restante(s)`);
+    const ok = await debitar(d, { userId: contas.membro.id, kitId: KIT_TIME, avatarUrl: `https://exemplo.invalid/r22-${i}.png`, custoCents: 11 });
+    assert.equal(ok, true, `o débito da geração ${i} devia ter gravado`);
+  }
+
+  const sexta = await temDireito(contas.membro.id);
+  assert.equal(sexta.fonte, null, 'a 6ª geração não tem direito — as 5 do pacote foram usadas');
+  assert.equal(sexta.restantes, 0);
+  const { data: linha } = await supabase.from('brilhantes_time').select('geracoes').eq('team_id', teamId).eq('user_id', contas.membro.id).maybeSingle();
+  assert.equal(linha.geracoes, 5, 'o banco guarda 5 — bate com o que o contador contou');
 
   await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
 });

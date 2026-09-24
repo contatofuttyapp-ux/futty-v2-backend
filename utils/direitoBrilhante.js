@@ -7,7 +7,7 @@
 //      21, uma vez na vida). O uniforme é à escolha entre os 5.
 //   2. TIME     é membro de um time com `teams.brilhante_ativo` e ainda tem
 //      geração no pacote: sem linha em `brilhantes_time` para
-//      (team_id, user_id) OU `geracoes < teams.brilhante_por_jogador` (3,
+//      (team_id, user_id) OU `geracoes < teams.brilhante_por_jogador` (5,
 //      migração 059), dentro de `teams.brilhante_limite` (25 jogadores). O
 //      uniforme é o do time (`teams.brilhante_kit`), fixado pelo dono.
 //
@@ -153,7 +153,7 @@ async function temDireito(userId) {
 async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
   try {
     if (direito?.fonte === 'time') {
-      // Rodada 21 — o pacote passou a dar 3 gerações por jogador, não 1:
+      // Rodadas 21/22 — o pacote passou a dar 5 gerações por jogador, não 1:
       // `geracoes` conta quantas essa pessoa já usou NESTE time, e o upsert
       // tem de a SOMAR, não substituir. Lê-e-escreve, mesmo padrão do crédito
       // abaixo — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
