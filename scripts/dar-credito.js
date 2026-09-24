@@ -5,7 +5,7 @@
 // a conta demo das lojas (2 créditos, para o revisor ver o produto completo),
 // um pedido que chegou em `pedidos_ativacao`, ou a própria bancada.
 //
-//   node scripts/dar-credito.js demo-loja@futtymock.com          +1 crédito
+//   node scripts/dar-credito.js demo-loja@futtymock.com          +10 créditos
 //   node scripts/dar-credito.js demo-loja@futtymock.com 2        +2 créditos
 //   node scripts/dar-credito.js --ver demo-loja@futtymock.com    só mostra
 //   node scripts/dar-credito.js --time <slug> --kit dark-gold    ativa o pacote
@@ -72,7 +72,8 @@ async function mostrar(email) {
   const antes = await mostrar(email);
   if (tem('ver')) return;
 
-  const quantos = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) || 1);
+  // Rodada 21 (24-set): padrão subiu de 1 para 10 — o mesmo que "Minha Figurinha" dá.
+  const quantos = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) || 10);
   const novo = (Number(antes.brilhante_creditos) || 0) + quantos;
   const { error } = await supabase.from('users').update({ brilhante_creditos: novo }).eq('id', antes.id);
   if (error) { console.error('não consegui dar o crédito (migração 054 aplicada?):', error.message); process.exit(1); }

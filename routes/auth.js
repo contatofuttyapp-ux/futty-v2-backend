@@ -667,11 +667,13 @@ async function apagarAntigo(caminho, motivo) {
 }
 
 // RODADA 19 — teto de "Minhas figurinhas" (decisão do dono, 23-set).
-const TETO_HISTORICO_FIGURINHAS = 6;
+// RODADA 21 (24-set) — subiu de 6 para 10: gerações mais generosas enchiam o
+// histórico mais depressa (Minha Figurinha sozinha já dá 10).
+const TETO_HISTORICO_FIGURINHAS = 10;
 
 /**
  * Arquiva a figurinha que acaba de ser substituída em user_avatar_historico
- * em vez de a apagar, e aplica o teto de 6 (apaga a mais antiga — linha +
+ * em vez de a apagar, e aplica o teto (apaga a mais antiga — linha +
  * arquivo — quando passa disso). Fail-safe: sem a migração 057, cai no
  * comportamento de sempre (apaga a antiga na hora) — nunca acumula lixo à
  * toa só porque o Pedro ainda não correu a migração.
@@ -696,12 +698,12 @@ async function arquivarFigurinhaAntiga(userId, kitId, avatarUrlAntigo) {
     if (!excesso.length) return;
     const { error: delErr } = await supabase.from('user_avatar_historico').delete().in('id', excesso.map((l) => l.id));
     if (delErr) throw new Error(delErr.message);
-    for (const l of excesso) await apagarAntigo(caminhoNoBucket(l.avatar_url, 'avatars'), 'teto de 6 no histórico de figurinhas');
+    for (const l of excesso) await apagarAntigo(caminhoNoBucket(l.avatar_url, 'avatars'), 'teto do histórico de figurinhas');
     console.log('[avatar-ai] histórico acima do teto — removida(s)', { userId, quantas: excesso.length });
   } catch (e) {
     // O arquivo da antiga já está seguro (insert acima deu certo); o teto é
     // limpeza, nunca pode derrubar a geração que acabou de ser entregue.
-    console.warn('[avatar-ai] não consegui aplicar o teto de 6 do histórico:', e.message);
+    console.warn('[avatar-ai] não consegui aplicar o teto do histórico:', e.message);
   }
 }
 
@@ -1233,8 +1235,9 @@ router.post(
 );
 
 /**
- * PUT /api/me/kit — veste um kit JÁ GERADO (slot existente). Não gera nada.
- * 200 { avatar_url, kit } se houver slot; 409 { precisa_gerar: true, kit } se não.
+ * PUT /api/me/kit — veste um kit JÁ GERADO (slot, ou histórico se o slot não
+ * sobreviveu). Não gera nada, não custa direito.
+ * 200 { avatar_url, kit } se achou uma figurinha guardada; 409 { precisa_gerar: true, kit } se não.
  */
 router.put(
   '/api/me/kit',
@@ -1259,17 +1262,42 @@ router.put(
       .eq('kit_id', kitId)
       .maybeSingle();
 
-    // Sem slot → o cliente tem de gerar primeiro (gasta quota). 409 ≠ erro: é um estado.
-    if (!slot?.avatar_url) return res.status(409).json({ precisa_gerar: true, kit: kitId });
+    // RODADA 21 — "uniformes guardados": o slot é a fonte normal (guarda a
+    // ÚLTIMA versão de cada kit e nunca é apagado, só substituído quando o
+    // MESMO kit é regerado). Ainda assim, sem slot, olha para o histórico
+    // (user_avatar_historico) antes de mandar gerar — mesma rede de segurança
+    // do PUT /api/me/avatar/historico/:id, para uma versão antiga desse kit
+    // nunca custar uma geração nova só porque o slot dela não sobreviveu.
+    let avatarUrl = slot?.avatar_url || null;
+    if (!avatarUrl) {
+      try {
+        const { data: antiga, error: erroHist } = await supabase
+          .from('user_avatar_historico')
+          .select('avatar_url')
+          .eq('user_id', userId)
+          .eq('kit_id', kitId)
+          .order('criado_em', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (erroHist) throw new Error(erroHist.message);
+        avatarUrl = antiga?.avatar_url || null;
+      } catch (e) {
+        if (!ehMigracaoEmFalta(e.message)) throw new HttpError(500, e.message);
+        console.warn('[me/kit] histórico indisponível (migração 057 aplicada?):', e.message);
+      }
+    }
+
+    // Sem slot nem histórico → o cliente tem de gerar (gasta quota). 409 ≠ erro: é um estado.
+    if (!avatarUrl) return res.status(409).json({ precisa_gerar: true, kit: kitId });
 
     await ensureUserRow(req.user);
     const { error } = await supabase
       .from('users')
-      .update({ avatar_url: slot.avatar_url, kit_ativo: kitId })
+      .update({ avatar_url: avatarUrl, kit_ativo: kitId })
       .eq('id', userId);
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ avatar_url: slot.avatar_url, kit: kitId });
+    res.json({ avatar_url: avatarUrl, kit: kitId });
   })
 );
 
@@ -1351,7 +1379,7 @@ router.put(
 );
 
 /**
- * GET /api/me/avatar/historico — RODADA 19: as últimas 6 figurinhas de
+ * GET /api/me/avatar/historico — RODADA 19: as últimas figurinhas de
  * "Minhas figurinhas" (user_avatar_historico, migração 057). Fail-safe: sem
  * a migração, devolve lista vazia (a galeria some sozinha, sem erro na tela).
  */

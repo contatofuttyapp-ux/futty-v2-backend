@@ -200,11 +200,14 @@ test('creditos soma à pessoa e resolve o pedido "minha"', async (t) => {
   });
   assert.equal(mau.status, 400, 'zero crédito não é uma ativação, é um engano');
 
+  // RODADA 21 (24-set): "Minha Figurinha" dá 10 gerações (era 2) — o valor que
+  // o Gabinete manda por padrão. A rota em si aceita qualquer quantidade de
+  // 1 a 25; 10 é o número real do produto, não um limite da rota.
   const r = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
-    token: contas.super.token, body: { userId: contas.membro.id, quantidade: 2 },
+    token: contas.super.token, body: { userId: contas.membro.id, quantidade: 10 },
   });
   assert.equal(r.status, 200);
-  assert.equal(r.json.creditos, 2, 'a "Minha Brilhante" dá 2 gerações');
+  assert.equal(r.json.creditos, 10, 'a "Minha Figurinha" dá 10 gerações (Rodada 21)');
 
   const { data: pedido } = await supabase.from('pedidos_ativacao').select('estado').eq('id', pedidoMinhaId).maybeSingle();
   assert.equal(pedido.estado, 'ativado');
@@ -212,6 +215,33 @@ test('creditos soma à pessoa e resolve o pedido "minha"', async (t) => {
   // Volta a zero: os testes de uniforme abaixo precisam do membro SEM crédito,
   // senão o crédito paga um kit diferente do time (e é suposto pagar mesmo).
   await supabase.from('users').update({ brilhante_creditos: 0 }).eq('id', contas.membro.id);
+});
+
+// ─── 4B. CRÉDITOS POR E-MAIL (RODADA 21) — quem ainda não tem pedido nem
+// crédito nenhum não aparece em NENHUMA das duas listas que a aba já lê. ────
+test('creditos por e-mail resolve o userId no servidor (RODADA 21)', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  const semNada = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
+    token: contas.super.token, body: { quantidade: 10 },
+  });
+  assert.equal(semNada.status, 400, 'sem userId e sem email não há quem creditar');
+
+  const naoExiste = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
+    token: contas.super.token, body: { email: 'ninguem-com-este-email@futtymock.invalid', quantidade: 10 },
+  });
+  assert.equal(naoExiste.status, 404, 'e-mail sem conta não pode virar um userId qualquer');
+
+  const r = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
+    token: contas.super.token, body: { email: contas.comum.email, quantidade: 10 },
+  });
+  assert.equal(r.status, 200, `devia resolver o e-mail para o userId, deu ${r.status} (${r.json?.error || ''})`);
+  assert.equal(r.json.user_id, contas.comum.id, 'o e-mail tem de resolver para o userId certo, nunca um id inventado no cliente');
+  assert.equal(r.json.creditos, 10);
+
+  const { data: pessoa } = await supabase.from('users').select('brilhante_creditos').eq('id', contas.comum.id).maybeSingle();
+  assert.equal(pessoa.brilhante_creditos, 10, 'o banco bate com o que a rota respondeu');
+
+  await supabase.from('users').update({ brilhante_creditos: 0 }).eq('id', contas.comum.id);
 });
 
 // ─── 5. RECUSAR COM MOTIVO ───────────────────────────────────────────────────
@@ -293,6 +323,87 @@ test('PUT /api/me/kit veste um kit não-default já gerado, sem gate de plano', 
   const r = await pedir('PUT', '/api/me/kit', { token: contas.membro.token, body: { kit: KIT_TIME } });
   assert.equal(r.status, 200, `vestir um kit já gerado tem de ser sempre livre, deu ${r.status} (${r.json?.error || ''})`);
   assert.equal(r.json.kit, KIT_TIME);
+});
+
+// ─── 6B. UNIFORME GUARDADO: NUNCA GERA, NUNCA DEBITA (RODADA 21) ────────────
+test('PUT /api/me/kit num uniforme já pintado não chama a fal nem debita', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  await supabase.from('users').update({ brilhante_creditos: 3 }).eq('id', contas.comum.id);
+  const { data: perfil } = await supabase.from('users').select('foto_hash, avatar_url, kit_ativo').eq('id', contas.comum.id).maybeSingle();
+  // Restaura o que já estava lá, não `null` a martelo — kit_ativo é NOT NULL
+  // no banco (achado ao rodar este teste: o UPDATE de limpeza rebentava em
+  // silêncio, código 23502, e o "fundo de cima" lá embaixo herdava a
+  // Brilhante desta conta por engano).
+  const avatarUrlOriginal = perfil?.avatar_url ?? null;
+  const kitAtivoOriginal = perfil?.kit_ativo ?? 'dark-gold';
+  await supabase.from('user_avatar_slots').upsert({
+    user_id: contas.comum.id, kit_id: KIT_OUTRO,
+    avatar_url: 'https://exemplo.invalid/ja-pintado.png',
+    foto_fingerprint: perfil?.foto_hash || null,
+  }, { onConflict: 'user_id,kit_id' });
+
+  // Monkey-patch de global.fetch só para esta janela: conta qualquer chamada
+  // rumo à fal (queue.fal.run), a prova de que "não chama a fal" não é só
+  // "respondeu rápido" — é ZERO chamadas de verdade.
+  const fetchOriginal = global.fetch;
+  let chamadasFal = 0;
+  global.fetch = (...args) => {
+    if (String(args[0]).includes('fal.run')) chamadasFal += 1;
+    return fetchOriginal(...args);
+  };
+  let r;
+  try {
+    r = await pedir('PUT', '/api/me/kit', { token: contas.comum.token, body: { kit: KIT_OUTRO } });
+  } finally {
+    global.fetch = fetchOriginal;
+  }
+  assert.equal(r.status, 200);
+  assert.equal(r.json.avatar_url, 'https://exemplo.invalid/ja-pintado.png');
+  assert.equal(chamadasFal, 0, 'trocar para um uniforme já pintado não pode tocar na fal — mock deve registrar zero chamadas');
+
+  const { data: pessoa } = await supabase.from('users').select('brilhante_creditos').eq('id', contas.comum.id).maybeSingle();
+  assert.equal(pessoa.brilhante_creditos, 3, 'e não debita nada — o crédito continua o mesmo de antes');
+
+  await supabase.from('user_avatar_slots').delete().eq('user_id', contas.comum.id).eq('kit_id', KIT_OUTRO);
+  // O PUT /api/me/kit acima vestiu de verdade (users.avatar_url/kit_ativo) —
+  // desfaz também isso, senão contas.comum "ganha" uma Brilhante que vaza
+  // para o teste "fundo de cima" lá embaixo (achado ao rodar este arquivo:
+  // 403 esperado virou 200 porque a conta continuava com avatar_url de figurinha).
+  await supabase.from('users').update({ brilhante_creditos: 0, avatar_url: avatarUrlOriginal, kit_ativo: kitAtivoOriginal }).eq('id', contas.comum.id);
+});
+
+// ─── 6C. O CONTADOR "N GERAÇÕES RESTANTES" BATE COM O BANCO (RODADA 21) ─────
+test('GET /api/brilhantes/estado.direito.restantes bate com brilhante_creditos', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  await supabase.from('users').update({ brilhante_creditos: 10 }).eq('id', contas.comum.id);
+  const r = await pedir('GET', '/api/brilhantes/estado', { token: contas.comum.token });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.direito.fonte, 'credito');
+  assert.equal(r.json.direito.restantes, 10, 'o contador da tela vem do banco, não de um número fixo no frontend');
+  assert.equal(r.json.creditos, 10);
+  await supabase.from('users').update({ brilhante_creditos: 0 }).eq('id', contas.comum.id);
+});
+
+test('GET /api/brilhantes/estado.direito.restantes bate com o saldo do pacote do time', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  const sonda = await supabase.from('brilhantes_time').select('geracoes').limit(1);
+  if (sonda.error?.code === '42703' || sonda.error?.code === 'PGRST204') {
+    return t.skip('migração 059 (brilhantes_time.geracoes) ainda não aplicada');
+  }
+  // O membro (do time deste arquivo, pacote no KIT_TIME) ainda não gerou nada
+  // neste bloco — 3 de 3 restantes.
+  await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
+  const r0 = await pedir('GET', '/api/brilhantes/estado', { token: contas.membro.token });
+  assert.equal(r0.json.direito.fonte, 'time');
+  assert.equal(r0.json.direito.restantes, 3, 'pacote novo: 3 de 3 restantes (migração 059)');
+
+  await supabase.from('brilhantes_time').upsert({
+    team_id: teamId, user_id: contas.membro.id, kit_id: KIT_TIME, avatar_url: 'https://exemplo.invalid/r21.png', geracoes: 2,
+  }, { onConflict: 'team_id,user_id' });
+  const r2 = await pedir('GET', '/api/brilhantes/estado', { token: contas.membro.token });
+  assert.equal(r2.json.direito.restantes, 1, 'usou 2 de 3 — resta 1, e é o banco que diz isso, não a tela');
+
+  await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
 });
 
 // ─── 7. SAIR DO TIME ─────────────────────────────────────────────────────────

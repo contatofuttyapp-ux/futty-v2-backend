@@ -517,25 +517,39 @@ router.post(
 );
 
 /**
- * POST /api/super/gabinete/brilhantes/creditos { userId, quantidade } — soma
- * créditos à pessoa (a "Minha Figurinha" dá 2), resolve o pedido 'minha'
- * pendente dela e avisa.
+ * POST /api/super/gabinete/brilhantes/creditos { userId, quantidade } ou
+ * { email, quantidade } — soma créditos à pessoa (a "Minha Figurinha" dá 10,
+ * Rodada 21), resolve o pedido 'minha' pendente dela e avisa. `email` é para
+ * dar crédito a quem AINDA não tem pedido nem crédito nenhum (não aparece em
+ * nenhuma das duas listas da aba) — resolvido para userId aqui dentro, nunca
+ * no cliente.
  */
 router.post(
   '/api/super/gabinete/brilhantes/creditos',
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    const userId = String(req.body?.userId || '');
+    let userId = String(req.body?.userId || '');
+    const email = String(req.body?.email || '').trim().toLowerCase();
     const quantidade = Number(req.body?.quantidade);
-    if (!userId) throw new HttpError(400, 'Escolha a pessoa.');
+    if (!userId && !email) throw new HttpError(400, 'Escolha a pessoa (ou informe o e-mail).');
     if (!Number.isInteger(quantidade) || quantidade < 1 || quantidade > 25) {
       throw new HttpError(400, 'Quantidade tem de ser um número inteiro de 1 a 25.');
     }
 
     try {
-      const { data: pessoa, error: erroLer } = await supabase
-        .from('users').select('id, email, nome_jogador, brilhante_creditos').eq('id', userId).maybeSingle();
-      if (erroLer) throw new Error(erroLer.message);
+      let pessoa;
+      if (userId) {
+        const { data, error: erroLer } = await supabase
+          .from('users').select('id, email, nome_jogador, brilhante_creditos').eq('id', userId).maybeSingle();
+        if (erroLer) throw new Error(erroLer.message);
+        pessoa = data;
+      } else {
+        const { data, error: erroLer } = await supabase
+          .from('users').select('id, email, nome_jogador, brilhante_creditos').eq('email', email).maybeSingle();
+        if (erroLer) throw new Error(erroLer.message);
+        pessoa = data;
+        if (pessoa) userId = pessoa.id;
+      }
       if (!pessoa) throw new HttpError(404, 'Pessoa não encontrada.');
 
       // Soma lida-e-escrita, como o debitar(): o PostgREST não faz `x = x + n`

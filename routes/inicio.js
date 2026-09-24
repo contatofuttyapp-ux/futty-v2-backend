@@ -101,8 +101,8 @@ router.get(
       ad: { ad: ads?.paginas?.inicio ?? null },
       ads: ads || null,
       brilhante: brilhante
-        ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos }
-        : { fonte: null, team_id: null, kit_id: null, creditos: 0 },
+        ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos, restantes: brilhante.restantes }
+        : { fonte: null, team_id: null, kit_id: null, creditos: 0, restantes: 0 },
       // Nome próprio: `pedidos` (acima) são os pedidos de ENTRADA em times —
       // coisa completamente diferente.
       pedidos_brilhante: pedidos_brilhante || [],

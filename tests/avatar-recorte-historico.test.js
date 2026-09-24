@@ -1,5 +1,6 @@
 // Futty v2.0 — RODADA 19 (23-set): "Ajustar enquadramento" (recorte a partir
-// da original, com e sem ela) + "Minhas figurinhas" (teto de 6). Sem IA —
+// da original, com e sem ela) + "Minhas figurinhas" (teto — 6 então, 10 desde
+// a Rodada 21). Sem IA —
 // nenhum destes testes chama a fal (custaria dinheiro de verdade); o teto de
 // histórico é testado chamando arquivarFigurinhaAntiga() direto, o mesmo
 // helper que POST /api/me/avatar/ai chama depois de uma geração de verdade.
@@ -162,45 +163,53 @@ describe('PUT /api/me/avatar/recorte — RODADA 19', () => {
   });
 });
 
-describe('user_avatar_historico — teto de 6 (arquivarFigurinhaAntiga)', () => {
+describe('user_avatar_historico — teto (arquivarFigurinhaAntiga)', () => {
   let userId;
+  // RODADA 21 (24-set): 6 → 10 — lido da constante exportada, nunca hardcoded
+  // aqui, para este teste continuar certo se o teto mudar de novo.
+  const TETO = authRouter.TETO_HISTORICO_FIGURINHAS || 10;
+  const ALEM_DO_TETO = TETO + 1;
 
   before(async () => { ({ userId } = await novoUsuario('historico')); });
   after(async () => limparConta(userId));
 
-  test('a 7ª arquivada apaga a mais antiga (linha + arquivo no Storage)', async (t) => {
+  test(`a ${ALEM_DO_TETO}ª arquivada apaga a mais antiga (linha + arquivo no Storage)`, async (t) => {
     if (typeof authRouter.arquivarFigurinhaAntiga !== 'function') {
       return t.skip('arquivarFigurinhaAntiga não exportado — rodada 19 não aplicada nesta base?');
     }
-    // 6 figurinhas "antigas" já arquivadas, uma por minuto (ordem determinística).
+    // TETO figurinhas "antigas" já arquivadas, uma por minuto (ordem determinística).
     const caminhos = [];
-    for (let i = 1; i <= 6; i += 1) {
+    for (let i = 1; i <= TETO; i += 1) {
       const caminho = `public/${userId}-ai-dark-gold-hist${i}.png`;
       caminhos.push(caminho);
       // eslint-disable-next-line no-await-in-loop
       const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: i * 10, g: 0, b: 0 } } }).png().toBuffer(), { contentType: 'image/png' });
       if (upErr) throw new Error(`upload hist${i}: ${upErr.message}`);
       const url = `${SUPABASE_URL}/storage/v1/object/public/avatars/${caminho}`;
-      const criadoEm = new Date(Date.now() - (7 - i) * 60000).toISOString(); // hist1 = mais antiga
+      const criadoEm = new Date(Date.now() - (ALEM_DO_TETO - i) * 60000).toISOString(); // hist1 = mais antiga
       // eslint-disable-next-line no-await-in-loop
       const { error: insErr } = await supabase.from('user_avatar_historico').insert({ user_id: userId, kit_id: 'dark-gold', avatar_url: url, criado_em: criadoEm });
       if (insErr) return t.skip(`user_avatar_historico indisponível (migração 057 aplicada?): ${insErr.message}`);
     }
 
-    // A 7ª — via o MESMO helper que POST /api/me/avatar/ai chama ao regenerar.
-    const caminho7 = `public/${userId}-ai-dark-gold-hist7.png`;
-    await supabase.storage.from('avatars').upload(caminho7, await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 70, g: 0, b: 0 } } }).png().toBuffer(), { contentType: 'image/png' });
-    const url7 = `${SUPABASE_URL}/storage/v1/object/public/avatars/${caminho7}`;
-    await authRouter.arquivarFigurinhaAntiga(userId, 'dark-gold', url7);
+    // A ALÉM-DO-TETO — via o MESMO helper que POST /api/me/avatar/ai chama ao regenerar.
+    const caminhoNova = `public/${userId}-ai-dark-gold-hist${ALEM_DO_TETO}.png`;
+    await supabase.storage.from('avatars').upload(caminhoNova, await sharp({ create: { width: 8, height: 8, channels: 3, background: { r: 70, g: 0, b: 0 } } }).png().toBuffer(), { contentType: 'image/png' });
+    const urlNova = `${SUPABASE_URL}/storage/v1/object/public/avatars/${caminhoNova}`;
+    await authRouter.arquivarFigurinhaAntiga(userId, 'dark-gold', urlNova);
 
     const { data: linhas, error } = await supabase.from('user_avatar_historico').select('avatar_url').eq('user_id', userId);
     if (error) throw new Error(error.message);
-    assert.equal(linhas.length, 6, `teto tem de manter exatamente 6 (achei ${linhas.length})`);
+    assert.equal(linhas.length, TETO, `teto tem de manter exatamente ${TETO} (achei ${linhas.length})`);
     const urls = linhas.map((l) => l.avatar_url);
-    assert.ok(urls.includes(url7), 'a recém-arquivada (7ª) tem de estar dentro');
+    assert.ok(urls.includes(urlNova), `a recém-arquivada (${ALEM_DO_TETO}ª) tem de estar dentro`);
     assert.ok(!urls.some((u) => u.includes('hist1.png')), 'a mais antiga (hist1) tem de ter saído da tabela');
 
-    const { data: existeAinda } = await supabase.storage.from('avatars').list('public', { search: `${userId}-ai-dark-gold-hist1` });
-    assert.equal((existeAinda || []).length, 0, 'o ARQUIVO da mais antiga também tem de ter sido apagado do Storage');
+    // Nome exato, não o `search` (prefixo): com TETO=10 e além=11, o prefixo
+    // "hist1" também bate em "hist10"/"hist11", que continuam vivos de propósito.
+    const nomeHist1 = `${userId}-ai-dark-gold-hist1.png`;
+    const { data: achados } = await supabase.storage.from('avatars').list('public', { search: `${userId}-ai-dark-gold-hist1` });
+    const aindaExisteHist1 = (achados || []).some((f) => f.name === nomeHist1);
+    assert.equal(aindaExisteHist1, false, 'o ARQUIVO da mais antiga também tem de ter sido apagado do Storage');
   });
 });

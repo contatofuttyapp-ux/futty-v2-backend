@@ -74,7 +74,7 @@ router.get(
     const pedidos = await pedidosVivos(userId);
 
     res.json({
-      direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId },
+      direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId, restantes: direito.restantes },
       creditos: direito.creditos,
       times,
       pedidos,

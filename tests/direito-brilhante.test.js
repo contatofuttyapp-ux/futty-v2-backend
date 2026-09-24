@@ -22,13 +22,13 @@ const assert = require('node:assert/strict');
 function fakeSupabase(respostas) {
   const chamadas = [];
   const builder = (tabela) => {
-    const estado = { tabela, filtros: {}, count: false };
+    const estado = { tabela, filtros: {}, count: false, cols: '' };
     const resolver = () => {
-      chamadas.push({ tabela, filtros: { ...estado.filtros }, count: estado.count });
+      chamadas.push({ tabela, filtros: { ...estado.filtros }, count: estado.count, cols: estado.cols });
       return respostas(tabela, estado);
     };
     const api = {
-      select(_cols, opts) { if (opts?.count) estado.count = true; return api; },
+      select(cols, opts) { estado.cols = cols || ''; if (opts?.count) estado.count = true; return api; },
       eq(col, val) { estado.filtros[col] = val; return api; },
       is(col, val) { estado.filtros[col] = val; return api; },
       update(patch) { estado.patch = patch; return api; },
@@ -111,6 +111,82 @@ test('o time manda à frente do crédito — o direito do time é grátis e tem 
   assert.equal(d.opcoes[1].fonte, 'credito');
 });
 
+// ─── 2B. PACOTE COM SALDO (RODADA 21, migração 059) ──────────────────────────
+// O pacote passou a dar 3 gerações por jogador (era 1): `geracoes` conta
+// quantas essa pessoa já usou NESTE time, e o direito só acaba quando bate no
+// `teams.brilhante_por_jogador`.
+test('pacote com 2 de 3 gerações usadas → ainda tem direito, restantes=1', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') {
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+    }
+    if (tabela === 'brilhantes_time') {
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 2 });
+    }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, 'time');
+  assert.equal(d.restantes, 1, 'usou 2 de 3 — resta 1');
+});
+
+test('pacote com as 3 gerações usadas → sem direito (a 4ª é recusada)', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') {
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+    }
+    if (tabela === 'brilhantes_time') {
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 3 });
+    }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, null, 'as 3 gerações do pacote já foram usadas — nada de uma 4ª');
+  assert.equal(d.restantes, 0);
+});
+
+test('refazer (2ª/3ª geração) não esbarra no tecto de 25 JOGADORES — só um jogador novo esbarra', async () => {
+  // Time já tem 25 jogadores (tecto batido), mas a pessoa já é UM DELES (só
+  // usou 1 das 3) — refazer não é "mais um jogador", é a mesma vaga de novo.
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') {
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 3 } }]);
+    }
+    if (tabela === 'brilhantes_time') {
+      return estado.count ? semErro(null, { count: 25 }) : semErro({ user_id: PESSOA, geracoes: 1 });
+    }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, 'time', 'time cheio não pode travar quem já está dentro dele');
+  assert.equal(d.restantes, 2);
+});
+
+test('migração 059 (coluna geracoes) ainda não rodou → comportamento antigo: 1 linha = já usou a única que se sabia dar', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') {
+      // brilhante_por_jogador também ausente (mesma migração) — 1 é o fail-safe.
+      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25 } }]);
+    }
+    if (tabela === 'brilhantes_time') {
+      if (estado.count) return semErro(null, { count: 5 });
+      // A 1ª tentativa (select user_id, geracoes) falha — coluna ausente; o
+      // fallback (select user_id) tem de achar a linha na mesma.
+      if (String(estado.cols).includes('geracoes')) {
+        return { data: null, error: { message: 'column brilhantes_time.geracoes does not exist' } };
+      }
+      return semErro({ user_id: PESSOA });
+    }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, null, 'sem a 059, uma linha existente ainda esgota o direito — nunca dá 3 de graça por engano');
+});
+
 // ─── 3. SEM DIREITO ──────────────────────────────────────────────────────────
 test('sem crédito e sem time ativo → sem direito', async () => {
   const { mod } = carregarCom((tabela) => {
@@ -187,10 +263,15 @@ test('erro REAL do banco (não é migração em falta) sobe — não vira "sem d
 });
 
 // ─── Débito: só depois de a figurinha existir ────────────────────────────────
-test('debitar("time") grava a linha do pacote com o custo real', async () => {
+test('debitar("time") na 1ª vez grava geracoes=1 (uniforme novo debita 1)', async () => {
   let gravado = null;
   const { mod } = carregarCom((tabela, estado) => {
-    if (tabela === 'brilhantes_time') { gravado = estado.linha; return semErro(null); }
+    if (tabela === 'brilhantes_time') {
+      // A leitura prévia (geracoesNoTime) não acha linha nenhuma — 1ª geração.
+      if (estado.count) return semErro(null, { count: 0 });
+      if (estado.linha) { gravado = estado.linha; return semErro(null); } // o upsert
+      return semErro(null); // a leitura prévia
+    }
     return semErro(null);
   });
   const ok = await mod.debitar(
@@ -201,6 +282,39 @@ test('debitar("time") grava a linha do pacote com o custo real', async () => {
   assert.equal(gravado.team_id, TIME);
   assert.equal(gravado.user_id, PESSOA);
   assert.equal(gravado.custo_cents, 11, 'o custo REAL da fal, arredondado — é o que o Gabinete vai somar');
+  assert.equal(gravado.geracoes, 1, 'RODADA 21 — uniforme novo debita 1 geração');
+});
+
+test('debitar("time") na 2ª vez SOMA — geracoes 1 → 2, nunca substitui', async () => {
+  let gravado = null;
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'brilhantes_time') {
+      if (estado.linha) { gravado = estado.linha; return semErro(null); } // o upsert
+      return semErro({ user_id: PESSOA, geracoes: 1 }); // a leitura prévia: já usou 1
+    }
+    return semErro(null);
+  });
+  await mod.debitar({ fonte: 'time', teamId: TIME }, { userId: PESSOA, kitId: 'dark-gold', avatarUrl: 'https://x/y2.png', custoCents: 11 });
+  assert.equal(gravado.geracoes, 2, 'refazer soma sobre o que já tinha, não reseta para 1');
+});
+
+test('debitar("time") sem a migração 059 (coluna geracoes ausente) NÃO tenta escrevê-la', async () => {
+  let gravado = null;
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'brilhantes_time') {
+      if (estado.linha) { gravado = estado.linha; return semErro(null); } // o upsert
+      // 1ª leitura (select user_id, geracoes) falha — coluna ausente; o
+      // fallback (select user_id, sem geracoes) tem de continuar a funcionar.
+      if (String(estado.cols).includes('geracoes')) {
+        return { data: null, error: { message: 'column brilhantes_time.geracoes does not exist' } };
+      }
+      return semErro({ user_id: PESSOA });
+    }
+    return semErro(null);
+  });
+  const ok = await mod.debitar({ fonte: 'time', teamId: TIME }, { userId: PESSOA, kitId: 'dark-gold', avatarUrl: 'https://x/y3.png', custoCents: 11 });
+  assert.equal(ok, true, 'sem a 059 o débito continua funcionando (comportamento antigo)');
+  assert.equal('geracoes' in gravado, false, 'escrever uma coluna que não existe rebentaria o upsert inteiro');
 });
 
 test('debitar("credito") tira 1 e nunca vai a negativo', async () => {
@@ -218,4 +332,27 @@ test('debitar que falha NÃO derruba nada — a pessoa fica com a figurinha', as
   const { mod } = carregarCom(() => { throw new Error('banco fora do ar'); });
   const ok = await mod.debitar({ fonte: 'credito' }, { userId: PESSOA, kitId: 'dark-gold', custoCents: 11 });
   assert.equal(ok, false, 'devolve false e segue: cobrar sem entregar seria pior do que entregar sem cobrar');
+});
+
+// ─── Presente do criador (RODADA 21: 1 → 3) ──────────────────────────────────
+test('presentearCriador dá 3 créditos (era 1) a quem cria o 1º time', async () => {
+  let patch = null;
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users' && estado.patch) { patch = estado.patch; return semErro(null); }
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0, presente_criador_em: null });
+    return semErro(null);
+  });
+  const deu = await mod.presentearCriador(PESSOA);
+  assert.equal(deu, true);
+  assert.equal(patch.brilhante_creditos, 3, 'RODADA 21 — o presente subiu de 1 para 3');
+  assert.equal(mod.PRESENTE_CRIADOR_CREDITOS, 3);
+});
+
+test('presentearCriador não dá 2 vezes — quem já recebeu não ganha de novo', async () => {
+  const { mod } = carregarCom((tabela) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 3, presente_criador_em: '2026-09-24T00:00:00.000Z' });
+    return semErro(null);
+  });
+  const deu = await mod.presentearCriador(PESSOA);
+  assert.equal(deu, false, 'presente_criador_em já preenchido — é uma vez na vida');
 });
