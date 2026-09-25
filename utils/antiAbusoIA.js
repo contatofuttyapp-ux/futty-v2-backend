@@ -198,7 +198,7 @@ async function verificarAutoFreeze() {
  * geração e guarda-se a soma de inteiros: arredondar só no fim perderia os
  * cêntimos de cada linha.
  */
-async function registrarGeracao({ userId, ip, custoCents = null }) {
+async function registrarGeracao({ userId, ip, custoCents = null, teamId = null }) {
   try {
     const dia = hojeISO();
     const { data: atual } = await supabase.from('gasto_ia_diario').select('geracoes, custo_cents').eq('dia', dia).maybeSingle();
@@ -212,7 +212,15 @@ async function registrarGeracao({ userId, ip, custoCents = null }) {
     const geracoes = geracoesAntes + 1;
     const custo_cents = custoAntes + Math.round(desta);
     await supabase.from('gasto_ia_diario').upsert({ dia, geracoes, custo_cents }, { onConflict: 'dia' });
-    await supabase.from('geracao_ia_log').insert({ user_id: userId, ip: ip || null });
+    // RODADA 28 — o log passa a guardar também o time que pagou (pacote) e o custo REAL desta geração
+    // (null se a fal não mandou o header): é daqui que o Gabinete tira o custo por time POR MÊS.
+    const { error: erroLog } = await supabase.from('geracao_ia_log').insert({
+      user_id: userId, ip: ip || null, team_id: teamId || null, custo_cents: custoCents == null ? null : Math.round(custoCents),
+    });
+    if (erroLog && /team_id|custo_cents/i.test(erroLog.message || '')) {
+      // Migração 063 por correr: o log de sempre (quem, IP, quando) continua — é o que o antiabuso lê.
+      await supabase.from('geracao_ia_log').insert({ user_id: userId, ip: ip || null });
+    }
     await alertarSeNecessario(custo_cents);
     await verificarAutoFreeze();
   } catch {

@@ -12,6 +12,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
 const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
+const { custoDoTimePorMes } = require('../utils/custoPorTime');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
 const pkg = require('../package.json');
@@ -62,6 +63,16 @@ function porDia(datas, nDias = 7) {
   const cont = Object.fromEntries(chaves.map((k) => [k, 0]));
   for (const d of datas || []) { const k = new Date(d).toISOString().slice(0, 10); if (k in cont) cont[k] += 1; }
   return { chaves, vals: chaves.map((k) => cont[k]) };
+}
+
+// As linhas do pacote dos times (uma por pessoa: gerações e custo somado). Sem a migração 059 a coluna
+// `geracoes` não existe e o select inteiro falharia — cai sem ela (cada linha conta 1, como antes).
+async function linhasDoPacote(idsTimes) {
+  const completa = await supabase.from('brilhantes_time').select('team_id, custo_cents, geracoes').in('team_id', idsTimes);
+  if (!completa.error) return completa.data || [];
+  const antiga = await supabase.from('brilhantes_time').select('team_id, custo_cents').in('team_id', idsTimes);
+  if (antiga.error) throw new Error(antiga.error.message);
+  return antiga.data || [];
 }
 
 /** GET /api/super/gabinete — pulso + crescimento + vida + marcos (agregados, sem PII). */
@@ -389,20 +400,28 @@ router.get(
       // Uso e custo REAL por time (a mesma verdade do gasto_ia_diario: o que a
       // fal cobrou, gravado por geração). `sem_custo` conta as linhas antigas
       // sem custo gravado, para o total não se fazer passar por completo.
+      // RODADA 28 (achado da Rodada 22): cada linha é UMA pessoa, com `geracoes` e o custo SOMADO
+      // delas (utils/direitoBrilhante.js#debitar) — `geradas` é a soma das gerações, não das linhas,
+      // e `jogadores` é quantos já gastaram vaga do pacote. O mês sai do log (migração 063).
       const uso = {};
       const membros = {};
+      let custoPorMes = null; // null = migração 063 por correr
       if (idsTimes.length) {
-        const [{ data: linhas }, { data: equipas }] = await Promise.all([
-          supabase.from('brilhantes_time').select('team_id, custo_cents').in('team_id', idsTimes),
+        const [linhas, { data: equipas }, log] = await Promise.all([
+          linhasDoPacote(idsTimes),
           supabase.from('team_members').select('team_id, user_id').in('team_id', idsTimes),
+          supabase.from('geracao_ia_log').select('team_id, custo_cents, created_at').in('team_id', idsTimes).order('created_at', { ascending: false }).limit(5000),
         ]);
-        for (const l of linhas || []) {
-          const u = uso[l.team_id] || (uso[l.team_id] = { geradas: 0, custo_cents: 0, sem_custo: 0 });
-          u.geradas += 1;
+        for (const l of linhas) {
+          const u = uso[l.team_id] || (uso[l.team_id] = { geradas: 0, jogadores: 0, custo_cents: 0, sem_custo: 0 });
+          u.jogadores += 1;
+          u.geradas += l.geracoes == null ? 1 : Number(l.geracoes) || 0;
           if (l.custo_cents == null) u.sem_custo += 1;
           else u.custo_cents += Number(l.custo_cents) || 0;
         }
         for (const m of equipas || []) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
+        if (!log.error) custoPorMes = custoDoTimePorMes(log.data);
+        else console.warn('[gabinete/brilhantes] custo por mês indisponível (migração 063 aplicada?):', log.error.message);
       }
 
       // Quem pediu (nome/e-mail) — lookup direto, sem embed: o Gabinete já lê
@@ -442,7 +461,7 @@ router.get(
           time_slug: timesPorId[p.team_id]?.slug || null,
         })),
         times: timesTodos.map((t) => {
-          const u = uso[t.id] || { geradas: 0, custo_cents: 0, sem_custo: 0 };
+          const u = uso[t.id] || { geradas: 0, jogadores: 0, custo_cents: 0, sem_custo: 0 };
           return {
             id: t.id,
             nome: t.nome,
@@ -454,8 +473,11 @@ router.get(
             manto_proprio: !!t.manto_proprio,
             membros: membros[t.id] || 0,
             geradas: u.geradas,
+            jogadores: u.jogadores,
             custo_usd: Number((u.custo_cents / 100).toFixed(2)),
             geradas_sem_custo: u.sem_custo,
+            // [{ mes: 'AAAA-MM', geracoes, custo_usd, sem_custo }], mais recente primeiro; null sem a 063.
+            custo_por_mes: custoPorMes ? (custoPorMes[t.id] || []) : null,
             tem_pedido: pedidosPendentes.some((p) => p.team_id === t.id),
           };
         }),

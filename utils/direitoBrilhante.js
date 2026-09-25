@@ -37,7 +37,7 @@ function ehMigracaoEmFalta(mensagem = '') {
 async function geracoesNoTime(teamId, userId) {
   const { data, error } = await supabase
     .from('brilhantes_time')
-    .select('user_id, geracoes')
+    .select('user_id, geracoes, custo_cents')
     .eq('team_id', teamId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -45,6 +45,8 @@ async function geracoesNoTime(teamId, userId) {
     return {
       existe: !!data,
       usadas: data ? (data.geracoes == null ? 1 : Number(data.geracoes)) : 0,
+      // Rodada 28: o custo JÁ gasto nesta linha — a geração nova SOMA a ele (ver debitar).
+      custoCents: data?.custo_cents ?? null,
       colunaExiste: true,
     };
   }
@@ -58,7 +60,18 @@ async function geracoesNoTime(teamId, userId) {
   if (erroAntigo) throw new Error(erroAntigo.message);
   // colunaExiste:false avisa o debitar() para NÃO escrever `geracoes` no
   // upsert (coluna ainda não existe) — deixa o banco/comportamento antigo.
-  return { existe: !!antigo, usadas: antigo ? 1 : 0, colunaExiste: false };
+  return { existe: !!antigo, usadas: antigo ? 1 : 0, custoCents: null, colunaExiste: false };
+}
+
+/**
+ * RODADA 28 (achado da Rodada 22) — o custo de uma linha do pacote é a SOMA das gerações dela.
+ * O upsert gravava o custo da geração atual por cima do anterior: refazer 5 vezes deixava no
+ * Gabinete só o custo da última. Sem custo nenhum conhecido fica null (o Gabinete conta à parte
+ * as gerações sem custo gravado, para o total não se passar por completo).
+ */
+function somarCusto(anteriorCents, destaCents) {
+  if (anteriorCents == null && destaCents == null) return null;
+  return Math.round((Number(anteriorCents) || 0) + (Number(destaCents) || 0));
 }
 
 /**
@@ -157,13 +170,14 @@ async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
       // `geracoes` conta quantas essa pessoa já usou NESTE time, e o upsert
       // tem de a SOMAR, não substituir. Lê-e-escreve, mesmo padrão do crédito
       // abaixo — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
-      const { usadas, colunaExiste } = await geracoesNoTime(direito.teamId, userId);
+      const { usadas, custoCents: jaGasto, colunaExiste } = await geracoesNoTime(direito.teamId, userId);
       const linha = {
         team_id: direito.teamId,
         user_id: userId,
         kit_id: kitId,
         avatar_url: avatarUrl,
-        custo_cents: custoCents == null ? null : Math.round(custoCents),
+        // Rodada 28: SOMA à linha (antes o upsert punha só o custo desta geração por cima).
+        custo_cents: somarCusto(jaGasto, custoCents),
         gerada_em: new Date().toISOString(),
       };
       // Sem a migração 059, a coluna nem existe — escrevê-la rebentaria o
@@ -231,4 +245,4 @@ async function presentearCriador(userId) {
   }
 }
 
-module.exports = { temDireito, debitar, presentearCriador, ehMigracaoEmFalta, PRESENTE_CRIADOR_CREDITOS };
+module.exports = { temDireito, debitar, presentearCriador, ehMigracaoEmFalta, somarCusto, PRESENTE_CRIADOR_CREDITOS };

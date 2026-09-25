@@ -1261,7 +1261,8 @@ router.post(
       // das quatro chamadas mudou de preço.
       parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
     });
-    registrarGeracao({ userId, ip: req.ip, custoCents }).catch(() => {});
+    // Rodada 28: o time que pagou (pacote) vai junto — é o custo por time e por mês do Gabinete.
+    registrarGeracao({ userId, ip: req.ip, custoCents, teamId: direitoUsado?.fonte === 'time' ? direitoUsado.teamId : null }).catch(() => {});
 
     // DEBITA O DIREITO — só AGORA, com a figurinha gravada e entregue
     // (SPEC-FIGURINHA-3 §5). Uma geração que falhou a meio (fal fora do ar,

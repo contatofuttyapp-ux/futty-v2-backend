@@ -290,12 +290,22 @@ test('debitar("time") na 2ª vez SOMA — geracoes 1 → 2, nunca substitui', as
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'brilhantes_time') {
       if (estado.linha) { gravado = estado.linha; return semErro(null); } // o upsert
-      return semErro({ user_id: PESSOA, geracoes: 1 }); // a leitura prévia: já usou 1
+      return semErro({ user_id: PESSOA, geracoes: 1, custo_cents: 11 }); // a leitura prévia: já usou 1
     }
     return semErro(null);
   });
-  await mod.debitar({ fonte: 'time', teamId: TIME }, { userId: PESSOA, kitId: 'dark-gold', avatarUrl: 'https://x/y2.png', custoCents: 11 });
+  await mod.debitar({ fonte: 'time', teamId: TIME }, { userId: PESSOA, kitId: 'dark-gold', avatarUrl: 'https://x/y2.png', custoCents: 12.4 });
   assert.equal(gravado.geracoes, 2, 'refazer soma sobre o que já tinha, não reseta para 1');
+  // RODADA 28 (achado da Rodada 22): o custo também SOMA — antes ficava só o da última geração.
+  assert.equal(gravado.custo_cents, 23, `11 + 12 cêntimos devia dar 23, deu ${gravado.custo_cents}`);
+});
+
+test('somarCusto: soma o que se sabe; sem custo nenhum fica null (o Gabinete conta à parte)', async () => {
+  const { mod } = carregarCom(() => semErro(null));
+  assert.equal(mod.somarCusto(null, null), null);
+  assert.equal(mod.somarCusto(null, 11.2), 11);
+  assert.equal(mod.somarCusto(11, null), 11, 'geração sem header da fal não apaga o que já estava somado');
+  assert.equal(mod.somarCusto(11, 12.4), 23);
 });
 
 test('debitar("time") sem a migração 059 (coluna geracoes ausente) NÃO tenta escrevê-la', async () => {

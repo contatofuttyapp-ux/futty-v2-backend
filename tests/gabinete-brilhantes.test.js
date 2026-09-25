@@ -432,8 +432,10 @@ test('pacote de 5: cinco gerações debitam e a 6ª é recusada (banco real)', a
   const sexta = await temDireito(contas.membro.id);
   assert.equal(sexta.fonte, null, 'a 6ª geração não tem direito — as 5 do pacote foram usadas');
   assert.equal(sexta.restantes, 0);
-  const { data: linha } = await supabase.from('brilhantes_time').select('geracoes').eq('team_id', teamId).eq('user_id', contas.membro.id).maybeSingle();
+  const { data: linha } = await supabase.from('brilhantes_time').select('geracoes, custo_cents').eq('team_id', teamId).eq('user_id', contas.membro.id).maybeSingle();
   assert.equal(linha.geracoes, 5, 'o banco guarda 5 — bate com o que o contador contou');
+  // Rodada 28 (achado da Rodada 22): o custo da linha é a SOMA das 5 gerações, não só o da última.
+  assert.equal(linha.custo_cents, 55, `5 × 11 cêntimos devia dar 55, deu ${linha.custo_cents}`);
 
   await supabase.from('brilhantes_time').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
 });
@@ -467,6 +469,44 @@ test('quem sai do time mantém a Brilhante já gerada', async (t) => {
 
   // Devolve a filiação, para o `after` limpar como espera.
   await supabase.from('team_members').insert({ team_id: teamId, user_id: contas.membro.id, role: 'member' });
+});
+
+// ─── 7b. CUSTO REAL POR TIME: SOMADO POR GERAÇÃO, E POR MÊS (Rodada 28, H) ───
+test('custo por time soma TODAS as gerações de cada pessoa e quebra por mês', async (t) => {
+  if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
+  // O dono refez: 2 gerações, 11 + 12 cêntimos — a linha dele guarda a soma (debitar soma desde a
+  // Rodada 28; antes ficava só o custo da última). O membro já tem 1 geração de 11 (teste 7).
+  await supabase.from('brilhantes_time').upsert({
+    team_id: teamId, user_id: contas.dono.id, kit_id: KIT_TIME, geracoes: 2,
+    avatar_url: 'https://exemplo.invalid/brilhante-do-dono.png', custo_cents: 23,
+  }, { onConflict: 'team_id,user_id' });
+
+  // O log por geração (migração 063): duas em setembro e uma no começo de outubro — às 01h30 UTC do
+  // dia 1º ainda é 30 de setembro em Brasília.
+  const log = [
+    { user_id: contas.dono.id, team_id: teamId, custo_cents: 11, created_at: '2026-09-10T15:00:00Z' },
+    { user_id: contas.dono.id, team_id: teamId, custo_cents: 12, created_at: '2026-10-01T01:30:00Z' },
+    { user_id: contas.membro.id, team_id: teamId, custo_cents: null, created_at: '2026-10-02T12:00:00Z' },
+  ];
+  const { error: erroLog } = await supabase.from('geracao_ia_log').insert(log);
+  t.after(() => supabase.from('geracao_ia_log').delete().eq('team_id', teamId));
+
+  const r = await pedir('GET', '/api/super/gabinete/brilhantes', { token: contas.super.token });
+  assert.equal(r.status, 200);
+  const time = r.json.times.find((x) => x.id === teamId);
+  assert.equal(time.jogadores, 2, 'duas pessoas gastaram vaga do pacote');
+  assert.equal(time.geradas, 3, 'gerações somadas (2 do dono + 1 do membro), não linhas');
+  assert.equal(time.custo_usd, 0.34, 'o custo é a soma de TODAS as gerações (23 + 11 cêntimos)');
+
+  if (erroLog) {
+    assert.match(erroLog.message, /team_id|custo_cents/, `erro inesperado no log: ${erroLog.message}`);
+    assert.equal(time.custo_por_mes, null, 'sem a migração 063 não há quebra por mês — e a tela sabe disso');
+    return t.diagnostic('migração 063 ainda não aplicada: o total por time está certo, a quebra por mês espera por ela');
+  }
+  assert.deepEqual(time.custo_por_mes, [
+    { mes: '2026-10', geracoes: 1, custo_usd: 0, sem_custo: 1 },
+    { mes: '2026-09', geracoes: 2, custo_usd: 0.23, sem_custo: 0 },
+  ]);
 });
 
 // ─── 8. OS 6 FUNDOS VÊM COM A BRILHANTE, NÃO COM UM PLANO ────────────────────
