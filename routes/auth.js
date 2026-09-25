@@ -16,6 +16,7 @@ const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
 const { apagarUsuario } = require('../utils/apagarUsuario');
+const { dataDeNascimentoValida, menorQueIdadeMinima, MSG_MENOR } = require('../utils/idade');
 // A figurinha, em três módulos próprios (17-set, variante 6 da bancada):
 //   prompts/figurinha.js       o texto que vai à IA (a bancada importa o MESMO)
 //   utils/entradaFigurinha.js  a foto que vai com ele (faixa + corte quadrado)
@@ -161,6 +162,23 @@ const LIMITES_IA_APOSENTADO = { free: 2, pro: 10, elite: 20 };
 const PERFIL_COLS =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 
+// RODADA 28 (bloco C, LGPD art. 14) — o Futty é para maiores de 13 anos. "Cadastro em curso" = o
+// onboarding dia-1 ainda não foi concluído: é aí que a data chega (e-mail: no formulário; Google/Apple:
+// no passo "Quando você nasceu?"). Contas que já existiam (onboarding concluído) não são tocadas.
+function cadastroEmCurso(user) {
+  return user?.user_metadata?.onboarding_completo !== true;
+}
+
+// Menor de 13 no cadastro: a conta que o Google/Apple (ou um cadastro forçado) acabou de criar não
+// fica — apaga-se tudo o que ela tiver (em geral nada além da linha e, talvez, uma foto) e a sessão
+// deixa de valer na hora.
+async function recusarMenor(req) {
+  console.log('[cadastro] menor de 13 no cadastro: conta apagada', { userId: req.user.id });
+  await apagarUsuario(req.user.id);
+  invalidarSessaoDoPedido(req);
+  throw new HttpError(403, MSG_MENOR, 'MENOR_DE_13');
+}
+
 /**
  * GET /api/me — devolve o utilizador autenticado + stats agregadas.
  * Garante também a linha em public.users (caso o trigger não tenha corrido).
@@ -246,18 +264,18 @@ router.patch(
       if (v && !AVATARES_GENERICOS.includes(v)) throw new HttpError(400, 'Avatar genérico inválido.');
       patch.avatar_generico = v;
     }
-    // Data de nascimento (pedido único do Início a quem não a tem). SET-ONCE: se já
+    // Data de nascimento (pedido único do Início a quem não a tem; e, desde a Rodada 28, o passo
+    // "Quando você nasceu?" do onboarding de quem entrou com Google/Apple). SET-ONCE: se já
     // existir, não deixa mudar (evita a passagem trivial menor→adulto).
     if ('birthdate' in b) {
-      const v = b.birthdate == null || b.birthdate === '' ? null : String(b.birthdate).slice(0, 10);
-      if (v) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new HttpError(400, 'Data de nascimento inválida.');
-        const d = new Date(`${v}T00:00:00Z`);
-        if (Number.isNaN(d.getTime()) || d > new Date() || d.getUTCFullYear() < 1900) {
-          throw new HttpError(400, 'Data de nascimento inválida.');
-        }
+      const bruto = b.birthdate == null || b.birthdate === '' ? null : String(b.birthdate).slice(0, 10);
+      if (bruto) {
+        const v = dataDeNascimentoValida(bruto);
+        if (!v) throw new HttpError(400, 'Data de nascimento inválida.');
         const atual = await getUserById(req.user.id, 'birthdate');
-        if (atual && atual.birthdate) throw new HttpError(400, 'A data de nascimento já está definida.');
+        if (atual && atual.birthdate) throw new HttpError(400, 'A data de nascimento já está definida.', 'NASCIMENTO_JA_DEFINIDO');
+        // Rodada 28: no cadastro, menor de 13 não fica com conta (LGPD art. 14).
+        if (cadastroEmCurso(req.user) && menorQueIdadeMinima(v)) await recusarMenor(req);
         patch.birthdate = v;
       }
     }
@@ -312,6 +330,14 @@ router.post(
   '/api/me/onboarding-completo',
   requireAuth,
   asyncHandler(async (req, res) => {
+    // RODADA 28 (LGPD art. 14): a data do cadastro por e-mail (metadata → users.birthdate) ou a do
+    // passo do onboarding. Menor de 13: a conta não fica. Sem data nenhuma a conclusão passa — o
+    // app da loja que ainda não tem o passo (iOS 33, Android 15) não pode ficar preso aqui; o app
+    // novo não deixa concluir sem ela. Quando só houver builds novos nas lojas, exigir aqui.
+    const perfilIdade = await getUserById(req.user.id, 'birthdate');
+    const nascimento = perfilIdade?.birthdate || req.user.user_metadata?.birthdate || null;
+    if (cadastroEmCurso(req.user) && menorQueIdadeMinima(nascimento)) await recusarMenor(req);
+
     const meta = { ...(req.user.user_metadata || {}), onboarding_completo: true };
     const { error } = await supabase.auth.admin.updateUserById(req.user.id, { user_metadata: meta });
     if (error) throw new HttpError(500, error.message);
