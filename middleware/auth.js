@@ -65,18 +65,28 @@ function sessaoConhecida(token) {
   return sessoes.espiar(token) !== undefined && tokenNoPrazo(token);
 }
 
+// O Supabase Auth não respondeu (rede, ou erro DELE: 5xx) — não é o token que é inválido.
+function authForaDoAr(erro) {
+  return isAuthRetryableFetchError(erro) || Number(erro?.status) >= 500;
+}
+
 async function validarNoSupabase(token) {
   const { data, error } = await supabase.auth.getUser(token);
-  if (error && isAuthRetryableFetchError(error)) throw error; // rede, não token inválido
+  if (error && authForaDoAr(error)) throw error; // rede/servidor, não token inválido
   return error || !data?.user ? null : data.user;
 }
+
+// RODADA 28 — 401 passou a significar, para o app, "a sessão acabou: sai deste aparelho e vai para o
+// login" (lib/api.js). Então 401 só pode sair quando o Supabase DISSE que o token não vale. Sem sessão
+// em cache e com o Supabase Auth fora do ar, o motor não sabe — e a resposta honesta é 503 (antes era
+// 401, e um soluço do Supabase ia deslogar todo mundo que estivesse abrindo o app naquele minuto).
+const MSG_AUTH_FORA = 'Não deu para confirmar sua sessão agora. Tente de novo em instantes.';
 
 async function getUserCacheado(token) {
   try {
     return await sessoes.obter(token, () => validarNoSupabase(token));
   } catch (erro) {
-    // Sem sessão em cache e o Supabase não respondeu: 401, como sempre foi.
-    if (isAuthRetryableFetchError(erro)) return null;
+    if (authForaDoAr(erro)) throw new HttpError(503, MSG_AUTH_FORA, 'AUTH_INDISPONIVEL');
     throw erro;
   }
 }

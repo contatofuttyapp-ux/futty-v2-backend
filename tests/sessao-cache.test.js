@@ -100,11 +100,35 @@ test('Supabase fora do ar na revalidação: a sessão fica', async (t) => {
   assert.equal((await getUserCacheado(tk))?.id, 'u1', 'um soluço de rede deslogou a pessoa');
 });
 
-test('sem sessão em cache e Supabase fora do ar: null (401), como antes', async () => {
+// RODADA 28 — para o app, 401 = "a sessão acabou, vai para o login". Com o Supabase Auth fora do ar o
+// motor não sabe se o token vale: 503, nunca 401 (antes era 401, e um soluço deslogava quem abrisse o app).
+test('sem sessão em cache e Supabase fora do ar: 503 AUTH_INDISPONIVEL, nunca 401', async () => {
   const auth = authFalso();
   auth.resposta = () => ({ data: { user: null }, error: new AuthRetryableFetchError('fetch failed', 0) });
   const { getUserCacheado } = carregarAuth(auth);
+  await assert.rejects(getUserCacheado(token(3600)), (e) => e.status === 503 && e.code === 'AUTH_INDISPONIVEL');
+});
+
+test('Supabase Auth com erro DELE (5xx): 503 também — o token não foi recusado', async () => {
+  const auth = authFalso();
+  auth.resposta = () => ({ data: { user: null }, error: new AuthApiError('Internal Server Error', 500, 'unexpected_failure') });
+  const { getUserCacheado } = carregarAuth(auth);
+  await assert.rejects(getUserCacheado(token(3600)), (e) => e.status === 503);
+});
+
+test('token recusado pelo Supabase (4xx): null → 401, como sempre', async () => {
+  const auth = authFalso();
+  auth.resposta = () => ({ data: { user: null }, error: new AuthApiError('Session from session_id claim in JWT does not exist', 403, 'session_not_found') });
+  const { getUserCacheado } = carregarAuth(auth);
   assert.equal(await getUserCacheado(token(3600)), null);
+});
+
+test('requireAuth: Supabase fora do ar vira 503 no pedido, não 401', async () => {
+  const auth = authFalso();
+  auth.resposta = () => ({ data: { user: null }, error: new AuthRetryableFetchError('fetch failed', 0) });
+  const { requireAuth } = carregarAuth(auth);
+  const erro = await new Promise((resolve) => requireAuth({ headers: { authorization: `Bearer ${token(3600, 'x')}` } }, {}, resolve));
+  assert.equal(erro?.status, 503);
 });
 
 test('invalidarSessaoDoPedido apaga na hora, mesmo com revalidação em voo', async () => {
