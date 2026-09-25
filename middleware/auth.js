@@ -56,6 +56,15 @@ function tokenNoPrazo(token) {
   }
 }
 
+/**
+ * true se o motor já validou este token há pouco, sem ir à rede. É o que separa uma
+ * sessão de verdade de um Authorization qualquer: os limiters gerais da /api só
+ * tiram do balde por IP o pedido que passa neste teste (middleware/limiters.js).
+ */
+function sessaoConhecida(token) {
+  return sessoes.espiar(token) !== undefined && tokenNoPrazo(token);
+}
+
 async function validarNoSupabase(token) {
   const { data, error } = await supabase.auth.getUser(token);
   if (error && isAuthRetryableFetchError(error)) throw error; // rede, não token inválido
@@ -152,4 +161,4 @@ function invalidarSessaoDoPedido(req) {
   if (userId) sessoes.invalidarSe((user) => user.id === userId);
 }
 
-module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido, getUserCacheado };
+module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido, getUserCacheado, bearerToken, sessaoConhecida };

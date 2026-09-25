@@ -34,8 +34,9 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
-const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 
+const { criarLimitesDaApi, criarLimiteDeAvatar } = require('./middleware/limiters');
+const { bearerToken, sessaoConhecida } = require('./middleware/auth');
 const { supabase, ensureAvatarsBucket } = require('./utils/db');
 const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
 const { carregarModelo } = require('./utils/nsfwFilter');
@@ -149,60 +150,24 @@ app.use(compression({ threshold: 1024 }));
 // para que o rate limiter conte por IP real do cliente, e não pelo IP do proxy.
 app.set('trust proxy', 1);
 
-// Rate limiting geral: protege todas as rotas /api de abuso.
-// DEV (31-jul): fora de produção o tecto sobe para 2000 — numa tarde de teste o
-// dono + o Claude + o hot-reload estouravam os 200 e o app "morria" por 15 min.
-// Em produção (NODE_ENV=production) os 200 continuam valendo.
-// VELOCIDADE 4: a web passou a falar com o motor através de uma função na
-// Cloudflare (frontend/functions/api/[[path]].js), para acabar com o preflight.
-// O efeito colateral é que, visto daqui, TODOS esses pedidos chegam do mesmo IP
-// — o do edge. Um tecto por IP juntaria pessoas diferentes no mesmo balde e
-// bastavam quatro a navegar ao mesmo tempo para o app "cair" 15 minutos para
-// toda a gente. O edge reencaminha o IP real em CF-Connecting-IP; quando esse
-// header vem, é ele que conta.
-// O empate, de olhos abertos: quem bata direto no Cloud Run pode forjar o
-// header e trocar de balde. O tecto por IP é a rede grossa (anti-tráfego
-// anónimo); a rede fina é por utilizador (middleware/limiters.js) e essa não se
-// forja sem a sessão de alguém.
-function chaveDoPedido(req) {
-  const doEdge = req.get('cf-connecting-ip');
-  return ipKeyGenerator(doEdge || req.ip);
-}
-
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: process.env.NODE_ENV === 'production' ? 200 : 2000,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: chaveDoPedido,
-  message: { error: 'Muitos pedidos. Tente de novo mais tarde.' },
-  // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): /api/media/:token é o proxy
-  // de imagem — um feed com muitas fotos faz várias chamadas de uma vez e
-  // esgotava os 200/15min do limiter geral por IP. Tem o próprio limiter,
-  // mais largo (routes/media.js), então sai da conta daqui para não somar dois
-  // tectos apertados. NB: dentro de app.use('/api', ...) o Express já tira o
-  // prefixo /api de req.path (confirmado com um teste rápido), por isso o
-  // check é /media, não /api/media.
-  // VELOCIDADE 4: o preflight já morre no cors() lá em cima, mas contá-lo aqui
-  // seria contar duas vezes cada chamada (OPTIONS + o pedido real) e cortar o
-  // tecto a meio. Ignorar OPTIONS é a rede de segurança para o dia em que
-  // alguém trocar a ordem dos middleware.
-  skip: (req) => req.method === 'OPTIONS' || req.path.startsWith('/media'),
-});
-app.use('/api', apiLimiter);
+// Rate limiting geral: protege todas as rotas /api de abuso. Em DOIS baldes, e
+// cada pedido cai em um só: por IP (rede grossa, anti-tráfego anônimo) e por
+// sessão (rede fina, para quem o motor já validou). Os tetos, o critério e o
+// porquê estão em middleware/limiters.js (hotfix 25: o IP da casa do dono e o
+// Wi-Fi da quadra esgotavam o balde de todo mundo). DEV (31-jul): fora de
+// produção os tetos sobem; numa tarde de teste o dono + o Claude + o hot-reload
+// estouravam o de produção e o app "morria" por 15 min.
+// VELOCIDADE 4: a web fala com o motor por uma função na Cloudflare
+// (frontend/functions/api/[[path]].js), e visto daqui todos esses pedidos
+// chegam do mesmo IP, o do edge; ele reencaminha o IP real em CF-Connecting-IP.
+// /api/media tem o limiter próprio (routes/media.js).
+app.use('/api', ...criarLimitesDaApi({ tokenDoPedido: bearerToken, sessaoConhecida }));
 
 // Rate limiting restrito para endpoints caros/abusáveis. NB: não há rotas de
 // login/registo no backend (a auth é feita no frontend via Supabase Auth), por
 // isso o limite estrito aplica-se à geração de avatar IA (custa $ no fal.ai) e
-// ao upload de avatar.
-const strictLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 20,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Muitas tentativas. Tente de novo em 15 minutos.' },
-});
-app.use('/api/me/avatar', strictLimiter); // cobre também /api/me/avatar/ai
+// ao upload de avatar. Conta por pessoa (sessão), não por IP.
+app.use('/api/me/avatar', criarLimiteDeAvatar({ tokenDoPedido: bearerToken })); // cobre também /api/me/avatar/ai
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));

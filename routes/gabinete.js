@@ -5,6 +5,7 @@
 // digno, SEM inventar números. Ver SPEC-GABINETE v3.
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
+const { LIMITES } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
@@ -27,13 +28,17 @@ const inicioDiaUTC = (d) => { const x = new Date(d); x.setUTCHours(0, 0, 0, 0); 
 // 6,6× abaixo do real.
 const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 
-// Rate limiters ativos — manifesto estático, sincronizado à mão com server.js
-// (apiLimiter/strictLimiter) e media.js/limiters.js (não há API pública do
-// express-rate-limit para ler a config de volta de uma instância já criada).
+// Rate limiters ativos — manifesto estático (não há API pública do
+// express-rate-limit para ler a config de volta de uma instância já criada). Os
+// quatro primeiros leem os tetos de middleware/limiters.js (LIMITES), os mesmos que
+// os limiters usam; os por utilizador abaixo seguem sincronizados à mão com aquele
+// arquivo.
+const EM_DEV = process.env.NODE_ENV === 'production' ? '' : ' (dev)';
 const RATE_LIMITS_ATIVOS = [
-  { rota: 'global · toda /api (exceto /api/media)', limite: process.env.NODE_ENV === 'production' ? '200/15min por IP' : '2000/15min por IP (dev)' },
-  { rota: 'GET /api/media/:token', limite: '600/15min por IP' },
-  { rota: 'POST /api/me/avatar[/ai]', limite: '20/15min por IP' },
+  { rota: 'global · toda /api (exceto /api/media), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
+  { rota: 'GET /api/media/:token', limite: `${LIMITES.midia}/15min por IP` },
+  { rota: 'POST /api/me/avatar[/ai]', limite: `${LIMITES.avatar}/15min por sessão (sem sessão: por IP)` },
   { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
   { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
   { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por utilizador (partilhado)' },

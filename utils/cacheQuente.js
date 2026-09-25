@@ -84,6 +84,14 @@ function criarCache({ nome, ttlMs, max = 1000, guardarSe = () => true, servirVel
         registrarCache(nome, false, performance.now() - inicio);
       }
     },
+    /**
+     * O valor guardado para a chave, fresco ou vencido, sem ir à rede nem renovar
+     * nada; undefined se não houver. Serve a quem só precisa saber se o cache já
+     * conhece a chave.
+     */
+    espiar(chave) {
+      return entradas.get(chave)?.valor;
+    },
     /** Grava um valor já conhecido (quem acabou de escrever vê a própria escrita). */
     definir(chave, valor) {
       emVoo.delete(chave);

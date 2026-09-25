@@ -18,7 +18,7 @@
 const crypto = require('node:crypto');
 const express = require('express');
 const sharp = require('sharp');
-const { rateLimit } = require('express-rate-limit');
+const { criarLimiteDeMidia } = require('../middleware/limiters');
 const { supabase } = require('../utils/db');
 const { verificarToken } = require('../utils/mediaToken');
 
@@ -66,16 +66,11 @@ function normalizarLargura(bruto) {
 }
 
 // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): isento do limiter geral da
-// /api (server.js, apiLimiter — 200/15min) porque um feed com muitas fotos
-// dispara uma chamada por <img>, de uma vez. Sem sessão (o token HMAC é a
-// própria autorização), por isso conta por IP, não por utilizador.
-const mediaLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 600,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Muitos pedidos de imagem. Tente de novo em alguns minutos.' },
-});
+// /api (server.js) porque um feed com muitas fotos dispara uma chamada por
+// <img>, de uma vez. Sem sessão (o token HMAC é a própria autorização), por isso
+// conta por IP, o real (CF-Connecting-IP quando vem, senão req.ip). Teto e chave
+// em middleware/limiters.js (hotfix 25).
+const mediaLimiter = criarLimiteDeMidia();
 
 router.get('/api/media/:token', mediaLimiter, async (req, res) => {
   const alvo = verificarToken(req.params.token);
