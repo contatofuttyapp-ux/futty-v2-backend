@@ -20,6 +20,29 @@ if (pushConfigurado) {
   console.warn('[Futty] Push desativado: faltam VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY no .env.');
 }
 
+// COFRE 25-set — o par VAPID foi trocado. Toda subscrição feita com a chave ANTIGA passa a ser recusada pelo push
+// service com 403 (FCM: "SenderId mismatch"; os outros: JWT que não bate com a inscrição): ela nunca mais serve, então
+// sai do banco — e o cliente se inscreve de novo sozinho na próxima abertura do app (usePushNotifications).
+// 404/410 = expirada/removida pelo próprio browser, como sempre. Qualquer outro código (429, 5xx, rede) é passageiro:
+// a linha fica.
+const CODIGOS_DE_SUBSCRICAO_MORTA = [403, 404, 410];
+
+/** O erro do web-push diz que ESTA subscrição nunca mais vai servir? */
+function subscricaoMorta(err) {
+  return CODIGOS_DE_SUBSCRICAO_MORTA.includes(err?.statusCode);
+}
+
+/** Apaga a subscrição se o erro diz que ela morreu. Devolve true se apagou. Nunca lança. */
+async function limparSeMorta(err, subscricaoId) {
+  if (!subscricaoMorta(err)) return false;
+  try {
+    await supabase.from('push_subscriptions').delete().eq('id', subscricaoId);
+    return true;
+  } catch {
+    return false; // o erro que importa é o do envio; a limpeza tenta de novo no próximo
+  }
+}
+
 /** POST /api/push/subscribe — guarda (upsert) a subscrição do utilizador. */
 router.post(
   '/subscribe',
@@ -116,10 +139,7 @@ router.post(
         try {
           await webpush.sendNotification(subscription, body);
         } catch (err) {
-          // 404/410 = subscrição expirada → limpar.
-          if (err?.statusCode === 404 || err?.statusCode === 410) {
-            await supabase.from('push_subscriptions').delete().eq('id', s.id);
-          }
+          await limparSeMorta(err, s.id); // 403 (VAPID trocado) / 404 / 410: não serve mais
           throw err;
         }
       })
@@ -180,10 +200,7 @@ router.post(
         try {
           await webpush.sendNotification(subscription, body);
         } catch (err) {
-          // 404/410 = subscrição expirada → limpar.
-          if (err?.statusCode === 404 || err?.statusCode === 410) {
-            await supabase.from('push_subscriptions').delete().eq('id', s.id);
-          }
+          await limparSeMorta(err, s.id); // 403 (VAPID trocado) / 404 / 410: não serve mais
           throw err;
         }
       })
@@ -199,7 +216,7 @@ router.post(
 
 /**
  * Envia uma notificação push a uma lista de utilizadores (fire-and-forget).
- * Nunca lança: erros são engolidos; subscrições mortas (404/410) são apagadas.
+ * Nunca lança: erros são engolidos; subscrições mortas (403/404/410) são apagadas.
  * @param {string[]} userIds destinatários
  * @param {{title:string, body?:string, url?:string}} payload
  */
@@ -227,10 +244,7 @@ async function enviarNotificacao(userIds, payload) {
         try {
           await webpush.sendNotification(subscription, body);
         } catch (err) {
-          // 404/410 = subscrição expirada/removida pelo browser → limpar.
-          if (err?.statusCode === 404 || err?.statusCode === 410) {
-            await supabase.from('push_subscriptions').delete().eq('id', s.id);
-          }
+          await limparSeMorta(err, s.id); // 403 (VAPID trocado) / 404 / 410: não serve mais
         }
       })
     );
@@ -240,4 +254,5 @@ async function enviarNotificacao(userIds, payload) {
 }
 
 router.enviarNotificacao = enviarNotificacao;
+router.subscricaoMorta = subscricaoMorta;
 module.exports = router;
