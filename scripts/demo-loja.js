@@ -2,7 +2,10 @@
 //
 //   node scripts/demo-loja.js              cria tudo (aborta se já existir)
 //   node scripts/demo-loja.js --sortear    sorteia o próximo jogo (algoritmo real)
-//   node scripts/demo-loja.js --limpar     apaga tudo o que o script criou
+//   node scripts/demo-loja.js --reagendar  põe o próximo jogo num domingo à frente e desfaz o
+//                                          sorteio; não apaga nem cria nada (é o que refaz as capturas)
+//   node scripts/demo-loja.js --limpar     apaga tudo o que o script criou (INCLUI a conta demo-loja@,
+//                                          que é a do revisor das lojas: só com o Pedro pedindo)
 //   opções: --sem-figurinha (não chama a API de IA)
 //
 // Correr a partir de backend/ (utils/db.js lê o .env do diretório atual).
@@ -21,6 +24,7 @@ const { removerFicheirosPorUrl } = require('../utils/storage');
 const args = process.argv.slice(2);
 const LIMPAR = args.includes('--limpar');
 const SORTEAR = args.includes('--sortear');
+const REAGENDAR = args.includes('--reagendar');
 const SEM_FIGURINHA = args.includes('--sem-figurinha');
 
 const LOJA = path.resolve(__dirname, '..', '..', '..', 'LOJA');
@@ -56,6 +60,15 @@ const aviso = (m) => console.warn('!', m);
 const round1 = (n) => Math.round(n * 10) / 10;
 // Brasília é UTC-3 sem horário de verão: 9h locais = 12h UTC.
 const brt = (y, m, d, h = 9, min = 0) => new Date(Date.UTC(y, m - 1, d, h + 3, min)).toISOString();
+
+// Domingo 9h em Brasília, entre 7 e 13 dias à frente. O app trata jogo com data
+// vencida como encerrado: com a data fixa, o Início perdia o "Vou / Não vou".
+function proximoDomingo() {
+  const d = new Date(Date.now() - 3 * 3600000);
+  d.setUTCDate(d.getUTCDate() + 7);
+  d.setUTCDate(d.getUTCDate() + ((7 - d.getUTCDay()) % 7));
+  return brt(d.getUTCFullYear(), d.getUTCMonth() + 1, d.getUTCDate());
+}
 
 // forca = nota média que os colegas dão (0,5 a 5). gr = goleiro. cabeca = cabeça de chave.
 const JOGADORES = [
@@ -104,7 +117,7 @@ const JOGOS_PASSADOS = [
   { data: brt(2026, 8, 30), placar: [3, 3] },
   { data: brt(2026, 9, 6), placar: [4, 3] },
 ];
-const PROXIMO_JOGO = { data: brt(2026, 9, 20), local: 'Society do Guará II', porTime: 4 };
+const PROXIMO_JOGO = { data: proximoDomingo(), local: 'Society do Guará II', porTime: 4 };
 const CONFIRMADOS_PROXIMO = ['Bruninho', 'Tiãozinho', 'Careca', 'Índio', 'Marquinhos', 'Paulinho Gaúcho', 'Dudu', 'Cabeção', 'Nego Di'];
 const RECUSARAM_PROXIMO = ['Fabinho', 'Renatinho'];
 
@@ -385,7 +398,7 @@ async function criarProximoJogo(ids, teamId) {
     .concat(RECUSARAM_PROXIMO.map((a) => ({ game_id: game.id, user_id: ids[a], confirmado: false, goleiro: false, cabeca_chave: false })));
   const { error: e2 } = await supabase.from('game_players').insert(linhas);
   if (e2) throw new Error(`game_players(próximo): ${e2.message}`);
-  ok(`próximo jogo domingo 20/09 às 9h com ${CONFIRMADOS_PROXIMO.length} confirmados`);
+  ok(`próximo jogo em ${PROXIMO_JOGO.data} com ${CONFIRMADOS_PROXIMO.length} confirmados`);
   return game;
 }
 
@@ -519,6 +532,18 @@ async function sortear() {
   ok(`sorteio gravado (semente ${resultado.seed}) — /equipa/${estado.teamSlug}/jogo/${game.id}/sorteio`);
 }
 
+// Devolve o próximo jogo ao estado de vitrine (domingo à frente, sem sorteio),
+// sem tocar em contas, figurinha ou times.
+async function reagendar() {
+  if (!fs.existsSync(ARQ_ESTADO)) throw new Error('LOJA/demo-estado.json não existe: corra o script sem opções primeiro.');
+  const estado = JSON.parse(fs.readFileSync(ARQ_ESTADO, 'utf8'));
+  const { error } = await supabase.from('games')
+    .update({ data: PROXIMO_JOGO.data, status: 'agendado', sorteio_realizado: false, times_resultado: null })
+    .eq('id', estado.proximoJogoId);
+  if (error) throw new Error(`games(reagendar): ${error.message}`);
+  ok(`próximo jogo (${estado.proximoJogoId.slice(0, 8)}) reagendado para ${PROXIMO_JOGO.data}, sem sorteio`);
+}
+
 async function limpar() {
   // 1) Contas do demo: public.users + auth (órfãos de uma criação interrompida).
   const { data: rows } = await supabase.from('users').select('id, email').ilike('email', `${PREFIXO}%@futtymock.com`);
@@ -570,6 +595,7 @@ async function limpar() {
 (async () => {
   if (LIMPAR) await limpar();
   else if (SORTEAR) await sortear();
+  else if (REAGENDAR) await reagendar();
   else await criar();
 })().catch((e) => {
   console.error('ERRO:', e.message);
