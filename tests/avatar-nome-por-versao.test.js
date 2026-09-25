@@ -138,9 +138,9 @@ test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o d
   // O QUE ESTÁ NO BUCKET BATE COM O QUE A TABELA DIZ. Esta é literalmente a
   // conta que a ETAPA 0 faz antes de gastar dinheiro — se falhar aqui, a trava
   // de hash recusaria toda a gente. Compara-se com `foto_hash` e não com o
-  // sha do ficheiro original de propósito: `receberAvatar` reescreve o buffer
-  // ao auto-orientar pelo EXIF (.rotate()), portanto o que é guardado nunca
-  // são os bytes exactos que saíram do cliente — e o hash é tirado depois.
+  // sha do ficheiro original de propósito: `receberAvatar` só reescreve o buffer
+  // quando há EXIF a corrigir (.rotate()), então o guardado pode não ser o byte a
+  // byte que saiu do cliente — e o hash é sempre tirado dos bytes GUARDADOS.
   const { data: blob, error } = await supabase.storage.from('avatars').download(caminhoB);
   assert.equal(error, null, `devia conseguir baixar ${caminhoB}: ${error?.message}`);
   const bytesNoBucket = Buffer.from(await blob.arrayBuffer());
@@ -152,8 +152,17 @@ test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o d
 
   // A versão anterior saiu do bucket (best-effort na rota, mas tem de acontecer
   // no caminho feliz — senão cada troca de foto deixa lixo por lá para sempre).
-  const { error: erroAntiga } = await supabase.storage.from('avatars').download(caminhoA);
-  assert.ok(erroAntiga, `a foto anterior (${caminhoA}) devia ter sido apagada depois do update`);
+  // Desde a rodada 27 a faxina roda DEPOIS da resposta (o POST não espera o Storage apagar), então
+  // espera-se um pouco. E a existência lê-se pelo LIST (metadados), nunca pelo download: um objeto
+  // já lido continua servido pelo cache do Storage por vários segundos depois do remove.
+  const nomeAntigo = caminhoA.split('/').pop();
+  let aindaLa = true;
+  for (let i = 0; i < 60 && aindaLa; i++) {
+    const { data: lista } = await supabase.storage.from('avatars').list('public', { limit: 20, search: nomeAntigo });
+    aindaLa = (lista || []).some((f) => f.name === nomeAntigo);
+    if (aindaLa) await new Promise((r) => setTimeout(r, 250));
+  }
+  assert.equal(aindaLa, false, `a foto anterior (${caminhoA}) devia ter sido apagada depois do update`);
 });
 
 test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e sem crédito gasto', async (t) => {

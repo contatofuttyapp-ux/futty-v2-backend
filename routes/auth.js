@@ -9,6 +9,8 @@ const { excluirContaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { obterMe, marcarFigurinhaStatus } = require('../services/inicio');
+const { aquecerDerivados } = require('../utils/derivadosMidia');
+const { orientarSePreciso } = require('../utils/orientarFoto');
 const { avatarEhFigurinhaNossa, devePreservarAvatar } = require('../utils/figurinhaRegra');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
@@ -74,14 +76,14 @@ function receberAvatar(req, res, next) {
     // ANTES de qualquer outra operação: primeira coisa a tocar no buffer.
     if (req.file) {
       try {
-        req.file.buffer = await sharp(req.file.buffer).rotate().toBuffer();
+        req.file.buffer = await orientarSePreciso(req.file.buffer);
       } catch {
         return next(new HttpError(400, 'Não foi possível ler essa imagem.'));
       }
     }
     if (req.fileOriginal) {
       try {
-        req.fileOriginal.buffer = await sharp(req.fileOriginal.buffer).rotate().toBuffer();
+        req.fileOriginal.buffer = await orientarSePreciso(req.fileOriginal.buffer);
       } catch {
         return next(new HttpError(400, 'Não foi possível ler a foto original.'));
       }
@@ -113,7 +115,7 @@ function receberRecorte(req, res, next) {
     }
     if (req.file) {
       try {
-        req.file.buffer = await sharp(req.file.buffer).rotate().toBuffer();
+        req.file.buffer = await orientarSePreciso(req.file.buffer);
       } catch {
         return next(new HttpError(400, 'Não foi possível ler essa imagem.'));
       }
@@ -379,38 +381,42 @@ router.post(
     // (sufixo "-original"), nunca confundível com o recorte.
     const caminho = caminhoFotoNovo(userId, ext);
     const caminhoOriginal = original && extOriginal ? caminhoFotoOriginalNovo(userId, extOriginal) : null;
-    // 2. Upload para o Supabase Storage (bucket "avatars"). Sem upsert: o
-    // carimbo de tempo já torna o nome único, e se por absurdo colidisse, o
-    // certo é falhar aqui em vez de escrever por cima do objeto de outra
-    // chamada — que é precisamente o hábito que esta rodada veio tirar.
     console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho, caminhoOriginal });
-    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
-      contentType: file.mimetype,
+
+    // RODADA 27 (25-set) — gravar o recorte, gravar a original (opcional) e ler o estado atual da
+    // pessoa saem JUNTOS: eram três idas ao Supabase em série e nenhuma depende das outras (a
+    // rota levava seis a sete idas até responder; ver o resto depois do res.json). Sem upsert:
+    // o carimbo de tempo já torna o nome único, e se por absurdo colidisse, o certo é falhar
+    // aqui em vez de escrever por cima do objeto de outra chamada.
+    const gravar = (destino, arquivo) => supabase.storage.from('avatars').upload(destino, arquivo.buffer, {
+      contentType: arquivo.mimetype,
       upsert: false,
       cacheControl: '3600',
     });
-    if (upErr) {
-      console.error('[avatar] erro no upload:', upErr.message);
-      throw new HttpError(500, upErr.message);
+    const [upRecorte, upOriginal, atual] = await Promise.all([
+      gravar(caminho, file),
+      caminhoOriginal ? gravar(caminhoOriginal, original) : Promise.resolve(null),
+      lerEstadoDoAvatar(userId),
+    ]);
+    if (upRecorte.error) {
+      console.error('[avatar] erro no upload:', upRecorte.error.message);
+      // A original subiu junto e, sem recorte, não serve a ninguém.
+      if (caminhoOriginal && !upOriginal?.error) apagarAntigo(caminhoOriginal, 'original sem recorte');
+      throw new HttpError(500, upRecorte.error.message);
     }
-    if (caminhoOriginal) {
-      const { error: upOrigErr } = await supabase.storage.from('avatars').upload(caminhoOriginal, original.buffer, {
-        contentType: original.mimetype,
-        upsert: false,
-        cacheControl: '3600',
-      });
-      // A original é um "nice to have" (Ajustar enquadramento cai no fallback
-      // sem ela) — falhar o upload dela não pode derrubar o recorte, que já
-      // está gravado no Storage e é o que o card usa.
-      if (upOrigErr) console.error('[avatar] upload da original falhou (segue sem ela):', upOrigErr.message);
-    }
+    // A original é um "nice to have" (Ajustar enquadramento cai no fallback sem ela) — falhar o
+    // upload dela não pode derrubar o recorte, que já está gravado no Storage e é o que o card
+    // usa. E foto_original_url só aponta para ela se ela existe: antes apontava para um objeto
+    // que não tinha subido, e o "Ajustar enquadramento" abria com erro.
+    const originalGravada = !!caminhoOriginal && !upOriginal?.error;
+    if (upOriginal?.error) console.error('[avatar] upload da original falhou (segue sem ela):', upOriginal.error.message);
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     // O ?v= já não é o que garante a actualização (o caminho é novo a cada
     // foto), mas fica: é o que distingue versões no proxy de mídia, que usa o
     // `v` na chave de cache dos derivados.
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
-    const originalUrl = caminhoOriginal
+    const originalUrl = originalGravada
       ? `${supabase.storage.from('avatars').getPublicUrl(caminhoOriginal).data.publicUrl}?v=${Date.now()}`
       : null;
     // URL público — deve usar o domínio do Supabase, não localhost.
@@ -428,15 +434,6 @@ router.post(
     //    sempre. (Hotfix 26: antes decidia por avatar_url ≠ foto_url, e a foto
     //    do Google copiada pelo trigger contava como figurinha: a foto nova ia
     //    para foto_url e o card nunca mudava.)
-    let atual = await getUserById(userId, 'foto_url, foto_original_url, avatar_url, card_modo');
-    if (!atual) {
-      // Sem a 056/057, as colunas novas não existem e o select acima falha
-      // inteiro (o PostgREST recusa a query toda por uma coluna desconhecida)
-      // — cai aqui sem elas, uma de cada vez. `ensureUserRow` já rodou: se
-      // ainda vier vazio, é mesmo coluna que falta, não a linha.
-      atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
-    }
-    if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
     const modoFoto = atual?.card_modo === 'foto';
     const preservar = devePreservarAvatar({ avatarUrlAtual: atual?.avatar_url, cardModo: atual?.card_modo });
     const novoAvatarUrl = preservar ? atual.avatar_url : avatarUrl;
@@ -474,32 +471,19 @@ router.post(
       throw new HttpError(500, updErr.message);
     }
 
-    // A foto anterior deixou de ser referenciada por `users.foto_url` — sai do
-    // bucket. Só DEPOIS do update: se apagasse antes e o update falhasse, o
-    // utilizador ficava sem foto nenhuma. Não se apaga quando o caminho é o
-    // mesmo (conta antiga, nome fixo) nem quando o avatar_url ainda aponta
-    // para ela (quem nunca gerou figurinha vê a própria foto no card).
-    const caminhoAntigo = caminhoNoBucket(atual?.foto_url, 'avatars');
-    const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
-    if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'foto substituída');
-    // A original anterior só sai se esta chamada trouxe uma NOVA (senão não
-    // haveria original nenhuma sobrevivendo no card de ninguém).
-    if (originalUrl) {
-      const caminhoOriginalAntigo = caminhoNoBucket(atual?.foto_original_url, 'avatars');
-      if (caminhoOriginalAntigo && caminhoOriginalAntigo !== caminhoOriginal) {
-        await apagarAntigo(caminhoOriginalAntigo, 'original substituída');
-      }
-    }
-
     // A FIGURINHA COMUM FICA PRONTA AQUI (SPEC-FIGURINHA-3 §3): ela é a foto na
     // moldura — assim que há foto, não há nada a esperar. O 'gerando' passa a
     // existir só para a Brilhante. Sem isto, quem trocasse a foto logo depois
     // de uma Brilhante falhada ficava preso no "não deu certo" do Início.
-    // Best-effort (coluna da migração 051): nunca derruba o upload.
+    // Best-effort (coluna da migração 051): nunca derruba o upload. Sai ANTES da
+    // resposta (sem esperar por ela): quem relê o /api/me a seguir já vê 'pronta'.
     marcarFigurinhaStatus(userId, 'pronta');
 
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: preservar, modoFoto, comOriginal: !!originalUrl });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null });
+
+    // RODADA 27 — a pessoa já tem o que precisa; o resto é faxina e adiantamento.
+    faxinaDaFotoNova({ atual, caminho, caminhoOriginal, originalUrl, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype, motivoAntiga: 'foto substituída' });
   })
 );
 
@@ -526,15 +510,18 @@ router.put(
     const userId = req.user.id;
     await ensureUserRow(req.user);
 
-    let atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
-    if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
-    if (!atual?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
-
+    // RODADA 27 — ler o estado e gravar o recorte novo saem juntos (não dependem um do outro).
+    // Sem foto, não há o que reenquadrar: o objeto que subiu à toa é apagado.
     const caminho = caminhoFotoNovo(userId, ext);
-    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, file.buffer, {
-      contentType: file.mimetype, upsert: false, cacheControl: '3600',
-    });
-    if (upErr) throw new HttpError(500, upErr.message);
+    const [atual, upRecorte] = await Promise.all([
+      lerEstadoDoAvatar(userId, { comOriginal: false }),
+      supabase.storage.from('avatars').upload(caminho, file.buffer, { contentType: file.mimetype, upsert: false, cacheControl: '3600' }),
+    ]);
+    if (!atual?.foto_url) {
+      if (!upRecorte.error) apagarAntigo(caminho, 'recorte sem foto');
+      throw new HttpError(400, 'Adicione uma foto primeiro.');
+    }
+    if (upRecorte.error) throw new HttpError(500, upRecorte.error.message);
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
@@ -553,13 +540,12 @@ router.put(
     }
     if (updErr) throw new HttpError(500, updErr.message);
 
-    const caminhoAntigo = caminhoNoBucket(atual.foto_url, 'avatars');
-    const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
-    if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'recorte reajustado');
-
     marcarFigurinhaStatus(userId, 'pronta');
     console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: preservar });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
+
+    // RODADA 27 — a foto anterior sai e os derivados da nova ficam prontos DEPOIS da resposta.
+    faxinaDaFotoNova({ atual, caminho, caminhoOriginal: null, originalUrl: null, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype });
   })
 );
 
@@ -669,6 +655,47 @@ async function apagarAntigo(caminho, motivo) {
   } catch (e) {
     console.warn('[avatar] não consegui apagar a versão anterior (fica órfã):', { caminho, motivo, erro: e.message });
   }
+}
+
+/**
+ * O estado do avatar da pessoa (foto, original, avatar e modo do card), tolerando as migrações
+ * 056/057 por correr: o PostgREST recusa a query INTEIRA por uma coluna desconhecida, então cai
+ * sem elas, uma de cada vez. `ensureUserRow` já rodou: se ainda vier vazio, é mesmo coluna que falta.
+ */
+async function lerEstadoDoAvatar(userId, { comOriginal = true } = {}) {
+  let atual = comOriginal ? await getUserById(userId, 'foto_url, foto_original_url, avatar_url, card_modo') : null;
+  if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
+  if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
+  return atual;
+}
+
+/**
+ * O que sobra de trocar a foto e NÃO precisa segurar a resposta (RODADA 27, 25-set):
+ *   · apagar a foto e a original anteriores. Só depois de o banco estar gravado: se apagasse
+ *     antes e o update falhasse, a pessoa ficava sem foto nenhuma. Ficou depois da RESPOSTA
+ *     porque já não há update a esperar; o pior caso continua sendo um arquivo órfão (logado);
+ *   · deixar prontos os derivados que as telas vão pedir da foto nova (utils/derivadosMidia.js),
+ *     a partir dos bytes que o motor já tem: o primeiro pedido da própria pessoa deixa de pagar a
+ *     ida ao Storage e o sharp.
+ * Não lança e ninguém a espera.
+ */
+function faxinaDaFotoNova({ atual, caminho, caminhoOriginal, originalUrl, novoAvatarUrl, avatarUrl, buffer, tipo, motivoAntiga = 'recorte reajustado' }) {
+  (async () => {
+    const tarefas = [];
+    // Não se apaga quando o caminho é o mesmo (conta antiga, nome fixo) nem quando o avatar_url
+    // ainda aponta para ela (quem nunca gerou figurinha vê a própria foto no card).
+    const caminhoAntigo = caminhoNoBucket(atual?.foto_url, 'avatars');
+    const aindaEmUso = caminhoAntigo === caminho || caminhoAntigo === caminhoNoBucket(novoAvatarUrl, 'avatars');
+    if (caminhoAntigo && !aindaEmUso) tarefas.push(apagarAntigo(caminhoAntigo, motivoAntiga));
+    // A original anterior só sai se esta chamada trouxe uma NOVA (senão não haveria original
+    // nenhuma sobrevivendo no card de ninguém).
+    if (originalUrl) {
+      const caminhoOriginalAntigo = caminhoNoBucket(atual?.foto_original_url, 'avatars');
+      if (caminhoOriginalAntigo && caminhoOriginalAntigo !== caminhoOriginal) tarefas.push(apagarAntigo(caminhoOriginalAntigo, 'original substituída'));
+    }
+    tarefas.push(aquecerDerivados({ url: avatarUrl, buffer, tipo }));
+    await Promise.all(tarefas);
+  })().catch((e) => console.error('[avatar] faxina depois da resposta falhou:', e.message));
 }
 
 // RODADA 19 — teto de "Minhas figurinhas" (decisão do dono, 23-set).

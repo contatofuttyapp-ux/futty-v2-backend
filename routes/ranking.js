@@ -40,7 +40,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     // destaque), mais abaixo. Zero drift, zero DDL, sempre verdadeiro.
     supabase
       .from('team_members')
-      .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, cor_frame )')
+      .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, avatar_generico, cor_frame )')
       .eq('team_id', teamId),
     // Votos do time (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
@@ -120,6 +120,9 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
       nome_jogador: u.nome_jogador || null,
       avatar_url: u.avatar_url || null,
       foto_url: u.foto_url || null,
+      // Sem foto nem figurinha, a linha mostra o genérico que a pessoa ESCOLHEU (o mesmo da Presença e do
+      // Início), não uma silhueta "?": Rodada 27.
+      avatar_generico: u.avatar_generico || null,
       cor_frame: u.cor_frame || 'dourado',
       categoria: p.ehGR ? 'GR' : 'linha',
       nota: notaParaExibir(p.notaInterna),

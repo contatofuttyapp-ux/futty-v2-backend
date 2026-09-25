@@ -7,6 +7,7 @@ const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
+const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
 const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
@@ -196,6 +197,10 @@ router.get(
 
     const meu = players.find((p) => p.user_id === req.user.id) || null;
 
+    // O sorteio guardou o avatar de quando foi feito; quem trocou a foto depois aparece com a de hoje
+    // (utils/avataresDoSorteio.js). Vem do mesmo game_players que a lista de presença: sem ida nova.
+    const timesResultado = comAvataresAtuais(game.times_resultado, new Map((gp || []).filter((p) => p.users).map((p) => [p.users.id, p.users.avatar_url || null])));
+
     const team = game.teams;
     res.json({
       team: { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor, role },
@@ -208,7 +213,7 @@ router.get(
         jogadores_por_time: game.jogadores_por_time,
         max_jogadores: game.max_jogadores ?? null,
         sorteio_realizado: game.sorteio_realizado,
-        times_resultado: game.times_resultado,
+        times_resultado: timesResultado,
         historico: !!game.historico,
         // Cancelamento.
         cancelado: !!game.cancelado || game.status === 'cancelado',
@@ -271,10 +276,13 @@ router.get(
         // devolve erro → mapa vazio → TODOS caem em silhueta (fail-closed, seguro).
         const { data: donos } = await supabase
           .from('users')
-          .select('id, birthdate, mostrar_rosto_publico')
+          .select('id, birthdate, mostrar_rosto_publico, avatar_url')
           .in('id', [...ids]);
         (donos || []).forEach((u) => usersById.set(u.id, u));
       }
+      // A foto de hoje, não a de quando o sorteio foi feito (utils/avataresDoSorteio.js); a regra de
+      // privacidade abaixo decide depois se ela pode aparecer.
+      game.times_resultado = comAvataresAtuais(game.times_resultado, new Map([...usersById].map(([id, u]) => [id, u.avatar_url || null])));
       aplicarRostoPublico(game.times_resultado, usersById, `${req.protocol}://${req.get('host')}`);
     }
 

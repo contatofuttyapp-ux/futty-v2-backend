@@ -9,6 +9,7 @@
 // - FALHA ABERTA em erro de infra (modelo não carrega / decode falha): regista e
 //   deixa passar, para um problema técnico não derrubar TODOS os uploads. A recusa
 //   é só por deteção positiva, nunca por avaria.
+const path = require('node:path');
 const sharp = require('sharp');
 const { HttpError } = require('./http');
 
@@ -37,10 +38,36 @@ const IMAGENS = new Set(['image/jpeg', 'image/png', 'image/webp']);
 let _tf = null;
 let _modeloPromise = null;
 
+/**
+ * RODADA 27 (25-set) — o classificador roda no backend WASM do tfjs, não no CPU em JS puro.
+ * O motor não tem o tfjs-node, e o backend padrão em JS puro levava ~1 040 ms para classificar UMA
+ * foto de 224×224 (medido na bancada); no WASM são ~76 ms, com as MESMAS probabilidades (Neutral
+ * 0,699 · Drawing 0,279 · Hentai 0,014 · Porn 0,007 · Sexy 0,002 numa imagem de prova). Era a
+ * maior fatia do POST /api/me/avatar (a rede do Supabase, de São Paulo a São Paulo, é barata).
+ * Se o WASM não subir (binário, CPU, versão do Node), fica no CPU e regista: uma avaria de
+ * desempenho nunca pode derrubar o upload nem o filtro.
+ */
+async function escolherBackend(tf) {
+  try {
+    const wasm = require('@tensorflow/tfjs-backend-wasm');
+    wasm.setWasmPaths(`${path.dirname(require.resolve('@tensorflow/tfjs-backend-wasm'))}/`);
+    const ok = await tf.setBackend('wasm');
+    await tf.ready();
+    if (ok && tf.getBackend() === 'wasm') return 'wasm';
+    console.warn('[nsfw] o backend wasm não ficou ativo — segue no CPU (mais lento)');
+  } catch (e) {
+    console.warn('[nsfw] backend wasm indisponível — segue no CPU (mais lento):', e.message);
+  }
+  await tf.setBackend('cpu');
+  await tf.ready();
+  return 'cpu';
+}
+
 function carregarModeloInterno() {
   if (!_modeloPromise) {
     _modeloPromise = (async () => {
       _tf = require('@tensorflow/tfjs');
+      await escolherBackend(_tf);
       const nsfw = require('nsfwjs');
       const modelo = await nsfw.load(); // MobileNetV2 (224, quantizado)
       return modelo;
@@ -49,11 +76,16 @@ function carregarModeloInterno() {
   return _modeloPromise;
 }
 
+/** O backend do tfjs que está classificando ('wasm', 'cpu') ou null se o modelo ainda não carregou. */
+function backendAtivo() {
+  return _tf ? _tf.getBackend() : null;
+}
+
 /** Pré-carrega o modelo no arranque (não bloqueia nem rebenta se falhar). */
 async function carregarModelo() {
   try {
     await carregarModeloInterno();
-    console.log('[nsfw] modelo carregado (uploads de imagem filtrados)');
+    console.log(`[nsfw] modelo carregado (uploads de imagem filtrados) · backend ${backendAtivo()}`);
   } catch (e) {
     console.error('[nsfw] falha a carregar o modelo — uploads seguem SEM filtro:', e.message);
   }
@@ -129,4 +161,4 @@ async function filtroNSFWFailClosed(req, res, next) {
   }
 }
 
-module.exports = { filtroNSFW, filtroNSFWFailClosed, carregarModelo, classificar, LIMIAR, MSG };
+module.exports = { filtroNSFW, filtroNSFWFailClosed, carregarModelo, classificar, backendAtivo, LIMIAR, MSG };
