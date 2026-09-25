@@ -67,7 +67,7 @@ const lerGasto = async () => {
   const saude = await fetch(`${base}/api/health`).catch(() => null);
   if (!saude?.ok) { console.error(`Servidor não responde em ${base}. Sobe-o com PORT=${porta} node server.js`); process.exit(1); }
 
-  const auth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const auth = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sessao, error: errLogin } = await auth.auth.signInWithPassword({ email: EMAIL, password: senha });
   if (errLogin) { console.error('login da conta demo falhou:', errLogin.message); process.exit(1); }
   const token = sessao.session.access_token;

@@ -48,7 +48,7 @@ async function limpar() {
 }
 
 async function sessaoDe(email, senha) {
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const anon = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data, error } = await anon.auth.signInWithPassword({ email, password: senha });
   if (error) throw new Error(`login ${email}: ${error.message}`);
   const ref = new URL(process.env.SUPABASE_URL).hostname.split('.')[0];

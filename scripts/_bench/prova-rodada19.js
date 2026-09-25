@@ -70,7 +70,7 @@ async function main() {
   if (eGp) throw new Error(`game_players: ${eGp.message}`);
   console.log(`✓ conta em ${SLUG_TIME}, confirmada em ${jogos.length} jogos (Ranking já pode listar).`);
 
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const anon = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sess, error: eLogin } = await anon.auth.signInWithPassword({ email: EMAIL, password: SENHA });
   if (eLogin) throw new Error(`login: ${eLogin.message}`);
   const ref = new URL(process.env.SUPABASE_URL).hostname.split('.')[0];

@@ -47,7 +47,7 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
   const saude = await fetch(`${base}/api/health`).catch(() => null);
   if (!saude?.ok) { console.error(`Servidor não responde em ${base}.`); process.exit(1); }
 
-  const auth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const auth = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sessao, error } = await auth.auth.signInWithPassword({ email: EMAIL, password: senha });
   if (error) { console.error('login falhou:', error.message); process.exit(1); }
   const token = sessao.session.access_token;

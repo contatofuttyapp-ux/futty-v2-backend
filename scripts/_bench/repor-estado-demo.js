@@ -61,7 +61,7 @@ const caminhoDe = (url) => {
   const linha = bruto.split(new RegExp(String.fromCharCode(92, 114, 63, 92, 110))).map((l) => l.trim()).filter(Boolean).pop() || '';
   const senha = linha.includes(':') ? linha.split(':').pop().trim() : linha;
 
-  const auth = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const auth = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sessao, error } = await auth.auth.signInWithPassword({ email: EMAIL, password: senha });
   if (error) { console.error('login falhou:', error.message); process.exit(1); }
   const token = sessao.session.access_token;

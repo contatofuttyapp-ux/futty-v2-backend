@@ -66,7 +66,7 @@ async function main() {
   if (eSlot) throw new Error(`user_avatar_slots: ${eSlot.message}`);
   console.log(`✓ conta com 3 créditos, kit ${KIT_PINTADO} pintado, super-admin.`);
 
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const anon = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sess, error: eLogin } = await anon.auth.signInWithPassword({ email: EMAIL, password: SENHA });
   if (eLogin) throw new Error(`login: ${eLogin.message}`);
   const ref = new URL(process.env.SUPABASE_URL).hostname.split('.')[0];

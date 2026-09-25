@@ -189,7 +189,7 @@ async function criarTudo() {
   ok(`sorteio gravado — semente ${resultado.seed}.`);
 
   // Sessão do capitão (figurinha), para o ver-iphone.mjs navegar já autenticado.
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const anon = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sess, error: eLogin } = await anon.auth.signInWithPassword({ email: emailDe(capitao.apelido), password: SENHA });
   if (eLogin) throw new Error(`login capitão: ${eLogin.message}`);
   const ref = new URL(process.env.SUPABASE_URL).hostname.split('.')[0];

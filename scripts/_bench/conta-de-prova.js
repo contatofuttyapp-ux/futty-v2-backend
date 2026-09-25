@@ -65,7 +65,7 @@ async function acharPorEmail(email) {
     else console.log(`crédito: ${credito}`);
   }
 
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+  const anon = createClient(process.env.SUPABASE_URL, require('../../utils/chavesSupabase').chavePublica());
   const { data: sessao, error: erroLogin } = await anon.auth.signInWithPassword({ email: EMAIL, password: SENHA });
   if (erroLogin) { console.error('login:', erroLogin.message); process.exit(1); }
 
