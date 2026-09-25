@@ -68,6 +68,7 @@ const blocksRoutes = require('./routes/blocks');
 const inicioRoutes = require('./routes/inicio');
 const brilhantesRoutes = require('./routes/brilhantes');
 const diagnosticoRoutes = require('./routes/diagnostico');
+const telemetriaRoutes = require('./routes/telemetria');
 
 const app = express();
 
@@ -242,6 +243,7 @@ app.use(blocksRoutes); // /api/blocks — bloqueio entre jogadores (Apple UGC 1.
 app.use(inicioRoutes); // GET /api/inicio — agregado da tela Início (1 pedido só)
 app.use(brilhantesRoutes); // /api/brilhantes — direito, créditos e pedidos (SPEC-FIGURINHA-3)
 app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app (VELOCIDADE 4)
+app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima (Rodada 28), sem sessão
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {

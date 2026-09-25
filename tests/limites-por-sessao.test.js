@@ -71,8 +71,8 @@ async function rajada(base, rota, n, opcoes) {
   return status;
 }
 
-test('os tetos combinados: 1500 por IP, 600 por sessão, 20 no avatar, 2000 na mídia (em produção)', () => {
-  assert.deepEqual(limitesPara(true), { janelaMs: 15 * 60 * 1000, apiPorIp: 1500, apiPorSessao: 600, avatar: 20, midia: 2000 });
+test('os tetos combinados: 1500 por IP, 600 por sessão, 20 no avatar, 2000 na mídia, 300 na telemetria (em produção)', () => {
+  assert.deepEqual(limitesPara(true), { janelaMs: 15 * 60 * 1000, apiPorIp: 1500, apiPorSessao: 600, avatar: 20, midia: 2000, telemetria: 300 });
   // Fora de produção sobem, como sempre foi (o dono + o Claude + o hot-reload numa tarde de teste).
   const dev = limitesPara(false);
   assert.ok(dev.apiPorIp >= 1500 && dev.apiPorSessao >= 600, `o teto de dev não pode ser menor que o de produção: ${JSON.stringify(dev)}`);

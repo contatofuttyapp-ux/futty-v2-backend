@@ -35,9 +35,10 @@ const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 // arquivo.
 const EM_DEV = process.env.NODE_ENV === 'production' ? '' : ' (dev)';
 const RATE_LIMITS_ATIVOS = [
-  { rota: 'global · toda /api (exceto /api/media), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
-  { rota: 'global · toda /api (exceto /api/media), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media e /api/telemetria), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media e /api/telemetria), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
   { rota: 'GET /api/media/:token', limite: `${LIMITES.midia}/15min por IP` },
+  { rota: 'POST /api/telemetria (anônima, sem sessão)', limite: `${LIMITES.telemetria}/15min por IP (o IP não é gravado)` },
   { rota: 'POST /api/me/avatar[/ai]', limite: `${LIMITES.avatar}/15min por sessão (sem sessão: por IP)` },
   { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
   { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
@@ -621,6 +622,28 @@ router.post(
       if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
       throw new HttpError(500, e.message);
     }
+  }),
+);
+
+/**
+ * GET /api/super/gabinete/velocidade — aba Velocidade (Rodada 28, bloco E): p50/p95 por tela e por
+ * versão nos últimos 7 dias e as 5 rotas mais lentas, da telemetria ANÔNIMA. A conta (percentis) é
+ * feita no banco pela função da migração 061; aqui não chega nenhum evento individual.
+ */
+router.get(
+  '/api/super/gabinete/velocidade',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const dias = Math.min(30, Math.max(1, Number(req.query.dias) || 7));
+    const { data, error } = await supabase.rpc('telemetria_velocidade_resumo', { p_dias: dias });
+    if (error) {
+      if (/telemetria_velocidade|function|does not exist|schema cache/i.test(error.message || '')) {
+        console.warn('[gabinete/velocidade] migração 061 em falta:', error.message);
+        return res.json({ indisponivel: true, motivo: 'A migração 061 ainda não foi aplicada no Supabase.', dias, medicoes: 0, por_tela: [], rotas_lentas: [] });
+      }
+      throw new HttpError(500, error.message);
+    }
+    res.json({ indisponivel: false, dias, medicoes: 0, por_tela: [], rotas_lentas: [], ...(data || {}) });
   }),
 );
 

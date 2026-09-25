@@ -92,6 +92,9 @@ function limitesPara(emProducao) {
     apiPorSessao: emProducao ? 600 : 6000, // um percurso normal usa ~9 pedidos; 600 é abuso
     avatar: 20, // por pessoa
     midia: 2000, // por IP
+    // Rodada 28: a telemetria anônima manda no máximo 1 aviso por tela por sessão (~15 numa sessão
+    // longa). 300 por IP cabe um time inteiro no mesmo Wi-Fi da quadra; o resto é enchimento.
+    telemetria: 300, // por IP
   };
 }
 const LIMITES = limitesPara(process.env.NODE_ENV === 'production');
@@ -123,17 +126,18 @@ function chaveDaSessao(token) {
  * validou; o resto, forjado ou o 1º pedido de uma sessão, conta nele.
  * `tokenDoPedido(req)` devolve o token Bearer (ou null) e `sessaoConhecida(token)`
  * diz se o motor já o validou (middleware/auth.js).
- * /media tem o limiter próprio (routes/media.js). O preflight já morre no cors()
- * lá em cima; ignorar OPTIONS aqui é a rede de segurança para o dia em que
- * alguém trocar a ordem, e evita contar duas vezes cada chamada. NB: dentro de
- * app.use('/api', ...) o Express já tira o prefixo /api de req.path.
+ * /media e /telemetria têm limiter próprio (routes/media.js, routes/telemetria.js).
+ * O preflight já morre no cors() lá em cima; ignorar OPTIONS aqui é a rede de
+ * segurança para o dia em que alguém trocar a ordem, e evita contar duas vezes
+ * cada chamada. NB: dentro de app.use('/api', ...) o Express já tira o prefixo
+ * /api de req.path.
  */
 function criarLimitesDaApi({ tokenDoPedido, sessaoConhecida, limites = LIMITES }) {
   const deSessaoConhecida = (req) => {
     const token = tokenDoPedido(req);
     return !!token && sessaoConhecida(token);
   };
-  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media');
+  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media') || req.path === '/telemetria';
   const comum = {
     windowMs: limites.janelaMs,
     standardHeaders: true,
@@ -194,8 +198,24 @@ function criarLimiteDeMidia({ limites = LIMITES } = {}) {
   });
 }
 
+/**
+ * POST /api/telemetria (Rodada 28): anônima, sem sessão — conta pelo IP real, que só vive na
+ * memória do limiter durante a janela e nunca vai para tabela nenhuma.
+ */
+function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
+  return rateLimit({
+    windowMs: limites.janelaMs,
+    max: limites.telemetria,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveDoPedido,
+    message: { error: 'Muitos avisos de velocidade. Tente de novo mais tarde.' },
+  });
+}
+
 module.exports = {
   criarLimiter,
+  criarLimiteDeTelemetria,
   conviteLimiter,
   pushAdminLimiter,
   denunciaLimiter,

@@ -131,7 +131,8 @@ const ROTAS = [
 
 // ─── 1. O PORTÃO ─────────────────────────────────────────────────────────────
 test('as rotas do Gabinete são do super-admin: 401 sem token, 403 com conta comum', async (t) => {
-  const todas = [['GET', '/api/super/gabinete/brilhantes'], ...ROTAS];
+  // Rodada 28: a aba Velocidade (telemetria anônima agregada) atrás do mesmo portão.
+  const todas = [['GET', '/api/super/gabinete/brilhantes'], ['GET', '/api/super/gabinete/velocidade'], ...ROTAS];
   for (const [metodo, path] of todas) {
     const sem = await pedir(metodo, path);
     assert.equal(sem.status, 401, `${metodo} ${path} sem token devia dar 401, deu ${sem.status}`);
@@ -144,7 +145,7 @@ test('as rotas do Gabinete são do super-admin: 401 sem token, 403 com conta com
     token: contas.dono.token, body: { teamId, kitId: KIT_TIME },
   });
   assert.equal(dono.status, 403, 'o dono do time não pode ativar o próprio pacote');
-  t.diagnostic('4 rotas × (sem token, conta comum, dono do time) = 9 portas fechadas');
+  t.diagnostic('5 rotas × (sem token, conta comum) + o dono do time = 11 portas fechadas');
 });
 
 // ─── 2. A LISTA ──────────────────────────────────────────────────────────────
