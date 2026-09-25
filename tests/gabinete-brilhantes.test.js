@@ -443,7 +443,11 @@ test('quem sai do time mantém a Brilhante já gerada', async (t) => {
     team_id: teamId, user_id: contas.membro.id, kit_id: KIT_TIME,
     avatar_url: 'https://exemplo.invalid/brilhante-do-time.png', custo_cents: 11,
   }, { onConflict: 'team_id,user_id' });
-  await supabase.from('users').update({ avatar_url: 'https://exemplo.invalid/brilhante-do-time.png' }).eq('id', contas.membro.id);
+  // O avatar dela é uma figurinha NOSSA (arquivo -ai- no bucket avatars, como o do motor): é o que a
+  // regra única (utils/figurinhaRegra.js) reconhece. Uma URL de fora não vale como figurinha
+  // desde o Hotfix 26 (a foto do Google, que o trigger 001 copiava, contava).
+  const avatarDaFigurinha = `${SUPABASE_URL}/storage/v1/object/public/avatars/public/${contas.membro.id}-ai-${KIT_TIME}-1.png`;
+  await supabase.from('users').update({ avatar_url: avatarDaFigurinha }).eq('id', contas.membro.id);
 
   // O Gabinete conta a geração e o custo REAL dela.
   const antes = await pedir('GET', '/api/super/gabinete/brilhantes', { token: contas.super.token });
@@ -455,7 +459,7 @@ test('quem sai do time mantém a Brilhante já gerada', async (t) => {
   await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', contas.membro.id);
 
   const { data: pessoa } = await supabase.from('users').select('avatar_url').eq('id', contas.membro.id).maybeSingle();
-  assert.equal(pessoa.avatar_url, 'https://exemplo.invalid/brilhante-do-time.png', 'sair do time não desfaz a figurinha de ninguém');
+  assert.equal(pessoa.avatar_url, avatarDaFigurinha, 'sair do time não desfaz a figurinha de ninguém');
   const { data: linha } = await supabase.from('brilhantes_time').select('user_id').eq('team_id', teamId).eq('user_id', contas.membro.id).maybeSingle();
   assert.ok(linha, 'a linha do pacote fica: o time gastou aquela vaga de verdade');
 
@@ -465,7 +469,7 @@ test('quem sai do time mantém a Brilhante já gerada', async (t) => {
 
 // ─── 8. OS 6 FUNDOS VÊM COM A BRILHANTE, NÃO COM UM PLANO ────────────────────
 test('fundo de cima: livre para quem tem Brilhante, barrado para quem não tem', async () => {
-  // O membro tem Brilhante (avatar_url ≠ foto_url, posto no teste anterior) e
+  // O membro tem Brilhante (avatar_url = uma figurinha nossa, posto no teste anterior) e
   // plano "free" — no modelo antigo levava 403 "exige um plano superior", com
   // "Os 6 fundos liberados" escrito na compra que o time fez.
   const comBrilhante = await pedir('PATCH', '/api/me', { token: contas.membro.token, body: { fundo_figurinha: 'aura' } });

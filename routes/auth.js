@@ -9,6 +9,7 @@ const { excluirContaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { obterMe, marcarFigurinhaStatus } = require('../services/inicio');
+const { avatarEhFigurinhaNossa, devePreservarAvatar } = require('../utils/figurinhaRegra');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
@@ -222,8 +223,10 @@ router.patch(
       // pagar. Quem não tem Brilhante não tem sequer seletor de fundo — este
       // gate é a defesa em profundidade para um pedido montado à mão.
       if (FUNDOS_PREMIUM.includes(v)) {
-        const perfil = await getUserById(req.user.id, 'avatar_url, foto_url, is_super_admin');
-        const temBrilhante = !!perfil?.avatar_url && perfil.avatar_url !== perfil.foto_url;
+        // O avatar ser uma figurinha NOSSA (utils/figurinhaRegra.js), não "≠ foto_url":
+        // a foto do Google, que o trigger 001 copiava, não abre os fundos pagos.
+        const perfil = await getUserById(req.user.id, 'avatar_url, is_super_admin');
+        const temBrilhante = avatarEhFigurinhaNossa(perfil?.avatar_url);
         if (!perfil?.is_super_admin && !temBrilhante) {
           throw new HttpError(403, 'Os 6 fundos vêm com a figurinha.', 'SEM_BRILHANTE');
         }
@@ -417,11 +420,14 @@ router.post(
     //    avatar_url (o que o card mostra): no modo 'foto' (Rodada 18,
     //    users.card_modo, migração 056) segue sempre a foto nova, mesmo
     //    havendo figurinha — é a escolha explícita da pessoa. Nos demais
-    //    casos (modo 'figurinha' ou ainda sem escolha) SÓ é sobrescrito se
-    //    ainda NÃO houver avatar IA; se já houver (avatar_url ≠ foto_url
-    //    actual), preserva-se → o card continua a mostrar o avatar antigo até
-    //    o utilizador gerar de novo (nunca a foto crua) — comportamento de
-    //    sempre, mantido como fail-safe se a 056 ainda não tiver corrido.
+    //    casos (modo 'figurinha' ou ainda sem escolha) SÓ é preservado se o
+    //    avatar atual for mesmo uma figurinha nossa (utils/figurinhaRegra.js);
+    //    aí o card continua a mostrá-la até a pessoa gerar de novo (nunca a
+    //    foto crua) — comportamento de sempre, mantido como fail-safe se a 056
+    //    ainda não tiver corrido. Sem figurinha, avatar_url vira a foto nova,
+    //    sempre. (Hotfix 26: antes decidia por avatar_url ≠ foto_url, e a foto
+    //    do Google copiada pelo trigger contava como figurinha: a foto nova ia
+    //    para foto_url e o card nunca mudava.)
     let atual = await getUserById(userId, 'foto_url, foto_original_url, avatar_url, card_modo');
     if (!atual) {
       // Sem a 056/057, as colunas novas não existem e o select acima falha
@@ -431,10 +437,10 @@ router.post(
       atual = await getUserById(userId, 'foto_url, avatar_url, card_modo');
     }
     if (!atual) atual = await getUserById(userId, 'foto_url, avatar_url');
-    const temAvatarIA = !!atual?.avatar_url && atual.avatar_url !== atual.foto_url;
     const modoFoto = atual?.card_modo === 'foto';
-    const novoAvatarUrl = modoFoto ? avatarUrl : (temAvatarIA ? atual.avatar_url : avatarUrl);
-    console.log('[avatar] UPDATE users:', { userId, temAvatarIA, modoFoto });
+    const preservar = devePreservarAvatar({ avatarUrlAtual: atual?.avatar_url, cardModo: atual?.card_modo });
+    const novoAvatarUrl = preservar ? atual.avatar_url : avatarUrl;
+    console.log('[avatar] UPDATE users:', { userId, preservar, modoFoto });
 
     // O HASH VAI NO MESMO UPDATE que o URL (22-set). Antes era gravado a
     // seguir, num update próprio, e isso abria uma janela de milissegundos em
@@ -492,7 +498,7 @@ router.post(
     // Best-effort (coluna da migração 051): nunca derruba o upload.
     marcarFigurinhaStatus(userId, 'pronta');
 
-    console.log('[avatar] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto, modoFoto, comOriginal: !!originalUrl });
+    console.log('[avatar] concluído:', { userId, preservouAvatarIA: preservar, modoFoto, comOriginal: !!originalUrl });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null });
   })
 );
@@ -534,11 +540,10 @@ router.put(
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
     // Mesma regra do POST /api/me/avatar: reenquadrar é "uma foto nova" para
-    // efeito de quem manda no card (card_modo/temAvatarIA) — não é um jeito
-    // separado de decidir isso.
-    const temAvatarIA = !!atual.avatar_url && atual.avatar_url !== atual.foto_url;
-    const modoFoto = atual.card_modo === 'foto';
-    const novoAvatarUrl = modoFoto ? avatarUrl : (temAvatarIA ? atual.avatar_url : avatarUrl);
+    // efeito de quem manda no card (card_modo e figurinha nossa) — não é um
+    // jeito separado de decidir isso.
+    const preservar = devePreservarAvatar({ avatarUrlAtual: atual.avatar_url, cardModo: atual.card_modo });
+    const novoAvatarUrl = preservar ? atual.avatar_url : avatarUrl;
 
     const patchFoto = { foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_hash: sha256Hex(file.buffer) };
     let { error: updErr } = await supabase.from('users').update(patchFoto).eq('id', userId);
@@ -553,7 +558,7 @@ router.put(
     if (caminhoAntigo && !aindaEmUso) await apagarAntigo(caminhoAntigo, 'recorte reajustado');
 
     marcarFigurinhaStatus(userId, 'pronta');
-    console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: temAvatarIA && !modoFoto });
+    console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: preservar });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
   })
 );

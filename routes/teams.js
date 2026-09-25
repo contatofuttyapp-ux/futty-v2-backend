@@ -15,6 +15,7 @@ const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
 const { presentearCriador } = require('../utils/direitoBrilhante');
+const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 
 const router = express.Router();
 
@@ -474,7 +475,7 @@ router.get(
     const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados] = await Promise.all([
       supabase
         .from('team_members')
-        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, foto_url, avatar_generico, email )')
+        .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
         .eq('team_id', team.id),
       // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
@@ -547,9 +548,10 @@ router.get(
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
         nota_media: notaMedia,
         // 22-set (SPEC-FIGURINHA-3): `plan` deixou de significar algo pago —
-        // o selo do admin agora é ter a Brilhante (avatar_url ≠ foto_url), a
-        // mesma desigualdade que o resto do app usa (nunca um booleano à parte).
-        tem_brilhante: !!m.users?.avatar_url && m.users.avatar_url !== m.users?.foto_url,
+        // o selo do admin agora é ter a Brilhante: o avatar ser uma figurinha NOSSA
+        // (utils/figurinhaRegra.js, a regra única; a desigualdade avatar_url ≠ foto_url
+        // que valia até o Hotfix 26 contava a foto do Google como figurinha).
+        tem_brilhante: avatarEhFigurinhaNossa(m.users?.avatar_url),
       };
     });
     membros.sort((a, b) => {

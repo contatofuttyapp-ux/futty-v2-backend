@@ -532,8 +532,12 @@ async function sortear() {
   ok(`sorteio gravado (semente ${resultado.seed}) — /equipa/${estado.teamSlug}/jogo/${game.id}/sorteio`);
 }
 
-// Devolve o próximo jogo ao estado de vitrine (domingo à frente, sem sorteio),
-// sem tocar em contas, figurinha ou times.
+// Devolve a vitrine ao estado da loja, sem criar nem apagar nada: o próximo jogo
+// num domingo à frente e sem sorteio, e as contas fictícias com a silhueta do bucket
+// kits em avatar_url. Sem essa silhueta o sorteio e o ranking mostram o boneco
+// cinza com "?" no lugar do jogador de camisa preta e dourada: aconteceu em 25-set,
+// quando um reparo de avatar_url "de fora do bucket avatars" (a foto do Google, Hotfix
+// 26) também levou o bucket kits.
 async function reagendar() {
   if (!fs.existsSync(ARQ_ESTADO)) throw new Error('LOJA/demo-estado.json não existe: corra o script sem opções primeiro.');
   const estado = JSON.parse(fs.readFileSync(ARQ_ESTADO, 'utf8'));
@@ -542,6 +546,22 @@ async function reagendar() {
     .eq('id', estado.proximoJogoId);
   if (error) throw new Error(`games(reagendar): ${error.message}`);
   ok(`próximo jogo (${estado.proximoJogoId.slice(0, 8)}) reagendado para ${PROXIMO_JOGO.data}, sem sorteio`);
+
+  // Só as descartáveis (demo-loja-<slug>@); a demo-loja@ (Bruninho, o revisor) tem a figurinha dele.
+  const { data: contas, error: eContas } = await supabase.from('users')
+    .select('id, avatar_generico')
+    .ilike('email', `${PREFIXO}-%@futtymock.com`)
+    .is('avatar_url', null);
+  if (eContas) throw new Error(`users(avatares): ${eContas.message}`);
+  let repostas = 0;
+  for (const c of contas || []) {
+    if (!GENERICO[c.avatar_generico]) continue;
+    // eslint-disable-next-line no-await-in-loop
+    const { error: eUp } = await supabase.from('users').update({ avatar_url: GENERICO[c.avatar_generico] }).eq('id', c.id);
+    if (eUp) throw new Error(`users(avatar ${c.id.slice(0, 8)}): ${eUp.message}`);
+    repostas += 1;
+  }
+  ok(repostas ? `${repostas} silhueta(s) do bucket kits repostas nas contas fictícias` : 'silhuetas das contas fictícias em ordem');
 }
 
 async function limpar() {

@@ -14,6 +14,7 @@ const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
+const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const plataforma = require('../utils/plataformaStore');
 const { cotaBytesPorTime, bytesUsadosPorTodosOsTimes } = require('../utils/resenhaCota');
 
@@ -33,7 +34,7 @@ router.get(
 
     const { data, count, error } = await supabase
       .from('users')
-      .select('id, nome, email, brilhante_creditos, avatar_url, foto_url, is_super_admin, created_at', { count: 'exact' })
+      .select('id, nome, email, brilhante_creditos, avatar_url, is_super_admin, created_at', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(off, off + limit - 1);
     if (error) throw new HttpError(500, error.message);
@@ -41,13 +42,15 @@ router.get(
     // Estado de suspensão (store de plataforma, sem DDL) anexado a cada linha.
     const { users: susUsers } = await plataforma.conjuntos();
     // 22-set (SPEC-FIGURINHA-3): `plan` saiu — o que resta ver aqui é o direito
-    // de Brilhante (créditos e se já tem uma), a mesma desigualdade avatar_url
-    // ≠ foto_url usada no resto do app. Sem foto_url/avatar_url no payload de
-    // volta: são detalhe de implementação, não algo que a tela precise mostrar.
-    const users = (data || []).map(({ avatar_url, foto_url, ...u }) => ({
+    // de Brilhante (créditos e se já tem uma), pela mesma regra do resto do app
+    // (o avatar atual ser um arquivo de figurinha nosso; Hotfix 26, antes era
+    // avatar_url ≠ foto_url e a foto do Google contava). Sem avatar_url no
+    // payload de volta: é detalhe de implementação, não algo que a tela precise
+    // mostrar.
+    const users = (data || []).map(({ avatar_url, ...u }) => ({
       ...u,
       suspenso: susUsers.has(u.id),
-      tem_brilhante: !!avatar_url && avatar_url !== foto_url,
+      tem_brilhante: avatarEhFigurinhaNossa(avatar_url),
     }));
 
     res.json({ users, page, limit, total: count || 0 });

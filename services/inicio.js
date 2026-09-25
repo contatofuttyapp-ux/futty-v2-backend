@@ -10,6 +10,7 @@ const { HttpError } = require('../utils/http');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { ehAdulto } = require('../utils/rostoPublico');
+const { temFigurinhaIA } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
 const { criarCache } = require('../utils/cacheQuente');
@@ -132,11 +133,13 @@ async function obterMe(user) {
   // pro frontend (Figurinha.jsx usava !!kit_ativo). tem_figurinha agora é
   // calculado aqui, na fonte, e cobre os 3 sinais reais de "já gerou
   // alguma": um slot pago (brilhantes_time), uma no histórico
-  // (user_avatar_historico, migração 057) ou o avatar ATUAL sendo IA
-  // pronta (avatar_url ≠ foto_url + figurinha_status 'pronta' — cobre quem
-  // gerou antes da 057 existir e nunca tem linha no histórico).
-  const avatarAtualEhIAPronta = !!perfil?.avatar_url && perfil.avatar_url !== perfil?.foto_url && perfil?.figurinha_status === 'pronta';
-  const temFigurinha = !!(brilhanteRows || []).length || !!(historicoRows || []).length || avatarAtualEhIAPronta;
+  // (user_avatar_historico, migração 057) ou o avatar ATUAL ser um arquivo
+  // de figurinha nosso (cobre quem gerou antes da 057 existir e nunca tem
+  // linha no histórico). HOTFIX 26 (25-set): o 3º sinal era `avatar_url ≠
+  // foto_url` + status 'pronta', e a foto do Google copiada pelo trigger
+  // handle_new_user contava como figurinha; agora olha o NOME do arquivo
+  // (utils/figurinhaRegra.js), a mesma regra do upload de foto.
+  const temFigurinha = temFigurinhaIA({ brilhanteRows, historicoRows, avatarUrl: perfil?.avatar_url });
 
   return {
     user: {

@@ -164,10 +164,14 @@ test('modo "foto" sobrevive a uma figurinha gerada depois — ou cai no fail-saf
   // Simula o que POST /api/me/avatar/ai faria: uma figurinha nova põe
   // avatar_url a apontar para ela de novo, mesmo com a pessoa em modo 'foto'
   // (gerar não é escolher o que mostrar — são caminhos diferentes). A partir
-  // daqui, avatar_url ≠ foto_url outra vez, exatamente como se a pessoa
-  // tivesse acabado de gerar sem ter mexido no interruptor.
+  // daqui o avatar atual é uma figurinha NOSSA outra vez (arquivo -ai- no
+  // bucket avatars, como o de POST /api/me/avatar/ai), exatamente como se a
+  // pessoa tivesse acabado de gerar sem ter mexido no interruptor. Hotfix 26:
+  // tem de ser um arquivo nosso; um URL qualquer de fora já não conta como
+  // figurinha (a foto do Google não pode ser "preservada").
+  const figurinhaSimulada = `${SUPABASE_URL}/storage/v1/object/public/avatars/public/${testUserId}-ai-${KIT}-1.png`;
   const { data: antes } = await supabase.from('users').select('foto_url, card_modo').eq('id', testUserId).maybeSingle();
-  const { error: erroSimula } = await supabase.from('users').update({ avatar_url: 'https://exemplo.invalid/avatar-modo-teste.png' }).eq('id', testUserId);
+  const { error: erroSimula } = await supabase.from('users').update({ avatar_url: figurinhaSimulada }).eq('id', testUserId);
   if (erroSimula) throw erroSimula;
 
   const novaFoto = await fotoDeTeste(200);
@@ -181,7 +185,10 @@ test('modo "foto" sobrevive a uma figurinha gerada depois — ou cai no fail-saf
     assert.equal(corpo.avatar_url, corpo.foto_url, 'com card_modo="foto" gravado, a troca de foto tem de atualizar o card mesmo tendo uma figurinha no meio do caminho');
   } else {
     // Sem a coluna (ou sem ela ter persistido), fail-safe = comportamento de
-    // sempre: com avatar_url ≠ foto_url no momento do upload, preserva.
-    assert.equal(corpo.avatar_url, 'https://exemplo.invalid/avatar-modo-teste.png', 'sem card_modo persistido, o fail-safe é preservar o avatar de IA (comportamento antigo)');
+    // sempre: com uma figurinha nossa no card no momento do upload, preserva.
+    // Compara pelo BANCO: a resposta passa pelo middleware mediaUrls, que troca o
+    // URL do Storage pelo do proxy.
+    const { data: depois } = await supabase.from('users').select('avatar_url').eq('id', testUserId).maybeSingle();
+    assert.equal(depois.avatar_url, figurinhaSimulada, 'sem card_modo persistido, o fail-safe é preservar o avatar de IA (comportamento antigo)');
   }
 });
