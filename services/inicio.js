@@ -10,7 +10,7 @@ const { HttpError } = require('../utils/http');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { ehAdulto } = require('../utils/rostoPublico');
-const { temFigurinhaIA } = require('../utils/figurinhaRegra');
+const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
 const { criarCache } = require('../utils/cacheQuente');
@@ -164,6 +164,11 @@ async function obterMe(user) {
       mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
       kit_ativo: perfil?.kit_ativo || null,
       tem_figurinha: temFigurinha,
+      // RODADA 28 — o card mostra AGORA uma figurinha nossa (arquivo -ai- no bucket), pela regra única
+      // (utils/figurinhaRegra.js). As telas decidiam isto por foto_url ≠ avatar_url — a regra que o
+      // Hotfix 26 aposentou no motor: com a foto do Google em avatar_url, a foto da pessoa ia para o
+      // card como se fosse figurinha (seletor de fundos, zoom abaixo da moldura, faixas vazias).
+      figurinha_ativa: avatarEhFigurinhaNossa(perfil?.avatar_url),
       avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
       figurinha_status: calcFigurinhaStatus(perfil?.figurinha_status, perfil?.figurinha_status_em),
       onboarding_completo: user.user_metadata?.onboarding_completo === true,

@@ -506,7 +506,8 @@ router.post(
     marcarFigurinhaStatus(userId, 'pronta');
 
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: preservar, modoFoto, comOriginal: !!originalUrl });
-    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null });
+    // figurinha_ativa (Rodada 28): o que o card mostra agora, pela regra única — as telas não comparam URLs.
+    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null, figurinha_ativa: avatarEhFigurinhaNossa(novoAvatarUrl) });
 
     // RODADA 27 — a pessoa já tem o que precisa; o resto é faxina e adiantamento.
     faxinaDaFotoNova({ atual, caminho, caminhoOriginal, originalUrl, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype, motivoAntiga: 'foto substituída' });
@@ -568,7 +569,7 @@ router.put(
 
     marcarFigurinhaStatus(userId, 'pronta');
     console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: preservar });
-    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl });
+    res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, figurinha_ativa: avatarEhFigurinhaNossa(novoAvatarUrl) });
 
     // RODADA 27 — a foto anterior sai e os derivados da nova ficam prontos DEPOIS da resposta.
     faxinaDaFotoNova({ atual, caminho, caminhoOriginal: null, originalUrl: null, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype });
@@ -886,7 +887,7 @@ router.post(
       marcarFigurinhaStatus(userId, 'pronta');
       invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando' logo abaixo.
       console.log('[avatar-ai] slot reutilizado (sem geração, sem direito gasto):', { userId, kitId });
-      return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true });
+      return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true, figurinha_ativa: avatarEhFigurinhaNossa(slot.avatar_url) });
     }
 
     // Daqui para baixo vai custar dinheiro de verdade: sem direito, para aqui.
@@ -1279,7 +1280,7 @@ router.post(
         .catch((e) => console.error('[avatar-ai] limpeza do tmp falhou:', e.message));
     }
 
-    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false });
+    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false, figurinha_ativa: avatarEhFigurinhaNossa(avatarUrl) });
     } catch (err) {
       // Qualquer falha a partir do e-mail-gate (inclusive) até aqui → 'falhou',
       // para o polling do Início parar de mostrar "criando..." e oferecer nova
@@ -1355,7 +1356,7 @@ router.put(
       .eq('id', userId);
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ avatar_url: avatarUrl, kit: kitId });
+    res.json({ avatar_url: avatarUrl, kit: kitId, figurinha_ativa: avatarEhFigurinhaNossa(avatarUrl) });
   })
 );
 
@@ -1432,7 +1433,7 @@ router.put(
     }
 
     invalidarSessaoDoPedido(req);
-    res.json({ avatar_url: novoAvatarUrl, modo });
+    res.json({ avatar_url: novoAvatarUrl, modo, figurinha_ativa: avatarEhFigurinhaNossa(novoAvatarUrl) });
   })
 );
 
@@ -1500,7 +1501,7 @@ router.put(
     }
 
     invalidarSessaoDoPedido(req);
-    res.json({ avatar_url: linha.avatar_url, kit: linha.kit_id });
+    res.json({ avatar_url: linha.avatar_url, kit: linha.kit_id, figurinha_ativa: avatarEhFigurinhaNossa(linha.avatar_url) });
   })
 );
 
