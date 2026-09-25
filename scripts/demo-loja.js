@@ -436,7 +436,7 @@ async function criarResenha(ids, teamId) {
 // "foto" (POST /api/me/avatar) e a IA pinta a figurinha (POST /api/me/avatar/ai).
 // Custa ~US$0,02. Se falhar, o app continua a mostrar o genérico no card.
 async function gerarFigurinha(senha) {
-  const anon = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  const anon = createClient(process.env.SUPABASE_URL, require('../utils/chavesSupabase').chavePublica(), { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: sess, error } = await anon.auth.signInWithPassword({ email: EMAIL_BRUNINHO, password: senha });
   if (error) throw new Error(`login demo: ${error.message}`);
   const auth = { Authorization: `Bearer ${sess.session.access_token}` };

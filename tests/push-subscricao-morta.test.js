@@ -22,7 +22,8 @@ const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 const push = require('../routes/push');
 
-const { SUPABASE_URL, SUPABASE_ANON_KEY, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
+const { SUPABASE_URL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
+const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
 const temVapid = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 
 let server;
@@ -73,7 +74,7 @@ function pedir(metodo, caminho, { token, body } = {}) {
 }
 
 before(async () => {
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   // O dublê: responde pelo ENDPOINT da subscrição, como faria o push service.
   webpush.sendNotification = async (subscription) => {

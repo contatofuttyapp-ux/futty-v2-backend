@@ -29,7 +29,8 @@ const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 
-const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+const { SUPABASE_URL } = process.env;
+const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
 const KIT = 'dark-gold'; // grátis, sempre ativo — nenhum gate de plano no caminho
 
 let server;
@@ -39,7 +40,7 @@ let testUserId;
 let migracao052Pendente = false;
 
 before(async () => {
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   // Sonda barata (mesma lógica de scripts/conferir-migracoes.js): sem a
   // coluna, os testes abaixo saem skipped em vez de failed.

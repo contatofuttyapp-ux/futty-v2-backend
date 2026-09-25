@@ -5,9 +5,9 @@
 // serve o ficheiro do bucket privado. Segredo = server-only (nunca no cliente).
 const crypto = require('crypto');
 
-// O fallback para SUPABASE_SERVICE_KEY/'dev-only' só é alcançável em dev —
+// O fallback para a chave secreta do Supabase/'dev-only' só é alcançável em dev —
 // server.js recusa arrancar em produção sem MEDIA_TOKEN_SECRET definido.
-const SEGREDO = process.env.MEDIA_TOKEN_SECRET || process.env.SUPABASE_SERVICE_KEY || 'dev-only';
+const SEGREDO = process.env.MEDIA_TOKEN_SECRET || require('./chavesSupabase').chaveSecreta() || 'dev-only';
 
 // VELOCIDADE 6A (15-set) — o token era `agora + 7 dias`, ou seja MUDAVA A CADA
 // SEGUNDO. URL diferente a cada leitura = o cache do celular NUNCA acertava: a

@@ -13,9 +13,10 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const { createClient } = require('@supabase/supabase-js');
 
-const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
+const { SUPABASE_URL } = process.env;
+const SUPABASE_SERVICE_KEY = require('../utils/chavesSupabase').chaveSecreta();
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('[seed] Faltam SUPABASE_URL / SUPABASE_SERVICE_KEY no backend/.env');
+  console.error('[seed] Faltam SUPABASE_URL / SUPABASE_SECRET_KEY (ou a antiga SUPABASE_SERVICE_KEY) no backend/.env');
   process.exit(1);
 }
 

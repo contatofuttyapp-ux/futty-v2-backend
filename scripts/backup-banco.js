@@ -9,7 +9,7 @@
 //   node backend/scripts/backup-banco.js
 //
 // LISTA DE TABELAS: fixa (abaixo), não descoberta em runtime — o projeto usa
-// só a REST API do Supabase (PostgREST) via SUPABASE_SERVICE_KEY, sem
+// só a REST API do Supabase (PostgREST) via chave secreta (utils/chavesSupabase.js), sem
 // connection string de Postgres (sem DATABASE_URL, sem "pg" instalado), e o
 // PostgREST não expõe information_schema por padrão (confirmado: consultar
 // public.information_schema.tables dá PGRST205). Se criares uma tabela nova,
@@ -64,7 +64,7 @@ async function exportarTabela(nome) {
 }
 
 async function main() {
-  // utils/db.js já valida SUPABASE_URL/SUPABASE_SERVICE_KEY no require acima
+  // utils/db.js já valida SUPABASE_URL e a chave secreta no require acima
   // (process.exit(1) se faltarem) — nada a checar aqui.
   const pastaHoje = path.join(PASTA_BACKUPS, hojeISO());
   fs.mkdirSync(pastaHoje, { recursive: true });

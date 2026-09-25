@@ -302,6 +302,10 @@ if (require.main === module) {
     servidor = app.listen(port, () => {
       console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
       console.log(`[Futty] Health check: http://localhost:${port}/health`);
+      // Rodada 28: qual chave do Supabase o motor pegou (nome e formato, nunca o valor) — é
+      // pelo log da revisão nova que se confere a troca para a chave secreta sb_secret_….
+      const chaves = require('./utils/chavesSupabase').origemDasChaves();
+      console.log(`[Futty] Supabase: chave secreta de ${chaves.secreta} (formato ${chaves.secretaFormato})`);
       // VELOCIDADE 7A (15-set): aquece os caches que a primeira pessoa depois de um
       // deploy (ou de uma instância nova do Cloud Run) pagaria dentro do tempo dela —
       // as suspensões, lidas por TODO pedido autenticado, e o gabinete, lido pelo

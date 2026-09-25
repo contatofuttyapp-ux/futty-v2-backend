@@ -20,7 +20,8 @@ const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 
-const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+const { SUPABASE_URL } = process.env;
+const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
 
 const KIT_TIME = 'dark-purple'; // o uniforme que o dono fixa no pacote
 const KIT_OUTRO = 'dark-gold'; // o que a pessoa poderia ter de antes
@@ -57,7 +58,7 @@ async function pedir(metodo, path, { token, body } = {}) {
 }
 
 before(async () => {
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY em falta no .env.');
+  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
 
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });

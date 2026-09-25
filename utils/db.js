@@ -6,15 +6,20 @@ require('dotenv').config({ quiet: true });
 const { createClient } = require('@supabase/supabase-js');
 const { HttpError } = require('./http');
 const { RATING_DEFAULT } = require('./helpers');
+const { chaveSecreta } = require('./chavesSupabase');
 
-const { SUPABASE_URL, SUPABASE_SERVICE_KEY } = process.env;
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('[Futty] ERRO: faltam SUPABASE_URL / SUPABASE_SERVICE_KEY no .env.');
+// Rodada 28: a chave secreta nova (SUPABASE_SECRET_KEY, sb_secret_…) manda; a
+// service_role antiga (SUPABASE_SERVICE_KEY) só vale enquanto a nova não estiver no
+// ambiente. Ver utils/chavesSupabase.js.
+const { SUPABASE_URL } = process.env;
+const CHAVE_SECRETA = chaveSecreta();
+if (!SUPABASE_URL || !CHAVE_SECRETA) {
+  console.error('[Futty] ERRO: faltam SUPABASE_URL / SUPABASE_SECRET_KEY (ou a antiga SUPABASE_SERVICE_KEY) no .env.');
   process.exit(1);
 }
 
-// Cliente admin (service_role) — uso exclusivo no servidor, ignora RLS.
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+// Cliente admin (chave secreta) — uso exclusivo no servidor, ignora RLS.
+const supabase = createClient(SUPABASE_URL, CHAVE_SECRETA, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 

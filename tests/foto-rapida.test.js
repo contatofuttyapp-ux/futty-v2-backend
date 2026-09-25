@@ -27,7 +27,8 @@ const { assinarToken, decodificarToken } = require('../utils/mediaToken');
 const { parseUrlPublico } = require('../utils/storage');
 const { chaveDoDerivado, cacheLer, TAMANHOS_DA_FOTO } = require('../utils/derivadosMidia');
 
-const { SUPABASE_URL, SUPABASE_ANON_KEY } = process.env;
+const { SUPABASE_URL } = process.env;
+const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
 
 let server;
 let baseUrl;
@@ -89,7 +90,7 @@ const originais = { remove: ApiDoBucket.prototype.remove, upload: ApiDoBucket.pr
 const restaurarGanchos = () => { ApiDoBucket.prototype.remove = originais.remove; ApiDoBucket.prototype.upload = originais.upload; };
 
 before(async () => {
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_ANON_KEY em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;

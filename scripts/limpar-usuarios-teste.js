@@ -11,7 +11,7 @@
 //       os dependentes por cascade. As contas MANTER em si (perfil, e-mail,
 //       figurinha, fotos) NUNCA são tocadas — só os times deixam de existir.
 //
-// Requer backend/.env com SUPABASE_URL e SUPABASE_SERVICE_KEY (reaproveita
+// Requer backend/.env com SUPABASE_URL e a chave secreta (SUPABASE_SECRET_KEY; reaproveita
 // utils/db.js, mesmo cliente service_role que o resto do backend usa).
 //
 // ORDEM da deleção real de cada usuário: ver utils/apagarUsuario.js (14-set,
