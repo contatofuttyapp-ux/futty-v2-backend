@@ -73,11 +73,25 @@ router.get(
     // comportamento certo.
     const pedidos = await pedidosVivos(userId);
 
+    // Pagamentos P1: há ao menos uma compra creditada? Sem a 064, false (nunca quebra a tela).
+    let comprasAtivas = false;
+    try {
+      const { count, error } = await supabase
+        .from('compras').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('estado', 'creditada');
+      if (error) throw new Error(error.message);
+      comprasAtivas = (count || 0) > 0;
+    } catch (e) {
+      console.warn('[brilhantes] compras indisponíveis (migração 064 aplicada?):', e.message);
+    }
+
     res.json({
       direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId, restantes: direito.restantes },
       creditos: direito.creditos,
       times,
       pedidos,
+      compras_ativas: comprasAtivas,
+      // A loja aparece no app quando o MOTOR diz — ligar sem build novo (P2 lê daqui).
+      loja_pronta: process.env.PAGAMENTOS_ATIVOS === 'true',
     });
   }),
 );

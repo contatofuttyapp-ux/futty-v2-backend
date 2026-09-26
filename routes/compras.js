@@ -13,12 +13,19 @@
 //   ignorado — para o RevenueCat não repetir para sempre; 5xx só se o banco falhou (aí o
 //   RevenueCat reenvia, e o índice único de `compras` segura o crédito em dobro).
 //
+// GET  /api/compras/minhas     — a tela "Minhas compras".
+// POST /api/compras/sincronizar — "Restaurar compras" e o webhook atrasado: o app manda as
+//   transações que o SDK conhece; o motor só credita o que a API REST do RevenueCat
+//   confirmar para esta pessoa (RC_API_KEY, chave secreta de servidor).
+//
 // Fábrica com tudo injetável (Supabase, compras, segredo, fetch): tests/compras-rotas.test.js
 // corre sem banco e sem rede.
 const crypto = require('node:crypto');
 const express = require('express');
 const { supabase: supabaseReal } = require('../utils/db');
 const { criarLimiteDeWebhook } = require('../middleware/limiters');
+const { requireAuth } = require('../middleware/auth');
+const { asyncHandler, HttpError } = require('../utils/http');
 const comprasPadrao = require('../utils/compras');
 
 const { ErroCompra } = comprasPadrao;
@@ -32,6 +39,10 @@ const TIPOS_COMPRA = ['INITIAL_PURCHASE', 'NON_RENEWING_PURCHASE'];
 // a Apple e o Google mandam quando devolvem o dinheiro. UNSUBSCRIBE e afins são de
 // assinatura — não vendemos — e ficam como 'ignorada'.
 const MOTIVOS_REEMBOLSO = ['CUSTOMER_SUPPORT'];
+// `store` na API REST (v1) do RevenueCat → `compras.loja`.
+const LOJAS_REST = { app_store: 'app_store', mac_app_store: 'app_store', play_store: 'play_store', promotional: 'promo' };
+const RC_API = 'https://api.revenuecat.com/v1';
+const MAX_SINCRONIZAR = 100;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** O segredo do header confere? sha256 dos dois lados: tempo constante e sem vazar o tamanho. */
@@ -65,6 +76,9 @@ function criarRotasCompras({
   aceitarSandbox = process.env.RC_ACEITAR_SANDBOX !== 'false',
   notificar = notificarReal,
   limiteWebhook = criarLimiteDeWebhook(),
+  rcApiKey = process.env.RC_API_KEY,
+  buscar = (...args) => fetch(...args),
+  autenticar = requireAuth,
 } = {}) {
   const router = express.Router();
 
@@ -173,6 +187,116 @@ function criarRotasCompras({
       return res.status(500).json({ error: 'Falha ao registrar o evento.' });
     }
   });
+
+  /**
+   * GET /api/compras/minhas — as compras da pessoa, a mais nova primeiro. Os eventos
+   * 'ignorada' ficam de fora (são auditoria do motor, não compras de ninguém).
+   */
+  router.get('/api/compras/minhas', autenticar, asyncHandler(async (req, res) => {
+    const { data, error } = await supabase
+      .from('compras')
+      .select('id, produto, loja, preco, moeda, criada_em, estado')
+      .eq('user_id', req.user.id)
+      .neq('estado', 'ignorada')
+      .order('criada_em', { ascending: false })
+      .limit(100);
+    if (error) {
+      if (comprasPadrao.ehTabelaEmFalta(error.message)) {
+        console.warn('[compras/minhas] tabela em falta (migração 064 aplicada?):', error.message);
+        return res.json({ compras: [], indisponivel: true });
+      }
+      throw new HttpError(500, error.message);
+    }
+    res.json({ compras: data || [], indisponivel: false });
+  }));
+
+  /** O assinante na API REST do RevenueCat. Lança HttpError 502 se ela não responder bem. */
+  async function assinanteNoRevenueCat(userId) {
+    let r;
+    try {
+      r = await buscar(`${RC_API}/subscribers/${encodeURIComponent(userId)}`, {
+        headers: { Authorization: `Bearer ${rcApiKey}`, 'Content-Type': 'application/json' },
+      });
+    } catch (e) {
+      console.error('[compras/sincronizar] RevenueCat fora do ar:', e.message);
+      throw new HttpError(502, 'Não deu para confirmar com a loja agora. Tente de novo.', 'COMPRAS_INDISPONIVEL');
+    }
+    if (!r.ok) {
+      console.error('[compras/sincronizar] RevenueCat respondeu', r.status);
+      throw new HttpError(502, 'Não deu para confirmar com a loja agora. Tente de novo.', 'COMPRAS_INDISPONIVEL');
+    }
+    const corpo = await r.json();
+    return corpo?.subscriber || {};
+  }
+
+  /**
+   * POST /api/compras/sincronizar { nonSubscriptionTransactions | customerInfo, teamId? } —
+   * o corpo NUNCA credita sozinho: diz só quais transações procurar. Para cada uma que não
+   * está em `compras`, o motor pergunta ao RevenueCat pelo assinante `users.id` e credita só
+   * o que ele confirmar, com a loja, o produto e o ambiente que ELE diz. A mesma trava de
+   * idempotência do webhook (loja, transacao_id) vale aqui: webhook e restauro podem chegar
+   * em qualquer ordem.
+   */
+  router.post('/api/compras/sincronizar', autenticar, asyncHandler(async (req, res) => {
+    if (!rcApiKey) throw new HttpError(503, 'As compras ainda não estão disponíveis.', 'COMPRAS_INDISPONIVEL');
+    const userId = req.user.id;
+    const corpo = req.body || {};
+    const lista = corpo.nonSubscriptionTransactions || corpo.customerInfo?.nonSubscriptionTransactions || [];
+    if (!Array.isArray(lista)) throw new HttpError(400, 'Transações inválidas.');
+    const ids = [...new Set(lista.slice(0, MAX_SINCRONIZAR)
+      .map((t) => (t && (t.transactionIdentifier || t.transactionId)) || '')
+      .map(String)
+      .filter(Boolean))];
+
+    const resumo = { creditadas: 0, ja_existiam: 0, nao_confirmadas: 0, recusadas: [] };
+    const pendentes = [];
+    for (const id of ids) {
+      const { data, error } = await supabase.from('compras').select('id').eq('transacao_id', id).limit(1);
+      if (error) throw new HttpError(500, error.message);
+      if (data?.length) resumo.ja_existiam += 1;
+      else pendentes.push(id);
+    }
+    if (!pendentes.length) return res.json(resumo);
+
+    const assinante = await assinanteNoRevenueCat(userId);
+    const confirmadas = [];
+    for (const [productId, itens] of Object.entries(assinante.non_subscriptions || {})) {
+      for (const item of Array.isArray(itens) ? itens : []) confirmadas.push({ productId, item });
+    }
+    const teamCorpo = corpo.teamId && UUID.test(String(corpo.teamId)) ? String(corpo.teamId) : null;
+    const teamAttr = atributo(assinante.subscriber_attributes, 'team_id');
+    const teamId = teamCorpo || (teamAttr && UUID.test(teamAttr) ? teamAttr : null);
+
+    for (const id of pendentes) {
+      const achada = confirmadas.find(({ item }) => item.store_transaction_id === id || item.id === id);
+      const produto = achada && PRODUTOS_LOJA[achada.productId];
+      const loja = achada && LOJAS_REST[achada.item.store];
+      const ambiente = achada?.item.is_sandbox ? 'sandbox' : 'producao';
+      if (!achada || !produto || !loja || (ambiente === 'sandbox' && !aceitarSandbox)) {
+        resumo.nao_confirmadas += 1;
+        continue;
+      }
+      try {
+        const r = await compras.aplicarCompra({
+          userId,
+          teamId: produto === 'minha' ? null : teamId,
+          produto,
+          loja,
+          transacaoId: achada.item.store_transaction_id || id,
+          appUserId: userId,
+          ambiente,
+          payload: { origem: 'sincronizar', item: achada.item, product_id: achada.productId },
+        });
+        if (r.repetida) resumo.ja_existiam += 1;
+        else resumo.creditadas += 1;
+      } catch (e) {
+        if (!(e instanceof ErroCompra)) throw e;
+        resumo.recusadas.push({ transacao: id, produto, codigo: e.codigo });
+      }
+    }
+    console.log('[compras/sincronizar]', { userId, ...resumo, recusadas: resumo.recusadas.length });
+    res.json(resumo);
+  }));
 
   return router;
 }

@@ -222,3 +222,101 @@ test('no servidor de verdade: rota montada, 401 sem segredo, fora do limiter ger
   const outra = await fetch(`${base}/api/rota-inexistente-p1`);
   assert.notEqual(outra.headers.get('ratelimit-limit'), '120', 'o limiter geral continua valendo no resto da /api');
 });
+
+// ─── Parte D: o app pergunta e restaura ──────────────────────────────────────
+
+/** App de teste com sessão falsa (req.user = PESSOA) e fetch do RevenueCat mockado. */
+async function montarApp({ rcApiKey = 'sk_teste', respostaRc = null, compras: linhas = [] } = {}, t) {
+  const pedidosRc = [];
+  const { cliente, tabelas } = criarSupabaseFalso({
+    users: [{ id: PESSOA, brilhante_creditos: 0 }, { id: DONO, brilhante_creditos: 0 }],
+    teams: [{ id: TIME, nome: 'Missa de Quinta', brilhante_ativo: false, brilhante_kit: null }],
+    team_members: [{ team_id: TIME, user_id: DONO, role: 'admin' }],
+    pedidos_ativacao: [],
+    compras: linhas,
+  });
+  const app = express();
+  app.use(express.json());
+  app.use(criarRotasCompras({
+    supabase: cliente,
+    compras: criarCompras({ supabase: cliente, notificar: () => {} }),
+    segredo: SEGREDO,
+    notificar: () => {},
+    limiteWebhook: (req, res, next) => next(),
+    rcApiKey,
+    buscar: async (url, opts) => {
+      pedidosRc.push({ url, auth: opts?.headers?.Authorization });
+      return { ok: true, json: async () => respostaRc };
+    },
+    autenticar: (req, res, next) => { req.user = { id: PESSOA }; next(); },
+  }));
+  // eslint-disable-next-line no-unused-vars
+  app.use((err, req, res, next) => res.status(err.status || 500).json({ error: err.message, code: err.code }));
+  const servidor = app.listen(0);
+  t.after(() => servidor.close());
+  const base = `http://127.0.0.1:${servidor.address().port}`;
+  const sincronizar = async (corpo) => {
+    const r = await fetch(`${base}/api/compras/sincronizar`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(corpo) });
+    return { status: r.status, json: await r.json() };
+  };
+  return { tabelas, pedidosRc, sincronizar, base };
+}
+
+const rcCom = (itens) => ({ subscriber: { non_subscriptions: itens, subscriber_attributes: {} } });
+
+test('sincronizar sem RC_API_KEY → 503 COMPRAS_INDISPONIVEL', async (t) => {
+  const { sincronizar } = await montarApp({ rcApiKey: null }, t);
+  const r = await sincronizar({ nonSubscriptionTransactions: [{ productIdentifier: 'futty_minha', transactionIdentifier: '1' }] });
+  assert.equal(r.status, 503);
+  assert.equal(r.json.code, 'COMPRAS_INDISPONIVEL');
+});
+
+test('sincronizar credita SÓ o que o RevenueCat confirma — o corpo sozinho não vale nada', async (t) => {
+  const { sincronizar, tabelas, pedidosRc } = await montarApp({
+    respostaRc: rcCom({ futty_minha: [{ id: 'rc-1', store_transaction_id: '2000000999', store: 'app_store', is_sandbox: false }] }),
+  }, t);
+  const r = await sincronizar({
+    customerInfo: {
+      nonSubscriptionTransactions: [
+        { productIdentifier: 'futty_minha', transactionIdentifier: '2000000999' },
+        { productIdentifier: 'futty_minha', transactionIdentifier: 'inventada-pelo-app' },
+      ],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.creditadas, 1);
+  assert.equal(r.json.nao_confirmadas, 1);
+  assert.equal(creditos(tabelas, PESSOA), 10);
+  assert.equal(pedidosRc[0].url, `https://api.revenuecat.com/v1/subscribers/${PESSOA}`);
+  assert.equal(pedidosRc[0].auth, 'Bearer sk_teste');
+
+  // De novo (ou o webhook depois): já existe, não credita e nem pergunta ao RevenueCat.
+  const r2 = await sincronizar({ nonSubscriptionTransactions: [{ productIdentifier: 'futty_minha', transactionIdentifier: '2000000999' }] });
+  assert.equal(r2.json.ja_existiam, 1);
+  assert.equal(creditos(tabelas, PESSOA), 10);
+  assert.equal(pedidosRc.length, 1);
+});
+
+test('sincronizar: produto de outro dono (pacote sem ser dono) fica em recusadas', async (t) => {
+  const { sincronizar, tabelas } = await montarApp({
+    respostaRc: rcCom({ futty_pacote: [{ id: 'rc-2', store_transaction_id: 'GPA.1', store: 'play_store', is_sandbox: true }] }),
+  }, t);
+  const r = await sincronizar({ teamId: TIME, nonSubscriptionTransactions: [{ transactionIdentifier: 'GPA.1' }] });
+  assert.equal(r.json.creditadas, 0);
+  assert.deepEqual(r.json.recusadas, [{ transacao: 'GPA.1', produto: 'pacote', codigo: 'NAO_E_DONO' }]);
+  assert.equal(tabelas.teams[0].brilhante_ativo, false);
+});
+
+test('minhas: lista as compras da pessoa, sem as ignoradas nem as dos outros', async (t) => {
+  const { base } = await montarApp({
+    compras: [
+      { id: 'c1', user_id: PESSOA, produto: 'minha', loja: 'app_store', preco: 9.9, moeda: 'BRL', estado: 'creditada', criada_em: '2026-09-20T10:00:00Z' },
+      { id: 'c2', user_id: PESSOA, produto: 'minha', loja: 'outra', estado: 'ignorada', criada_em: '2026-09-21T10:00:00Z' },
+      { id: 'c3', user_id: DONO, produto: 'pacote', loja: 'play_store', estado: 'creditada', criada_em: '2026-09-22T10:00:00Z' },
+    ],
+  }, t);
+  const r = await fetch(`${base}/api/compras/minhas`);
+  const json = await r.json();
+  assert.equal(r.status, 200);
+  assert.deepEqual(json.compras.map((c) => c.id), ['c1']);
+});
