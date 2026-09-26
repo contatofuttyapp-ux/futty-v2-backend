@@ -18,6 +18,16 @@ if (process.env.NODE_ENV === 'production' && !process.env.MEDIA_TOKEN_SECRET) {
   );
 }
 
+// Pagamentos P1 (26-set): o webhook do RevenueCat (routes/compras.js) credita figurinhas
+// pagas. Sem o segredo, ninguém (nem o RevenueCat) passa na porta — em produção isso
+// é dinheiro cobrado e não creditado. Mesmo padrão do MEDIA_TOKEN_SECRET: falha cedo.
+if (process.env.NODE_ENV === 'production' && !process.env.RC_WEBHOOK_SECRET) {
+  throw new Error(
+    '[Futty] RC_WEBHOOK_SECRET em falta. Gera 32 bytes aleatórios e define a variável no ' +
+    'Cloud Run (e o mesmo valor no painel do RevenueCat) antes de arrancar em produção. Ver docs/COMPRAS.md.'
+  );
+}
+
 // Error tracking — inicializar logo após o dotenv (DSN/NODE_ENV já carregados) e
 // antes dos restantes requires, para o Sentry instrumentar http/express. Só
 // ativo em produção (SENTRY_DSN definido).
@@ -69,6 +79,7 @@ const inicioRoutes = require('./routes/inicio');
 const brilhantesRoutes = require('./routes/brilhantes');
 const diagnosticoRoutes = require('./routes/diagnostico');
 const telemetriaRoutes = require('./routes/telemetria');
+const comprasRoutes = require('./routes/compras');
 
 const app = express();
 
@@ -244,6 +255,7 @@ app.use(inicioRoutes); // GET /api/inicio — agregado da tela Início (1 pedido
 app.use(brilhantesRoutes); // /api/brilhantes — direito, créditos e pedidos (SPEC-FIGURINHA-3)
 app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app (VELOCIDADE 4)
 app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima (Rodada 28), sem sessão
+app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {

@@ -95,6 +95,9 @@ function limitesPara(emProducao) {
     // Rodada 28: a telemetria anônima manda no máximo 1 aviso por tela por sessão (~15 numa sessão
     // longa). 300 por IP cabe um time inteiro no mesmo Wi-Fi da quadra; o resto é enchimento.
     telemetria: 300, // por IP
+    // Pagamentos P1: o webhook do RevenueCat. Chega de poucos IPs deles, em rajada quando
+    // reenviam uma fila; 120/min folga o real e barra quem martela a porta sem o segredo.
+    webhookCompras: 120, // por IP, por MINUTO
   };
 }
 const LIMITES = limitesPara(process.env.NODE_ENV === 'production');
@@ -126,7 +129,8 @@ function chaveDaSessao(token) {
  * validou; o resto, forjado ou o 1º pedido de uma sessão, conta nele.
  * `tokenDoPedido(req)` devolve o token Bearer (ou null) e `sessaoConhecida(token)`
  * diz se o motor já o validou (middleware/auth.js).
- * /media e /telemetria têm limiter próprio (routes/media.js, routes/telemetria.js).
+ * /media, /telemetria e /compras/webhook têm limiter próprio (routes/media.js,
+ * routes/telemetria.js, routes/compras.js).
  * O preflight já morre no cors() lá em cima; ignorar OPTIONS aqui é a rede de
  * segurança para o dia em que alguém trocar a ordem, e evita contar duas vezes
  * cada chamada. NB: dentro de app.use('/api', ...) o Express já tira o prefixo
@@ -137,7 +141,7 @@ function criarLimitesDaApi({ tokenDoPedido, sessaoConhecida, limites = LIMITES }
     const token = tokenDoPedido(req);
     return !!token && sessaoConhecida(token);
   };
-  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media') || req.path === '/telemetria';
+  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media') || req.path === '/telemetria' || req.path.startsWith('/compras/webhook');
   const comum = {
     windowMs: limites.janelaMs,
     standardHeaders: true,
@@ -213,9 +217,25 @@ function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
   });
 }
 
+/**
+ * POST /api/compras/webhook/revenuecat (Pagamentos P1): sem sessão — a autorização é o segredo
+ * no header. Conta por IP real, 120 por minuto.
+ */
+function criarLimiteDeWebhook({ limites = LIMITES } = {}) {
+  return rateLimit({
+    windowMs: 60 * 1000,
+    max: limites.webhookCompras,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveDoPedido,
+    message: { error: 'Muitos pedidos. Tente de novo em um minuto.' },
+  });
+}
+
 module.exports = {
   criarLimiter,
   criarLimiteDeTelemetria,
+  criarLimiteDeWebhook,
   conviteLimiter,
   pushAdminLimiter,
   denunciaLimiter,

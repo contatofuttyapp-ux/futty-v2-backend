@@ -37,10 +37,11 @@ const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 // arquivo.
 const EM_DEV = process.env.NODE_ENV === 'production' ? '' : ' (dev)';
 const RATE_LIMITS_ATIVOS = [
-  { rota: 'global · toda /api (exceto /api/media e /api/telemetria), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
-  { rota: 'global · toda /api (exceto /api/media e /api/telemetria), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media, /api/telemetria e o webhook de compras), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media, /api/telemetria e o webhook de compras), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
   { rota: 'GET /api/media/:token', limite: `${LIMITES.midia}/15min por IP` },
   { rota: 'POST /api/telemetria (anônima, sem sessão)', limite: `${LIMITES.telemetria}/15min por IP (o IP não é gravado)` },
+  { rota: 'POST /api/compras/webhook/revenuecat (segredo no header, sem sessão)', limite: `${LIMITES.webhookCompras}/min por IP` },
   { rota: 'POST /api/me/avatar[/ai]', limite: `${LIMITES.avatar}/15min por sessão (sem sessão: por IP)` },
   { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
   { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
