@@ -12,7 +12,7 @@
 // Uso: npm test  (ou: node --test tests/compras.test.js)
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { criarCompras, ErroCompra, MINHA_GERACOES } = require('../utils/compras');
+const { criarCompras, ErroCompra, MINHA_GERACOES, resumirReceita } = require('../utils/compras');
 const { criarSupabaseFalso } = require('./_supabaseFalso');
 
 const PESSOA = '22222222-2222-2222-2222-222222222222';
@@ -201,4 +201,24 @@ test('se o crédito falha, a linha é apagada (o reenvio da loja consegue credit
   const { compras, tabelas } = montar({}, { semRpc: true, falhar: (tabela, op) => (tabela === 'users' && op === 'update' ? { message: 'banco fora do ar' } : null) });
   await assert.rejects(compras.aplicarCompra(minha()), /fora do ar/);
   assert.equal(tabelas.compras.length, 0);
+});
+
+test('resumirReceita: produção creditada soma; sandbox, reembolso e ignorada à parte; Gabinete é concessão', () => {
+  const r = resumirReceita([
+    { loja: 'app_store', produto: 'minha', ambiente: 'producao', estado: 'creditada', preco_usd: '1.79' },
+    { loja: 'play_store', produto: 'pacote', ambiente: 'producao', estado: 'creditada', preco_usd: 8.99 },
+    { loja: 'app_store', produto: 'manto', ambiente: 'producao', estado: 'reembolsada', preco_usd: 8.99 },
+    { loja: 'app_store', produto: 'minha', ambiente: 'sandbox', estado: 'creditada', preco_usd: 1.79 },
+    { loja: 'gabinete', produto: 'minha', ambiente: 'producao', estado: 'creditada', preco_usd: 0 },
+    { loja: 'outra', produto: null, ambiente: 'producao', estado: 'ignorada', preco_usd: 5 },
+  ]);
+  assert.deepEqual(r, {
+    receita_mes: 10.78,
+    compras_mes: 2,
+    sandbox_mes: 1,
+    reembolsadas_mes: 1,
+    concessoes_mes: 1,
+    por_produto: { minha: 1, pacote: 1, manto: 0 },
+  });
+  assert.equal(resumirReceita([]).receita_mes, 0);
 });

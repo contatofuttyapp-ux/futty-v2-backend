@@ -301,6 +301,29 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
   return { aplicarCompra, reembolsar, registrarIgnorada, resolverPedidos };
 }
 
+/**
+ * O bloco de receita do Gabinete, a partir das linhas de `compras` do mês (função pura,
+ * testada sem banco). Receita = soma de `preco_usd` das creditadas em PRODUÇÃO — o sandbox
+ * conta à parte e o reembolso sai da soma. As concessões do Gabinete (preço 0) entram na
+ * receita como 0, mas não contam como compra: ficam em `concessoes_mes`.
+ */
+function resumirReceita(linhas = []) {
+  const r = { receita_mes: 0, compras_mes: 0, sandbox_mes: 0, reembolsadas_mes: 0, concessoes_mes: 0, por_produto: { minha: 0, pacote: 0, manto: 0 } };
+  let centavos = 0;
+  for (const c of linhas) {
+    if (c.estado === 'ignorada') continue;
+    if (c.ambiente === 'sandbox') { r.sandbox_mes += 1; continue; }
+    if (c.estado === 'reembolsada') { r.reembolsadas_mes += 1; continue; }
+    if (c.estado !== 'creditada') continue;
+    centavos += Math.round((Number(c.preco_usd) || 0) * 100);
+    if (c.loja === 'gabinete') { r.concessoes_mes += 1; continue; }
+    r.compras_mes += 1;
+    if (c.produto in r.por_produto) r.por_produto[c.produto] += 1;
+  }
+  r.receita_mes = centavos / 100;
+  return r;
+}
+
 const padrao = criarCompras();
 
 module.exports = {
@@ -311,5 +334,6 @@ module.exports = {
   PRODUTOS,
   LOJAS,
   ehTabelaEmFalta,
+  resumirReceita,
   novaTransacaoGabinete: () => `gab-${crypto.randomUUID()}`,
 };

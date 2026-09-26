@@ -1,7 +1,7 @@
 // Futty v2.0 — Gabinete do Dono (/gabinete). Rota super-admin exclusiva.
 // Camada de LEITURA agregada (série temporal, pulso, vida, marcos) + store editável
 // (Operação/Publicidade). Lei da casa: o dono é CEGO ao conteúdo — só números.
-// Receita (Stripe) e Publicidade (medição de ads) ainda não têm fonte real → "em breve"
+// Receita: tabela compras (Pagamentos P1, migração 064). Publicidade (medição de ads) ainda não tem fonte real → "em breve"
 // digno, SEM inventar números. Ver SPEC-GABINETE v3.
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
@@ -12,7 +12,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
 const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
-const { aplicarCompra, resolverPedidos, novaTransacaoGabinete, ErroCompra } = require('../utils/compras');
+const { aplicarCompra, resolverPedidos, novaTransacaoGabinete, ErroCompra, resumirReceita } = require('../utils/compras');
 const { custoDoTimePorMes } = require('../utils/custoPorTime');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
@@ -146,12 +146,21 @@ router.get(
       marcos.push({ ic: '🎉', t: `${marco}+ utilizadores`, d: `total atual: ${users.length}` });
     }
 
+    // Pagamentos P1: a receita existe a partir da primeira compra de loja (sandbox conta —
+    // é assim que o dono vê o painel acender no teste). Concessões do Gabinete não contam.
+    let receitaDisponivel = false;
+    try {
+      const { count, error } = await supabase.from('compras').select('id', { count: 'exact', head: true })
+        .neq('estado', 'ignorada').neq('loja', 'gabinete');
+      if (!error) receitaDisponivel = (count || 0) > 0;
+    } catch { /* 064 em falta: fica false */ }
+
     res.json({
       pulso: { users_hoje: usersHoje, jogos_hoje: jogosHoje, denuncias_abertas: denunciasAbertas, mrr: null },
       crescimento,
       vida,
       marcos,
-      receita_disponivel: false, // Stripe sem MRR real → "em breve" digno
+      receita_disponivel: receitaDisponivel, // Pagamentos P1: true depois da 1ª compra de loja
       publicidade_disponivel: false, // medição de ads (impressão/clique) ainda não existe
     });
   })
@@ -244,7 +253,7 @@ router.get(
     const hojeDia = hojeISO.slice(0, 10);
     const primeiroDiaMes = `${hojeDia.slice(0, 7)}-01`;
 
-    const [usersRes, gamesRes, teamsRes, gastoHoje, gastoMes, iaFreeze, ultimoBackup, op] = await Promise.all([
+    const [usersRes, gamesRes, teamsRes, gastoHoje, gastoMes, iaFreeze, ultimoBackup, op, comprasMes] = await Promise.all([
       supabase.from('users').select('created_at'),
       supabase.from('games').select('created_at').gte('created_at', seteDiasISO),
       supabase.from('teams').select('id'),
@@ -253,9 +262,12 @@ router.get(
       lerAppConfig('ia_freeze'),
       lerAppConfig('ultimo_backup'),
       gabineteStore.ler(),
+      supabase.from('compras').select('loja, produto, ambiente, estado, preco_usd').gte('criada_em', `${primeiroDiaMes}T00:00:00Z`),
     ]);
     const users = usersRes.data || [];
     const teams = teamsRes.data || [];
+    // Pagamentos P1: sem a 064, a receita diz que não sabe (null) em vez de mostrar 0.
+    const receita = comprasMes.error ? null : resumirReceita(comprasMes.data);
 
     // Denúncias abertas — mesmo agregado do /api/super/gabinete (zero conteúdo).
     let denunciasAbertas = 0;
@@ -314,6 +326,14 @@ router.get(
           custo_por_geracao_etiqueta: 'custo real (fal)',
           freeze: !!iaFreeze,
         },
+        // Pagamentos P1 — US$ das compras de loja creditadas no mês (produção só). Tudo null
+        // enquanto a migração 064 não correr.
+        receita_mes: receita ? receita.receita_mes : null,
+        compras_mes: receita ? receita.compras_mes : null,
+        sandbox_mes: receita ? receita.sandbox_mes : null,
+        reembolsadas_mes: receita ? receita.reembolsadas_mes : null,
+        concessoes_mes: receita ? receita.concessoes_mes : null,
+        por_produto: receita ? receita.por_produto : null,
       },
       seguranca: {
         banco_trancado: bancoTrancado,
@@ -351,6 +371,48 @@ const PRODUTO_LABEL = { pacote: 'Pacote do time', manto: 'Manto próprio', minha
 /** Mapa id → linha, para juntar pedidos a pessoas/times sem embeds do PostgREST. */
 function porId(linhas) {
   return Object.fromEntries((linhas || []).map((l) => [l.id, l]));
+}
+
+/**
+ * Pagamentos P1 — as últimas 50 compras (loja, Gabinete e ignoradas), com quem e que time.
+ * null se a 064 ainda não correu: uma lista vazia afirmaria "ninguém comprou".
+ */
+async function ultimasCompras() {
+  const { data, error } = await supabase
+    .from('compras')
+    .select('id, user_id, team_id, produto, loja, preco, moeda, preco_usd, ambiente, estado, criada_em')
+    .order('criada_em', { ascending: false })
+    .limit(50);
+  if (error) {
+    console.warn('[gabinete/brilhantes] compras indisponíveis (migração 064 aplicada?):', error.message);
+    return null;
+  }
+  const linhas = data || [];
+  const idsPessoas = [...new Set(linhas.map((c) => c.user_id).filter(Boolean))];
+  const idsTimes = [...new Set(linhas.map((c) => c.team_id).filter(Boolean))];
+  const [pessoas, times] = await Promise.all([
+    idsPessoas.length ? supabase.from('users').select('id, nome_jogador, email').in('id', idsPessoas) : { data: [] },
+    idsTimes.length ? supabase.from('teams').select('id, nome').in('id', idsTimes) : { data: [] },
+  ]);
+  const quem = porId(pessoas.data);
+  const time = porId(times.data);
+  return linhas.map((c) => ({
+    id: c.id,
+    user_id: c.user_id,
+    nome: quem[c.user_id]?.nome_jogador || null,
+    email: quem[c.user_id]?.email || null,
+    team_id: c.team_id,
+    time: time[c.team_id]?.nome || null,
+    produto: c.produto,
+    produto_label: PRODUTO_LABEL[c.produto] || c.produto,
+    loja: c.loja,
+    preco: c.preco == null ? null : Number(c.preco),
+    moeda: c.moeda,
+    preco_usd: c.preco_usd == null ? null : Number(c.preco_usd),
+    ambiente: c.ambiente,
+    estado: c.estado,
+    criada_em: c.criada_em,
+  }));
 }
 
 /**
@@ -431,6 +493,8 @@ router.get(
         .order('brilhante_creditos', { ascending: false });
       if (erroCredito) throw new Error(erroCredito.message);
 
+      const compras = await ultimasCompras();
+
       res.json({
         indisponivel: false,
         kits: KITS_DISPONIVEIS,
@@ -478,11 +542,12 @@ router.get(
           creditos: Number(u.brilhante_creditos) || 0,
           presente_criador_em: u.presente_criador_em || null,
         })),
+        compras, // null = migração 064 por correr
       });
     } catch (e) {
       if (!ehMigracaoEmFalta(e.message)) throw e;
       console.warn('[gabinete/brilhantes] migração 054 em falta:', e.message);
-      res.json({ indisponivel: true, motivo: 'A migração 054 ainda não foi corrida no Supabase.', kits: KITS_DISPONIVEIS, pedidos: [], times: [], pessoas: [] });
+      res.json({ indisponivel: true, motivo: 'A migração 054 ainda não foi corrida no Supabase.', kits: KITS_DISPONIVEIS, pedidos: [], times: [], pessoas: [], compras: null });
     }
   }),
 );
