@@ -15,7 +15,7 @@ const router = express.Router();
 const { VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
 const pushConfigurado = !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
 if (pushConfigurado) {
-  webpush.setVapidDetails(VAPID_SUBJECT || 'mailto:suporte@futty.app', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+  webpush.setVapidDetails(VAPID_SUBJECT || 'mailto:contato@futtyapp.com', VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 } else {
   console.warn('[Futty] Push desativado: faltam VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY no .env.');
 }

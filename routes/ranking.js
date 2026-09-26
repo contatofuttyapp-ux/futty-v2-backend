@@ -8,6 +8,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, requireTeamMember, getTeamBySlug, getRole, ensureUserRow } = require('../utils/db');
 const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
 const { agregadosDaEquipa, COLUNAS_JOGOS } = require('../utils/agregados');
+const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
@@ -367,7 +368,9 @@ router.get(
 
     res.json({
       team: { ...team, role },
-      jogador: { ...jogador, posicao, total_com_nota: comNota.length },
+      // figurinha_ativa (Rodada 28, Manutenção 26-set): mesma regra única de services/inicio.js —
+      // o card mostra AGORA uma figurinha nossa? As telas não devem voltar a comparar foto_url/avatar_url.
+      jogador: { ...jogador, posicao, total_com_nota: comNota.length, figurinha_ativa: avatarEhFigurinhaNossa(jogador.avatar_url) },
       radar,
       jogos_campeao,
       conquistas,

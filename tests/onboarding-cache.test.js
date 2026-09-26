@@ -20,6 +20,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -30,6 +31,7 @@ let accessToken;
 let testUserId;
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
@@ -54,6 +56,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (testUserId) await supabase.auth.admin.deleteUser(testUserId).catch(() => {});
   if (server) await new Promise((resolve) => server.close(resolve));
 });
@@ -68,7 +71,7 @@ function pedir(metodo, path, { token, body } = {}) {
   });
 }
 
-test('onboarding-completo com o MESMO token cacheado -> /api/me seguinte já vem true (sem loop)', async () => {
+test('onboarding-completo com o MESMO token cacheado -> /api/me seguinte já vem true (sem loop)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // 1) GET /api/me primeiro: cacheia req.user (middleware/auth.js) com
   // onboarding_completo ainda ausente — é a mesma condição de quem acabou de
   // logar e caiu direto no /onboarding.
@@ -93,7 +96,7 @@ test('onboarding-completo com o MESMO token cacheado -> /api/me seguinte já vem
   assert.equal(corpoDepois.user.onboarding_completo, true, 'depois de concluir, o MESMO token já tem de ver onboarding_completo:true');
 });
 
-test('tour-visto com o MESMO token cacheado -> /api/me seguinte já vem true', async () => {
+test('tour-visto com o MESMO token cacheado -> /api/me seguinte já vem true', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const post = await pedir('POST', '/api/me/tour-visto', { token: accessToken });
   assert.equal(post.status, 200, `POST tour-visto devia dar 200, deu ${post.status}`);
   const corpoPost = await post.json();

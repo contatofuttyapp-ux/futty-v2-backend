@@ -16,6 +16,7 @@ const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { dataDeNascimentoValida, idadeEm, menorQueIdadeMinima } = require('../utils/idade');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -42,6 +43,7 @@ let baseUrl;
 const contas = [];
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
@@ -49,6 +51,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   for (const c of contas) await supabase.auth.admin.deleteUser(c.id).catch(() => {});
   if (server) await new Promise((resolve) => server.close(resolve));
 });
@@ -84,7 +87,7 @@ async function contaExiste(id) {
 
 const anosAtras = (n) => `${new Date().getUTCFullYear() - n}-06-15`;
 
-test('onboarding (Google/Apple): data de menor de 13 → 403 MENOR_DE_13 e a conta some', async () => {
+test('onboarding (Google/Apple): data de menor de 13 → 403 MENOR_DE_13 e a conta some', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta();
   await pedir('GET', '/api/me', conta.token); // cria a linha em public.users, como o app faz
   const r = await pedir('PATCH', '/api/me', conta.token, { birthdate: anosAtras(10) });
@@ -99,7 +102,7 @@ test('onboarding (Google/Apple): data de menor de 13 → 403 MENOR_DE_13 e a con
   assert.equal(depois.status, 401, 'o token da conta apagada continuou valendo');
 });
 
-test('onboarding: 13 anos ou mais segue normal e conclui', async () => {
+test('onboarding: 13 anos ou mais segue normal e conclui', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta();
   await pedir('GET', '/api/me', conta.token);
   const r = await pedir('PATCH', '/api/me', conta.token, { birthdate: anosAtras(20) });
@@ -109,7 +112,7 @@ test('onboarding: 13 anos ou mais segue normal e conclui', async () => {
   assert.equal(await contaExiste(conta.id), true);
 });
 
-test('cadastro por e-mail com data de menor de 13 (forçado) → a conclusão do onboarding apaga a conta', async () => {
+test('cadastro por e-mail com data de menor de 13 (forçado) → a conclusão do onboarding apaga a conta', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta();
   await pedir('GET', '/api/me', conta.token);
   // o que o ensureUserRow grava a partir do metadata do signUp — aqui direto, sem depender da trava da 062
@@ -120,7 +123,7 @@ test('cadastro por e-mail com data de menor de 13 (forçado) → a conclusão do
   assert.equal(await contaExiste(conta.id), false);
 });
 
-test('conta que já existia (onboarding concluído) não é tocada', async () => {
+test('conta que já existia (onboarding concluído) não é tocada', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta({ onboardingConcluido: true });
   await pedir('GET', '/api/me', conta.token);
   const r = await pedir('PATCH', '/api/me', conta.token, { birthdate: anosAtras(10) });

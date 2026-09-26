@@ -17,6 +17,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -29,6 +30,7 @@ let teamSlugReal;
 let gameIdReal;
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   // Sobe o app numa porta livre (server.js só faz o próprio app.listen()
@@ -69,6 +71,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (testUserId) await supabase.auth.admin.deleteUser(testUserId).catch(() => {});
   if (server) await new Promise((resolve) => server.close(resolve));
 });
@@ -84,7 +87,7 @@ function pedir(metodo, path, { token, body } = {}) {
 }
 
 // ─── 1. Sem token → 401 em 10 rotas de dados ────────────────────────────────
-test('sem token -> 401 em 10 rotas de dados', async () => {
+test('sem token -> 401 em 10 rotas de dados', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const rotas = [
     ['GET', '/api/teams'],
     ['GET', () => `/api/teams/${teamSlugReal}`],
@@ -106,7 +109,7 @@ test('sem token -> 401 em 10 rotas de dados', async () => {
 });
 
 // ─── 2. Token de quem NÃO é membro → 403 nas rotas sensíveis ────────────────
-test('token de quem nao e membro -> 403 nas rotas sensiveis', async () => {
+test('token de quem nao e membro -> 403 nas rotas sensiveis', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const casos = [
     ['GET', () => `/api/teams/${teamSlugReal}`],
     ['GET', () => `/api/games/${gameIdReal}`],
@@ -125,7 +128,7 @@ test('token de quem nao e membro -> 403 nas rotas sensiveis', async () => {
 });
 
 // ─── Gabinete 2.0: GET /api/super/gabinete/resumo ───────────────────────────
-test('GET /api/super/gabinete/resumo -> 401 sem token, 403 com utilizador comum', async () => {
+test('GET /api/super/gabinete/resumo -> 401 sem token, 403 com utilizador comum', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const semToken = await pedir('GET', '/api/super/gabinete/resumo');
   assert.equal(semToken.status, 401, `sem token devia dar 401, deu ${semToken.status}`);
 
@@ -134,13 +137,13 @@ test('GET /api/super/gabinete/resumo -> 401 sem token, 403 com utilizador comum'
 });
 
 // ─── GET /api/inicio (agregado da tela Início, 11-set) ──────────────────────
-test('GET /api/inicio -> 401 sem token', async () => {
+test('GET /api/inicio -> 401 sem token', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const semToken = await pedir('GET', '/api/inicio');
   assert.equal(semToken.status, 401, `sem token devia dar 401, deu ${semToken.status}`);
 });
 
 // ─── 3. Rotas públicas → nunca 401 ──────────────────────────────────────────
-test('rotas publicas -> nunca 401', async () => {
+test('rotas publicas -> nunca 401', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const casos = [
     ['GET', '/api/health'],
     ['GET', () => `/api/p/${gameIdReal}`],

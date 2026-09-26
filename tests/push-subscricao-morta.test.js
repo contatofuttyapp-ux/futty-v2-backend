@@ -21,6 +21,7 @@ const webpush = require('web-push');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 const push = require('../routes/push');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -74,6 +75,7 @@ function pedir(metodo, caminho, { token, body } = {}) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   // O dublê: responde pelo ENDPOINT da subscrição, como faria o push service.
@@ -110,6 +112,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   webpush.sendNotification = enviosOriginais;
   try {
     for (const c of Object.values(contas)) await supabase.from('push_subscriptions').delete().eq('user_id', c.id);
@@ -132,7 +135,7 @@ test('subscricaoMorta: 403, 404 e 410 dizem "nunca mais serve"; o resto é passa
   }
 });
 
-test('enviarNotificacao: apaga as subscrições com 403/404/410 e SÓ elas', async () => {
+test('enviarNotificacao: apaga as subscrições com 403/404/410 e SÓ elas', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const id403 = await semear(contas.membro.id, 'chave-antiga-403', 403);
   const id410 = await semear(contas.membro.id, 'expirada-410', 410);
   const id404 = await semear(contas.membro.id, 'removida-404', 404);
@@ -152,7 +155,7 @@ test('enviarNotificacao: apaga as subscrições com 403/404/410 e SÓ elas', asy
   await supabase.from('push_subscriptions').delete().in('id', [id500, id429, idOk]);
 });
 
-test('aviso ao time inteiro: 403 limpa a linha e a resposta segue contando a falha', { skip: !temVapid && 'sem VAPID no .env' }, async () => {
+test('aviso ao time inteiro: 403 limpa a linha e a resposta segue contando a falha', { skip: (!COM_BANCO && MOTIVO_SKIP) || (!temVapid && 'sem VAPID no .env') }, async () => {
   const idMorta = await semear(contas.membro.id, 'time-chave-antiga', 403);
   const idViva = await semear(contas.membro.id, 'time-viva', 'ok');
 
@@ -167,7 +170,7 @@ test('aviso ao time inteiro: 403 limpa a linha e a resposta segue contando a fal
   await supabase.from('push_subscriptions').delete().eq('id', idViva);
 });
 
-test('mensagem a um jogador: 403 limpa a linha e a resposta segue contando a falha', { skip: !temVapid && 'sem VAPID no .env' }, async () => {
+test('mensagem a um jogador: 403 limpa a linha e a resposta segue contando a falha', { skip: (!COM_BANCO && MOTIVO_SKIP) || (!temVapid && 'sem VAPID no .env') }, async () => {
   const idMorta = await semear(contas.membro.id, 'msg-chave-antiga', 403);
 
   const res = await pedir('POST', `/api/push/equipas/${slug}/membros/${contas.membro.id}/mensagem`, {

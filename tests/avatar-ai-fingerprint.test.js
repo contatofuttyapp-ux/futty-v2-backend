@@ -28,6 +28,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -40,6 +41,7 @@ let testUserId;
 let migracao052Pendente = false;
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   // Sonda barata (mesma lógica de scripts/conferir-migracoes.js): sem a
@@ -88,6 +90,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (testUserId) {
     try {
       await supabase.from('user_avatar_slots').delete().eq('user_id', testUserId);
@@ -110,7 +113,7 @@ function pedir(metodo, path, { token, body, timeoutMs } = {}) {
   });
 }
 
-test('mesma foto (fingerprint bate) -> reutiliza o slot, sem gerar', async (t) => {
+test('mesma foto (fingerprint bate) -> reutiliza o slot, sem gerar', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (migracao052Pendente) return t.skip('migração 052 (user_avatar_slots.foto_fingerprint) ainda não aplicada no banco — ver scripts/conferir-migracoes.js');
   const res = await pedir('POST', '/api/me/avatar/ai', { token: accessToken, body: { kit: KIT } });
   assert.equal(res.status, 200, `devia reutilizar (200), deu ${res.status}`);
@@ -120,7 +123,7 @@ test('mesma foto (fingerprint bate) -> reutiliza o slot, sem gerar', async (t) =
   assert.equal(corpo.avatar_url, 'https://exemplo.com/avatar-da-foto-A.png', 'devia devolver o avatar do SLOT existente, sem gerar de novo');
 });
 
-test('foto NOVA (fingerprint não bate) -> NÃO reutiliza o slot da foto antiga', async (t) => {
+test('foto NOVA (fingerprint não bate) -> NÃO reutiliza o slot da foto antiga', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (migracao052Pendente) return t.skip('migração 052 (user_avatar_slots.foto_fingerprint) ainda não aplicada no banco — ver scripts/conferir-migracoes.js');
   // Troca a foto (B): mesmo efeito de POST /api/me/avatar com uma foto diferente —
   // muda foto_hash sem tocar no slot (é exatamente o que o upload real faz).

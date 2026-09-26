@@ -11,6 +11,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -47,6 +48,7 @@ async function gerarConvite() {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => {
@@ -73,6 +75,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     if (teamId) await supabase.from('teams').delete().eq('id', teamId);
     for (const c of Object.values(contas)) {
@@ -84,7 +87,7 @@ after(async () => {
   }
 });
 
-test('CONVITE_DIAS = 30: o token novo expira ~30 dias à frente', async () => {
+test('CONVITE_DIAS = 30: o token novo expira ~30 dias à frente', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const res = await pedir('POST', `/api/teams/${teamSlug}/convite`, { token: contas.admin.token });
   const corpo = await res.json();
   assert.equal(res.status, 201);
@@ -92,7 +95,7 @@ test('CONVITE_DIAS = 30: o token novo expira ~30 dias à frente', async () => {
   assert.ok(dias > 29 && dias < 31, `esperava ~30 dias de validade, deu ${dias.toFixed(2)}`);
 });
 
-test('o MESMO link é aceito por 2 contas diferentes (201 nas duas) e usos = 2 no GET', async () => {
+test('o MESMO link é aceito por 2 contas diferentes (201 nas duas) e usos = 2 no GET', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const token = await gerarConvite();
 
   const r1 = await pedir('POST', `/api/convite/${token}/aceitar`, { token: contas.entra1.token });
@@ -114,7 +117,7 @@ test('o MESMO link é aceito por 2 contas diferentes (201 nas duas) e usos = 2 n
   await supabase.from('team_members').delete().eq('team_id', teamId).in('user_id', [contas.entra1.id, contas.entra2.id]);
 });
 
-test('GET /api/teams/:slug/convites lista o convite USADO (não filtra mais por usado_por) com o contador certo', async () => {
+test('GET /api/teams/:slug/convites lista o convite USADO (não filtra mais por usado_por) com o contador certo', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const token = await gerarConvite();
   await pedir('POST', `/api/convite/${token}/aceitar`, { token: contas.entra1.token });
 
@@ -126,7 +129,7 @@ test('GET /api/teams/:slug/convites lista o convite USADO (não filtra mais por 
   await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', contas.entra1.id);
 });
 
-test('revogado (DELETE) -> GET /api/convite/:token dá motivo "nao_encontrado"', async () => {
+test('revogado (DELETE) -> GET /api/convite/:token dá motivo "nao_encontrado"', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const gerar = await pedir('POST', `/api/teams/${teamSlug}/convite`, { token: contas.admin.token });
   const { token } = await gerar.json();
   const { convites } = await (await pedir('GET', `/api/teams/${teamSlug}/convites`, { token: contas.admin.token })).json();
@@ -141,7 +144,7 @@ test('revogado (DELETE) -> GET /api/convite/:token dá motivo "nao_encontrado"',
   assert.equal(info.motivo, 'nao_encontrado', `esperava 'nao_encontrado' após revogar, deu ${info.motivo}`);
 });
 
-test('expirado -> GET /api/convite/:token dá motivo "expirado"; aceitar dá 400', async () => {
+test('expirado -> GET /api/convite/:token dá motivo "expirado"; aceitar dá 400', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const jaExpirou = new Date(Date.now() - 3600000).toISOString();
   const { data: convite, error } = await supabase
     .from('convites')

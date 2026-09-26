@@ -29,6 +29,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -64,6 +65,7 @@ function subirFoto(buf) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
@@ -86,6 +88,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (testUserId) {
     // apagarUsuario() faz o varrimento por prefixo; aqui basta o caminho curto.
     try {
@@ -101,7 +104,7 @@ after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
 });
 
-test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o da segunda', async () => {
+test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o da segunda', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const fotoA = await fotoDeTeste(120);
   const fotoB = await fotoDeTeste(180);
   assert.notEqual(sha256(fotoA), sha256(fotoB), 'as duas fotos de teste têm de ser mesmo diferentes');
@@ -166,7 +169,7 @@ test('duas fotos seguidas -> dois CAMINHOS diferentes no bucket, e o hash é o d
   assert.equal(aindaLa, false, `a foto anterior (${caminhoA}) devia ter sido apagada depois do update`);
 });
 
-test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e sem crédito gasto', async (t) => {
+test('hash da tabela não bate com o objeto -> 409 FOTO_DESATUALIZADA, sem fal e sem crédito gasto', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   // Cenário: o objeto no bucket é a foto B, mas `foto_hash` diz outra coisa —
   // é o que se veria se o download trouxesse uma versão que não é a atual.
   // Sem a trava, daqui saía uma figurinha paga da foto errada.

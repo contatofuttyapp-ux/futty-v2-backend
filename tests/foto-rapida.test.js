@@ -26,6 +26,7 @@ const { app, supabase } = require('../server');
 const { assinarToken, decodificarToken } = require('../utils/mediaToken');
 const { parseUrlPublico } = require('../utils/storage');
 const { chaveDoDerivado, cacheLer, TAMANHOS_DA_FOTO } = require('../utils/derivadosMidia');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -90,6 +91,7 @@ const originais = { remove: ApiDoBucket.prototype.remove, upload: ApiDoBucket.pr
 const restaurarGanchos = () => { ApiDoBucket.prototype.remove = originais.remove; ApiDoBucket.prototype.upload = originais.upload; };
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
@@ -98,6 +100,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   restaurarGanchos();
   try {
     if (teamId) await supabase.from('teams').delete().eq('id', teamId);
@@ -113,7 +116,7 @@ after(async () => {
   }
 });
 
-test('POST /api/me/avatar RESPONDE antes de apagar a foto anterior; o hash é o dos bytes guardados', async () => {
+test('POST /api/me/avatar RESPONDE antes de apagar a foto anterior; o hash é o dos bytes guardados', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const fotoA = await foto(110);
   const resA = await subirFoto(dona, fotoA);
@@ -153,7 +156,7 @@ test('POST /api/me/avatar RESPONDE antes de apagar a foto anterior; o hash é o 
   }
 });
 
-test('original: foto_original_url aponta para o arquivo gravado, e a original anterior sai depois', async () => {
+test('original: foto_original_url aponta para o arquivo gravado, e a original anterior sai depois', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const rec1 = await foto(90);
   const ori1 = await foto(91, 800, 1200);
@@ -173,7 +176,7 @@ test('original: foto_original_url aponta para o arquivo gravado, e a original an
   assert.equal(await esperarAte(async () => !(await existeNoBucket(caminhoOri1)), 12000), true, 'a original anterior saiu do bucket');
 });
 
-test('original que não sobe: 200, o recorte vale, e foto_original_url NÃO aponta para um arquivo que não existe', async () => {
+test('original que não sobe: 200, o recorte vale, e foto_original_url NÃO aponta para um arquivo que não existe', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const antes = await perfilNoBanco(dona.id);
   ApiDoBucket.prototype.upload = async function (caminho, ...a) {
@@ -196,7 +199,7 @@ test('original que não sobe: 200, o recorte vale, e foto_original_url NÃO apon
   assert.ok((lista || []).every((f) => !f.name.includes('131')) , 'nenhum arquivo da original que falhou ficou no bucket');
 });
 
-test('os derivados da foto nova ficam prontos no LRU sem ninguém pedir, e o proxy os serve como hit', async () => {
+test('os derivados da foto nova ficam prontos no LRU sem ninguém pedir, e o proxy os serve como hit', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const res = await subirFoto(dona, await foto(150));
   assert.equal(res.status, 200);
@@ -218,7 +221,7 @@ test('os derivados da foto nova ficam prontos no LRU sem ninguém pedir, e o pro
   assert.equal(decodificarToken(token).path, alvo.path);
 });
 
-test('PUT /api/me/avatar/recorte: a foto anterior sai e os derivados do recorte novo ficam prontos', async () => {
+test('PUT /api/me/avatar/recorte: a foto anterior sai e os derivados do recorte novo ficam prontos', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const antes = await perfilNoBanco(dona.id);
   const caminhoAntes = caminhoDe(antes.foto_url);
@@ -233,7 +236,7 @@ test('PUT /api/me/avatar/recorte: a foto anterior sai e os derivados do recorte 
   assert.ok(pronto, 'os derivados do recorte novo estão no LRU');
 });
 
-test('PUT .../recorte sem foto: 400 e nenhum arquivo órfão no bucket', async () => {
+test('PUT .../recorte sem foto: 400 e nenhum arquivo órfão no bucket', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const semFoto = await criarConta('semfoto');
   const res = await enviarRecorte(semFoto, await foto(60));
   assert.equal(res.status, 400);
@@ -244,7 +247,7 @@ test('PUT .../recorte sem foto: 400 e nenhum arquivo órfão no bucket', async (
   assert.equal(limpo, true, 'o recorte que subiu à toa foi apagado');
 });
 
-test('sorteio: quem trocou a foto depois de sorteado aparece com a foto de HOJE; Ranking traz o genérico escolhido', async () => {
+test('sorteio: quem trocou a foto depois de sorteado aparece com a foto de HOJE; Ranking traz o genérico escolhido', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const dona = contas.dona;
   const sufixo = `${Date.now()}-${crypto.randomInt(1e6)}`;
   const { data: time, error: eTime } = await supabase.from('teams')

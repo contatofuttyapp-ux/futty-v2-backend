@@ -19,6 +19,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -58,6 +59,7 @@ async function pedir(metodo, path, { token, body } = {}) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
 
   server = app.listen(0);
@@ -107,6 +109,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     if (teamId) {
       await supabase.from('brilhantes_time').delete().eq('team_id', teamId);
@@ -130,7 +133,7 @@ const ROTAS = [
 ];
 
 // ─── 1. O PORTÃO ─────────────────────────────────────────────────────────────
-test('as rotas do Gabinete são do super-admin: 401 sem token, 403 com conta comum', async (t) => {
+test('as rotas do Gabinete são do super-admin: 401 sem token, 403 com conta comum', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   // Rodada 28: a aba Velocidade (telemetria anônima agregada) atrás do mesmo portão.
   const todas = [['GET', '/api/super/gabinete/brilhantes'], ['GET', '/api/super/gabinete/velocidade'], ...ROTAS];
   for (const [metodo, path] of todas) {
@@ -149,7 +152,7 @@ test('as rotas do Gabinete são do super-admin: 401 sem token, 403 com conta com
 });
 
 // ─── 2. A LISTA ──────────────────────────────────────────────────────────────
-test('GET /brilhantes lista o pedido pendente com quem pediu e de que time', async (t) => {
+test('GET /brilhantes lista o pedido pendente com quem pediu e de que time', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada — ver db/migrations/054_brilhante.sql');
   const r = await pedir('GET', '/api/super/gabinete/brilhantes', { token: contas.super.token });
   assert.equal(r.status, 200);
@@ -171,7 +174,7 @@ test('GET /brilhantes lista o pedido pendente com quem pediu e de que time', asy
 });
 
 // ─── 3. ATIVAR O PACOTE ──────────────────────────────────────────────────────
-test('ativar-pacote liga o time no uniforme escolhido e resolve o pedido', async (t) => {
+test('ativar-pacote liga o time no uniforme escolhido e resolve o pedido', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const mau = await pedir('POST', '/api/super/gabinete/brilhantes/ativar-pacote', {
     token: contas.super.token, body: { teamId, kitId: 'uniforme-que-nao-existe' },
@@ -195,7 +198,7 @@ test('ativar-pacote liga o time no uniforme escolhido e resolve o pedido', async
 });
 
 // ─── 4. CRÉDITOS ─────────────────────────────────────────────────────────────
-test('creditos soma à pessoa e resolve o pedido "minha"', async (t) => {
+test('creditos soma à pessoa e resolve o pedido "minha"', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao || !pedidoMinhaId) return t.skip('migração 054 ainda não aplicada');
   const mau = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
     token: contas.super.token, body: { userId: contas.membro.id, quantidade: 0 },
@@ -221,7 +224,7 @@ test('creditos soma à pessoa e resolve o pedido "minha"', async (t) => {
 
 // ─── 4B. CRÉDITOS POR E-MAIL (RODADA 21) — quem ainda não tem pedido nem
 // crédito nenhum não aparece em NENHUMA das duas listas que a aba já lê. ────
-test('creditos por e-mail resolve o userId no servidor (RODADA 21)', async (t) => {
+test('creditos por e-mail resolve o userId no servidor (RODADA 21)', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const semNada = await pedir('POST', '/api/super/gabinete/brilhantes/creditos', {
     token: contas.super.token, body: { quantidade: 10 },
@@ -247,7 +250,7 @@ test('creditos por e-mail resolve o userId no servidor (RODADA 21)', async (t) =
 });
 
 // ─── 5. RECUSAR COM MOTIVO ───────────────────────────────────────────────────
-test('recusar fecha o pedido com motivo, e o motivo volta na tela de quem pediu', async (t) => {
+test('recusar fecha o pedido com motivo, e o motivo volta na tela de quem pediu', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const { data: novo } = await supabase
     .from('pedidos_ativacao').insert({ user_id: contas.comum.id, produto: 'minha' }).select('id').single();
@@ -279,7 +282,7 @@ test('recusar fecha o pedido com motivo, e o motivo volta na tela de quem pediu'
 });
 
 // ─── 6. O UNIFORME DO PACOTE MANDA ───────────────────────────────────────────
-test('geração pelo pacote: o uniforme é o do time, mesmo pedindo outro', async (t) => {
+test('geração pelo pacote: o uniforme é o do time, mesmo pedindo outro', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const { data: perfil } = await supabase.from('users').select('foto_hash').eq('id', contas.membro.id).maybeSingle();
   // Slot do uniforme DO TIME, da foto atual: o caminho certo reutiliza-o e não
@@ -296,7 +299,7 @@ test('geração pelo pacote: o uniforme é o do time, mesmo pedindo outro', asyn
   assert.equal(r.json.reutilizado, true, 'nada de gerar — e nada de gastar');
 });
 
-test('o slot-reuse não devolve a Brilhante de OUTRO uniforme', async (t) => {
+test('o slot-reuse não devolve a Brilhante de OUTRO uniforme', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const { data: perfil } = await supabase.from('users').select('foto_hash').eq('id', contas.membro.id).maybeSingle();
   // Agora a pessoa tem os DOIS slots da mesma foto: um do uniforme do time e
@@ -315,7 +318,7 @@ test('o slot-reuse não devolve a Brilhante de OUTRO uniforme', async (t) => {
 });
 
 // ─── ACHADO DA VARREDURA PÓS-FIGURINHA 3 (22-set) ───────────────────────────
-test('PUT /api/me/kit veste um kit não-default já gerado, sem gate de plano', async (t) => {
+test('PUT /api/me/kit veste um kit não-default já gerado, sem gate de plano', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   // Regressão: a rota ainda comparava users.plan (sempre 'free' agora que o
   // modelo Free/Pro/Elite saiu) contra kit.planos — nenhum kit fora o
@@ -328,7 +331,7 @@ test('PUT /api/me/kit veste um kit não-default já gerado, sem gate de plano', 
 });
 
 // ─── 6B. UNIFORME GUARDADO: NUNCA GERA, NUNCA DEBITA (RODADA 21) ────────────
-test('PUT /api/me/kit num uniforme já pintado não chama a fal nem debita', async (t) => {
+test('PUT /api/me/kit num uniforme já pintado não chama a fal nem debita', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   await supabase.from('users').update({ brilhante_creditos: 3 }).eq('id', contas.comum.id);
   const { data: perfil } = await supabase.from('users').select('foto_hash, avatar_url, kit_ativo').eq('id', contas.comum.id).maybeSingle();
@@ -375,7 +378,7 @@ test('PUT /api/me/kit num uniforme já pintado não chama a fal nem debita', asy
 });
 
 // ─── 6C. O CONTADOR "N GERAÇÕES RESTANTES" BATE COM O BANCO (RODADA 21) ─────
-test('GET /api/brilhantes/estado.direito.restantes bate com brilhante_creditos', async (t) => {
+test('GET /api/brilhantes/estado.direito.restantes bate com brilhante_creditos', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   await supabase.from('users').update({ brilhante_creditos: 10 }).eq('id', contas.comum.id);
   const r = await pedir('GET', '/api/brilhantes/estado', { token: contas.comum.token });
@@ -386,7 +389,7 @@ test('GET /api/brilhantes/estado.direito.restantes bate com brilhante_creditos',
   await supabase.from('users').update({ brilhante_creditos: 0 }).eq('id', contas.comum.id);
 });
 
-test('GET /api/brilhantes/estado.direito.restantes bate com o saldo do pacote do time', async (t) => {
+test('GET /api/brilhantes/estado.direito.restantes bate com o saldo do pacote do time', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const sonda = await supabase.from('brilhantes_time').select('geracoes').limit(1);
   if (sonda.error?.code === '42703' || sonda.error?.code === 'PGRST204') {
@@ -412,7 +415,7 @@ test('GET /api/brilhantes/estado.direito.restantes bate com o saldo do pacote do
 // Sem a fal: usa o mesmo temDireito()/debitar() que POST /api/me/avatar/ai
 // chama, contra a coluna de verdade. Prova o ciclo inteiro do pacote: cada
 // geração debita 1, o contador desce de 5 a 1, e a 6ª não tem direito.
-test('pacote de 5: cinco gerações debitam e a 6ª é recusada (banco real)', async (t) => {
+test('pacote de 5: cinco gerações debitam e a 6ª é recusada (banco real)', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   const sonda = await supabase.from('brilhantes_time').select('geracoes').limit(1);
   if (sonda.error?.code === '42703' || sonda.error?.code === 'PGRST204') {
@@ -441,7 +444,7 @@ test('pacote de 5: cinco gerações debitam e a 6ª é recusada (banco real)', a
 });
 
 // ─── 7. SAIR DO TIME ─────────────────────────────────────────────────────────
-test('quem sai do time mantém a Brilhante já gerada', async (t) => {
+test('quem sai do time mantém a Brilhante já gerada', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   await supabase.from('brilhantes_time').upsert({
     team_id: teamId, user_id: contas.membro.id, kit_id: KIT_TIME,
@@ -472,7 +475,7 @@ test('quem sai do time mantém a Brilhante já gerada', async (t) => {
 });
 
 // ─── 7b. CUSTO REAL POR TIME: SOMADO POR GERAÇÃO, E POR MÊS (Rodada 28, H) ───
-test('custo por time soma TODAS as gerações de cada pessoa e quebra por mês', async (t) => {
+test('custo por time soma TODAS as gerações de cada pessoa e quebra por mês', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   if (!temMigracao) return t.skip('migração 054 ainda não aplicada');
   // O dono refez: 2 gerações, 11 + 12 cêntimos — a linha dele guarda a soma (debitar soma desde a
   // Rodada 28; antes ficava só o custo da última). O membro já tem 1 geração de 11 (teste 7).
@@ -510,7 +513,7 @@ test('custo por time soma TODAS as gerações de cada pessoa e quebra por mês',
 });
 
 // ─── 8. OS 6 FUNDOS VÊM COM A BRILHANTE, NÃO COM UM PLANO ────────────────────
-test('fundo de cima: livre para quem tem Brilhante, barrado para quem não tem', async () => {
+test('fundo de cima: livre para quem tem Brilhante, barrado para quem não tem', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // O membro tem Brilhante (avatar_url = uma figurinha nossa, posto no teste anterior) e
   // plano "free" — no modelo antigo levava 403 "exige um plano superior", com
   // "Os 6 fundos liberados" escrito na compra que o time fez.

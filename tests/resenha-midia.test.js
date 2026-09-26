@@ -38,6 +38,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 const { bytesUsadosPeloTime } = require('../utils/resenhaCota');
 const { caminhoDeUrl } = require('../utils/storage');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -158,6 +159,7 @@ function gifDeBytes(bytes) {
 // ── setup / cleanup ──────────────────────────────────────────────────────────
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
@@ -185,6 +187,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     if (arquivosParaLimpar.length) await supabase.storage.from(STORAGE_BUCKET).remove(arquivosParaLimpar).catch(() => {});
     if (teamId) await supabase.from('teams').delete().eq('id', teamId);
@@ -199,7 +202,7 @@ after(async () => {
 
 // ── 1. JPG grande -> webp, bem menor ─────────────────────────────────────────
 
-test('upload de JPG ~2,5MB -> grava webp bem menor que 400KB', async () => {
+test('upload de JPG ~2,5MB -> grava webp bem menor que 400KB', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const original = await jpegGrande();
   assert.ok(original.length > 1024 * 1024, `a fixture tinha de ser >1MB pra valer como "foto grande", ficou ${(original.length / 1024).toFixed(0)}KB`);
 
@@ -217,7 +220,7 @@ test('upload de JPG ~2,5MB -> grava webp bem menor que 400KB', async () => {
 
 // ── 2. PNG com EXIF girado -> sai em pé ──────────────────────────────────────
 
-test('PNG fisicamente deitado + EXIF orientation=8 -> sai em pé', async () => {
+test('PNG fisicamente deitado + EXIF orientation=8 -> sai em pé', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { buffer, larguraEsperada, alturaEsperada } = await pngDeitadoComExif();
   // Confere a PRÓPRIA fixture antes de gastar um upload nela: os pixels têm
   // de estar deitados (proporção invertida) — senão o teste não prova nada.
@@ -249,7 +252,7 @@ test('PNG fisicamente deitado + EXIF orientation=8 -> sai em pé', async () => {
 
 // ── 3. GIF de 9MB -> recusado com mensagem clara ─────────────────────────────
 
-test('GIF de 9MB -> recusado (acima do teto de 8MB do GIF)', async () => {
+test('GIF de 9MB -> recusado (acima do teto de 8MB do GIF)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const gif9mb = gifDeBytes(9 * 1024 * 1024);
   const r = await enviarArquivo(contas.admin.token, gif9mb, 'reacao.gif', 'image/gif');
   assert.equal(r.status, 413, `devia recusar com 413, deu ${r.status}`);
@@ -258,7 +261,7 @@ test('GIF de 9MB -> recusado (acima do teto de 8MB do GIF)', async () => {
   assert.match(corpo.error, /8\s?mb/i, 'a mensagem tem de dizer o teto de 8MB');
 });
 
-test('GIF de 5MB (abaixo do teto de 8MB) -> passa sem compressão', async () => {
+test('GIF de 5MB (abaixo do teto de 8MB) -> passa sem compressão', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const gif5mb = gifDeBytes(5 * 1024 * 1024);
   const { media_type, caminho } = await upload(contas.admin.token, gif5mb, 'reacao-ok.gif', 'image/gif');
   assert.equal(media_type, 'gif');
@@ -269,7 +272,7 @@ test('GIF de 5MB (abaixo do teto de 8MB) -> passa sem compressão', async () => 
 
 // ── 4. Apagar um post apaga o ARQUIVO no Storage (item 3) ───────────────────
 
-test('DELETE /api/feed/posts/:id apaga o arquivo no Storage, não só a linha', async () => {
+test('DELETE /api/feed/posts/:id apaga o arquivo no Storage, não só a linha', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { url, caminho } = await upload(contas.admin.token, await jpegGrande(), 'vai-ser-apagada.jpg', 'image/jpeg');
   assert.ok(await metaNoStorage(caminho), 'pré-condição: o arquivo tem de existir antes de apagar o post');
 
@@ -292,7 +295,7 @@ test('DELETE /api/feed/posts/:id apaga o arquivo no Storage, não só a linha', 
   if (idx !== -1) arquivosParaLimpar.splice(idx, 1);
 });
 
-test('DELETE /api/me (excluir conta) também apaga a mídia da Resenha do usuário no Storage', async () => {
+test('DELETE /api/me (excluir conta) também apaga a mídia da Resenha do usuário no Storage', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // Conta descartável PRÓPRIA: apagá-la não pode mexer no teamId/contas.admin
   // usados pelos outros testes deste arquivo. Vira admin do MESMO time só
   // para poder postar — como já sobra outro admin (contas.admin), apagar
@@ -322,7 +325,7 @@ test('DELETE /api/me (excluir conta) também apaga a mídia da Resenha do usuár
 
 // ── 5. Cota de 500 MB por time -> 413 (SKIP sem a migração 053) ─────────────
 
-test('cota por time -> 413 ao estourar um limite baixo (simulado)', async (t) => {
+test('cota por time -> 413 ao estourar um limite baixo (simulado)', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   const usadosAgora = await bytesUsadosPeloTime(teamId);
   if (usadosAgora === null) {
     return t.skip('migração 053 (feed_bytes_por_time) ainda não aplicada no Supabase — cota fica fail-open de propósito até o Pedro rodar o SQL.');
@@ -348,7 +351,7 @@ test('cota por time -> 413 ao estourar um limite baixo (simulado)', async (t) =>
 
 // ── 6. Gabinete → Pessoas & times mostra o uso por time ─────────────────────
 
-test('GET /api/super/teams inclui midia_mb/midia_cota_mb do time (sem quebrar sem a migração 053)', async () => {
+test('GET /api/super/teams inclui midia_mb/midia_cota_mb do time (sem quebrar sem a migração 053)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   contas.donoGabinete = await criarConta('dono-gabinete'); // em `contas`: o after() cuida da exclusão
   const { error } = await supabase.from('users').update({ is_super_admin: true }).eq('id', contas.donoGabinete.id);
   if (error) throw error;

@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -25,6 +26,7 @@ let userId;
 let token;
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
@@ -41,6 +43,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     if (userId) {
       const { data: sobras } = await supabase.storage.from('avatars').list('public', { limit: 100, search: userId });
@@ -55,7 +58,7 @@ after(async () => {
 
 const me = async () => (await (await fetch(`${baseUrl}/api/me`, { headers: { Authorization: `Bearer ${token}` } })).json()).user;
 
-test('foto: false no upload e no /api/me', async () => {
+test('foto: false no upload e no /api/me', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const foto = await sharp({ create: { width: 400, height: 600, channels: 3, background: { r: 120, g: 110, b: 100 } } }).jpeg({ quality: 90 }).toBuffer();
   const form = new FormData();
   form.append('avatar', new Blob([foto], { type: 'image/jpeg' }), 'foto.jpg');
@@ -66,20 +69,20 @@ test('foto: false no upload e no /api/me', async () => {
   assert.equal((await me()).figurinha_ativa, false);
 });
 
-test('foto do Google em avatar_url (≠ foto_url): false — a regra antiga dizia true', async () => {
+test('foto do Google em avatar_url (≠ foto_url): false — a regra antiga dizia true', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   await supabase.from('users').update({ avatar_url: 'https://lh3.googleusercontent.com/a/foto-do-google=s96-c' }).eq('id', userId);
   const u = await me();
   assert.notEqual(u.avatar_url, u.foto_url, 'o cenário precisa de avatar_url ≠ foto_url');
   assert.equal(u.figurinha_ativa, false, 'a foto do Google virou "figurinha" de novo');
 });
 
-test('arquivo -ai- do nosso bucket em avatar_url: true', async () => {
+test('arquivo -ai- do nosso bucket em avatar_url: true', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const caminho = `${SUPABASE_URL}/storage/v1/object/public/avatars/public/${userId}-ai-dark-gold-1.png?v=1`;
   await supabase.from('users').update({ avatar_url: caminho }).eq('id', userId);
   assert.equal((await me()).figurinha_ativa, true);
 });
 
-test('"Mostrar minha foto" (PUT /api/me/avatar/modo): false na resposta', async () => {
+test('"Mostrar minha foto" (PUT /api/me/avatar/modo): false na resposta', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const r = await fetch(`${baseUrl}/api/me/avatar/modo`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },

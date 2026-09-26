@@ -22,6 +22,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -70,6 +71,7 @@ async function meDaApi(conta) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => {
@@ -80,6 +82,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     for (const conta of Object.values(contas)) {
       const { data: sobras } = await supabase.storage.from('avatars').list('public', { limit: 100, search: conta.id });
@@ -93,7 +96,7 @@ after(async () => {
   }
 });
 
-test('conta com a foto do Google em avatar_url: o upload troca o card (avatar_url = a foto nova)', async () => {
+test('conta com a foto do Google em avatar_url: o upload troca o card (avatar_url = a foto nova)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta('google', { full_name: 'Teste Google', avatar_url: GOOGLE });
   await gravarEstado(conta, { avatar_url: GOOGLE });
   const antes = await perfilNoBanco(conta.id);
@@ -111,12 +114,12 @@ test('conta com a foto do Google em avatar_url: o upload troca o card (avatar_ur
   assert.ok(corpo.avatar_url, 'a resposta traz o avatar_url novo');
 });
 
-test('a foto do Google não faz o /api/me acusar figurinha (tem_figurinha continua false depois do upload)', async () => {
+test('a foto do Google não faz o /api/me acusar figurinha (tem_figurinha continua false depois do upload)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const eu = await meDaApi(contas.google);
   assert.equal(eu.tem_figurinha, false, 'quem nunca gerou figurinha não pode ter tem_figurinha=true');
 });
 
-test('a segunda troca de foto também muda o card', async () => {
+test('a segunda troca de foto também muda o card', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = contas.google;
   const primeira = (await perfilNoBanco(conta.id)).foto_url;
   const res = await subirFoto(conta, await fotoDeTeste(160));
@@ -126,7 +129,7 @@ test('a segunda troca de foto também muda o card', async () => {
   assert.equal(depois.avatar_url, depois.foto_url, 'e o card acompanha a foto nova de novo');
 });
 
-test('PUT /api/me/avatar/recorte: com a foto do Google em avatar_url, o reenquadramento também troca o card', async () => {
+test('PUT /api/me/avatar/recorte: com a foto do Google em avatar_url, o reenquadramento também troca o card', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = contas.google;
   await gravarEstado(conta, { avatar_url: GOOGLE }); // volta ao estado do relato (foto_url já existe)
   const res = await enviarRecorte(conta, await fotoDeTeste(200));
@@ -137,7 +140,7 @@ test('PUT /api/me/avatar/recorte: com a foto do Google em avatar_url, o reenquad
   assert.equal(depois.avatar_url, depois.foto_url, 'o recorte novo vira o card quando não há figurinha');
 });
 
-test('conta com figurinha real (arquivo -ai- no nosso bucket): upload e recorte PRESERVAM a figurinha', async () => {
+test('conta com figurinha real (arquivo -ai- no nosso bucket): upload e recorte PRESERVAM a figurinha', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const conta = await criarConta('figurinha');
   const figurinha = `${SUPABASE_URL}/storage/v1/object/public/avatars/public/${conta.id}-ai-dark-gold-${Date.now()}.png`;
   await gravarEstado(conta, { avatar_url: figurinha });
@@ -158,7 +161,7 @@ test('conta com figurinha real (arquivo -ai- no nosso bucket): upload e recorte 
   assert.equal(eu.tem_figurinha, true, 'o avatar atual é figurinha nossa: tem_figurinha=true');
 });
 
-test('fundos pagos (PATCH /api/me): a foto do Google em avatar_url não os destranca; a figurinha nossa, sim', async () => {
+test('fundos pagos (PATCH /api/me): a foto do Google em avatar_url não os destranca; a figurinha nossa, sim', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const pedirFundo = (conta) => fetch(`${baseUrl}/api/me`, {
     method: 'PATCH',
     headers: { Authorization: `Bearer ${conta.token}`, 'Content-Type': 'application/json' },
@@ -173,7 +176,7 @@ test('fundos pagos (PATCH /api/me): a foto do Google em avatar_url não os destr
   assert.equal(liberada.status, 200, `quem tem figurinha nossa escolhe qualquer fundo, deu ${liberada.status}`);
 });
 
-test('modo "foto" (migração 056): a foto nova vira o card mesmo havendo figurinha', async (t) => {
+test('modo "foto" (migração 056): a foto nova vira o card mesmo havendo figurinha', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   const conta = contas.figurinha;
   const { error } = await supabase.from('users').update({ card_modo: 'foto' }).eq('id', conta.id);
   if (error) return t.skip(`migração 056 (users.card_modo) ainda não aplicada (${error.message})`);
@@ -183,7 +186,7 @@ test('modo "foto" (migração 056): a foto nova vira o card mesmo havendo figuri
   assert.equal(depois.avatar_url, depois.foto_url, 'em modo foto o card segue a foto');
 });
 
-test('estado torto: histórico de figurinhas mas o avatar atual é a foto do Google → a foto nova vira o card', async (t) => {
+test('estado torto: histórico de figurinhas mas o avatar atual é a foto do Google → a foto nova vira o card', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   const conta = await criarConta('torto', { avatar_url: GOOGLE });
   await gravarEstado(conta, { avatar_url: GOOGLE });
   const { error } = await supabase.from('user_avatar_historico').insert({ user_id: conta.id, kit_id: 'dark-gold', avatar_url: `${SUPABASE_URL}/storage/v1/object/public/avatars/public/${conta.id}-ai-dark-gold-1.png`, custo_cents: null });

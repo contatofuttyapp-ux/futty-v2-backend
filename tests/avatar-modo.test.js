@@ -23,6 +23,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -57,6 +58,7 @@ function pedirModo(modo) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
@@ -83,6 +85,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (testUserId) {
     try {
       const { data: sobras } = await supabase.storage.from('avatars').list('public', { limit: 100, search: testUserId });
@@ -97,14 +100,14 @@ after(async () => {
   if (server) await new Promise((resolve) => server.close(resolve));
 });
 
-test('modo fora de "foto"/"figurinha" -> 400 MODO_INVALIDO', async () => {
+test('modo fora de "foto"/"figurinha" -> 400 MODO_INVALIDO', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const res = await pedirModo('brilhante');
   const corpo = await res.json().catch(() => ({}));
   assert.equal(res.status, 400, `devia recusar com 400, deu ${res.status}: ${JSON.stringify(corpo)}`);
   assert.equal(corpo.code, 'MODO_INVALIDO');
 });
 
-test('sem slot nenhum, modo "figurinha" -> 400 digno (SEM_SLOT)', async () => {
+test('sem slot nenhum, modo "figurinha" -> 400 digno (SEM_SLOT)', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const res = await pedirModo('figurinha');
   const corpo = await res.json().catch(() => ({}));
   assert.equal(res.status, 400, `devia recusar com 400, deu ${res.status}: ${JSON.stringify(corpo)}`);
@@ -112,7 +115,7 @@ test('sem slot nenhum, modo "figurinha" -> 400 digno (SEM_SLOT)', async () => {
   assert.match(corpo.error || '', /figurinha/i, 'a mensagem tem de ser digna e falar de figurinha, não um erro técnico');
 });
 
-test('com um slot: "figurinha" veste o slot, "foto" volta pra própria foto, e o slot sobrevive', async () => {
+test('com um slot: "figurinha" veste o slot, "foto" volta pra própria foto, e o slot sobrevive', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { data: perfilAntes } = await supabase.from('users').select('foto_url').eq('id', testUserId).maybeSingle();
   const fotoUrl = perfilAntes?.foto_url;
   assert.ok(fotoUrl, 'preciso da foto de preparo já gravada em users.foto_url');
@@ -152,7 +155,7 @@ test('com um slot: "figurinha" veste o slot, "foto" volta pra própria foto, e o
   assert.equal(slotDepois?.avatar_url, avatarFigurinha, 'o slot tem de sobreviver à troca para modo foto');
 });
 
-test('card_modo grava a escolha (ou pula se a migração 056 ainda não tiver corrido)', async (t) => {
+test('card_modo grava a escolha (ou pula se a migração 056 ainda não tiver corrido)', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   const { data, error } = await supabase.from('users').select('card_modo').eq('id', testUserId).maybeSingle();
   if (error) {
     return t.skip(`migração 056 (users.card_modo) ainda não aplicada — ver db/migrations/056_card_modo.sql (${error.message})`);
@@ -161,7 +164,7 @@ test('card_modo grava a escolha (ou pula se a migração 056 ainda não tiver co
   assert.equal(data?.card_modo, 'foto', 'a coluna existe: a última troca (modo foto) tem de ter ficado gravada');
 });
 
-test('modo "foto" sobrevive a uma figurinha gerada depois — ou cai no fail-safe sem a 056', async () => {
+test('modo "foto" sobrevive a uma figurinha gerada depois — ou cai no fail-safe sem a 056', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // Simula o que POST /api/me/avatar/ai faria: uma figurinha nova põe
   // avatar_url a apontar para ela de novo, mesmo com a pessoa em modo 'foto'
   // (gerar não é escolher o que mostrar — são caminhos diferentes). A partir

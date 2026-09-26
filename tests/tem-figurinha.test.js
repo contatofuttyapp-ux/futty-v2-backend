@@ -15,6 +15,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -30,6 +31,7 @@ const fotoDeTeste = (tom) => sharp({
 }).jpeg({ quality: 92 }).toBuffer();
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => {
@@ -56,6 +58,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   try {
     if (userId) {
       const { data: sobras } = await supabase.storage.from('avatars').list('public', { limit: 100, search: userId });
@@ -68,7 +71,7 @@ after(async () => {
   }
 });
 
-test('conta nova com foto (sem figurinha nenhuma) -> GET /api/me tem_figurinha=false', async () => {
+test('conta nova com foto (sem figurinha nenhuma) -> GET /api/me tem_figurinha=false', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // O PONTO do pedido: o interruptor não pode mais se basear em kit_ativo.
   // (kit_ativo em si pode chegar 'dark-gold' mesmo aqui — achado à parte,
   // registado no relatório: parece DEFAULT da COLUNA no banco, não algo que
@@ -80,7 +83,7 @@ test('conta nova com foto (sem figurinha nenhuma) -> GET /api/me tem_figurinha=f
   assert.equal(corpo.user.tem_figurinha, false, 'conta que só subiu foto não pode ter tem_figurinha=true');
 });
 
-test('demo-loja@futtymock.com (figurinha pronta, sem linha em brilhantes_time/historico) -> tem_figurinha=true', async (t) => {
+test('demo-loja@futtymock.com (figurinha pronta, sem linha em brilhantes_time/historico) -> tem_figurinha=true', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
   const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
   const fs = require('node:fs');
   const path = require('node:path');

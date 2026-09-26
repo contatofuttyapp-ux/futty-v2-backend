@@ -31,6 +31,7 @@ const { test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -74,6 +75,7 @@ async function linhaDoElenco(userId) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
@@ -130,6 +132,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   // PostgREST devolve { error } em vez de rejeitar — nada de .catch() aqui (não
   // existe no builder do supabase-js e a excepção deixava o servidor aberto).
   try {
@@ -144,7 +147,7 @@ after(async () => {
   }
 });
 
-test('confirmar sem `goleiro` no body herda a flag do time', async () => {
+test('confirmar sem `goleiro` no body herda a flag do time', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const r = await pedir('POST', `/api/games/${gameId}/confirmar`, { token: contas.goleiro.token, body: { confirmado: true } });
   assert.equal(r.status, 200);
   const body = await r.json();
@@ -152,7 +155,7 @@ test('confirmar sem `goleiro` no body herda a flag do time', async () => {
   assert.deepEqual(await linhaDoElenco(contas.goleiro.id), { confirmado: true, goleiro: true });
 });
 
-test('confirmar com `goleiro: false` explícito manda mais que a flag do time', async () => {
+test('confirmar com `goleiro: false` explícito manda mais que a flag do time', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const r = await pedir('POST', `/api/games/${gameId}/confirmar`, { token: contas.goleiro.token, body: { confirmado: true, goleiro: false } });
   assert.equal(r.status, 200);
   assert.equal((await r.json()).meuEstado.goleiro, false);
@@ -164,13 +167,13 @@ test('confirmar com `goleiro: false` explícito manda mais que a flag do time', 
   assert.equal((await r2.json()).meuEstado.goleiro, false, 'não pode sobrescrever o que já foi marcado no jogo');
 });
 
-test('jogador de linha continua de linha ao confirmar', async () => {
+test('jogador de linha continua de linha ao confirmar', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const r = await pedir('POST', `/api/games/${gameId}/confirmar`, { token: contas.linha.token, body: { confirmado: true } });
   assert.equal(r.status, 200);
   assert.equal((await r.json()).meuEstado.goleiro, false);
 });
 
-test('membro com categoria GR que confirma pelo RSVP aparece como goleiro no elenco', async () => {
+test('membro com categoria GR que confirma pelo RSVP aparece como goleiro no elenco', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   // 1. Os três respondem "confirmado" ao RSVP (nada disto toca em game_players).
   for (const papel of ['admin', 'marcado', 'goleiro']) {
     const r = await pedir('POST', `/api/jogos/${gameId}/rsvp/responder`, { token: contas[papel].token, body: { status: 'confirmado' } });
@@ -197,7 +200,7 @@ test('membro com categoria GR que confirma pelo RSVP aparece como goleiro no ele
   assert.equal(players.find((p) => p.user_id === contas.marcado.id).goleiro, false);
 });
 
-test('PATCH .../membros/posicao com `posicao` (contrato antigo) só aceita GL — DEF/MEI/ATA viram linha', async () => {
+test('PATCH .../membros/posicao com `posicao` (contrato antigo) só aceita GL — DEF/MEI/ATA viram linha', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { data: time } = await supabase.from('teams').select('slug').eq('id', teamId).single();
 
   const r = await pedir('PATCH', `/api/equipas/${time.slug}/membros/posicao`, { token: contas.linha.token, body: { posicao: 'MEI' } });
@@ -217,7 +220,7 @@ test('PATCH .../membros/posicao com `posicao` (contrato antigo) só aceita GL �
   assert.equal(desfaz.status, 200);
 });
 
-test('PATCH .../membros/posicao com `goleiro` (contrato novo, Rodada 10B) grava categoria', async () => {
+test('PATCH .../membros/posicao com `goleiro` (contrato novo, Rodada 10B) grava categoria', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { data: time } = await supabase.from('teams').select('slug').eq('id', teamId).single();
 
   const r = await pedir('PATCH', `/api/equipas/${time.slug}/membros/posicao`, { token: contas.linha.token, body: { goleiro: true } });
@@ -234,7 +237,7 @@ test('PATCH .../membros/posicao com `goleiro` (contrato novo, Rodada 10B) grava 
   assert.deepEqual(await r2.json(), { ok: true, goleiro: false, posicao: null });
 });
 
-test('a coluna posicao (morta) não influencia mais nenhuma leitura — só categoria manda', async () => {
+test('a coluna posicao (morta) não influencia mais nenhuma leitura — só categoria manda', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { data: time } = await supabase.from('teams').select('slug').eq('id', teamId).single();
   // Contradiz de propósito: posicao diz uma coisa, categoria diz outra. Se a
   // leitura ainda olhasse para posicao, este teste apanhava.
@@ -263,7 +266,7 @@ test('a coluna posicao (morta) não influencia mais nenhuma leitura — só cate
   await supabase.from('team_members').update({ categoria: 'linha' }).eq('team_id', teamId).eq('user_id', contas.linha.id);
 });
 
-test('a pastilha "GR" do admin (rota antiga) e o chip/botão de goleiro (rota nova) nunca discordam — mesma coluna', async () => {
+test('a pastilha "GR" do admin (rota antiga) e o chip/botão de goleiro (rota nova) nunca discordam — mesma coluna', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
   const { data: time } = await supabase.from('teams').select('slug').eq('id', teamId).single();
 
   // A rota ANTIGA do admin (AdminPanel → categoria) liga o goleiro...

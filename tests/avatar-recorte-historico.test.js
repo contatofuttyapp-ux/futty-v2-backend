@@ -14,6 +14,7 @@ const sharp = require('sharp');
 const { createClient } = require('@supabase/supabase-js');
 const { app, supabase } = require('../server');
 const authRouter = require('../routes/auth');
+const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
 const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
@@ -62,6 +63,7 @@ async function limparConta(userId) {
 }
 
 before(async () => {
+  if (!COM_BANCO) return;
   if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => {
@@ -72,6 +74,7 @@ before(async () => {
 });
 
 after(async () => {
+  if (!COM_BANCO) return;
   if (server) await new Promise((resolve) => server.close(resolve));
 });
 
@@ -79,10 +82,10 @@ describe('POST /api/me/avatar com "original" — RODADA 19', () => {
   let userId;
   let accessToken;
 
-  before(async () => { ({ userId, accessToken } = await novoUsuario('original')); });
-  after(async () => limparConta(userId));
+  before(async () => { if (!COM_BANCO) return; ({ userId, accessToken } = await novoUsuario('original')); });
+  after(async () => { if (!COM_BANCO) return; return limparConta(userId); });
 
-  test('grava foto_original_url num objeto separado do recorte (foto_url)', async (t) => {
+  test('grava foto_original_url num objeto separado do recorte (foto_url)', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
     const form = new FormData();
     form.append('avatar', new Blob([await fotoDeTeste(80)], { type: 'image/jpeg' }), 'recorte.jpg');
     form.append('original', new Blob([await fotoDeTeste(80, 900)], { type: 'image/jpeg' }), 'original.jpg');
@@ -106,8 +109,8 @@ describe('PUT /api/me/avatar/recorte — RODADA 19', () => {
   let userId;
   let accessToken;
 
-  before(async () => { ({ userId, accessToken } = await novoUsuario('recorte')); });
-  after(async () => limparConta(userId));
+  before(async () => { if (!COM_BANCO) return; ({ userId, accessToken } = await novoUsuario('recorte')); });
+  after(async () => { if (!COM_BANCO) return; return limparConta(userId); });
 
   function putRecorte(buf) {
     const form = new FormData();
@@ -119,7 +122,7 @@ describe('PUT /api/me/avatar/recorte — RODADA 19', () => {
     });
   }
 
-  test('regrava só o recorte — a original sobrevive e o hash muda', async (t) => {
+  test('regrava só o recorte — a original sobrevive e o hash muda', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
     // Prepara: upload normal COM original.
     const form = new FormData();
     form.append('avatar', new Blob([await fotoDeTeste(100)], { type: 'image/jpeg' }), 'recorte.jpg');
@@ -140,7 +143,7 @@ describe('PUT /api/me/avatar/recorte — RODADA 19', () => {
     assert.notEqual(depois.foto_hash, antes.foto_hash, 'a trava de hash passa a ser a do recorte NOVO');
   });
 
-  test('funciona sem original nenhuma (conta antiga / legado) — não erra, só reenquadra o recorte atual', async () => {
+  test('funciona sem original nenhuma (conta antiga / legado) — não erra, só reenquadra o recorte atual', { skip: !COM_BANCO && MOTIVO_SKIP }, async () => {
     const { userId: uid2, accessToken: tok2 } = await novoUsuario('recorte-legado');
     try {
       // Upload SEM campo "original" — como o Onboarding faz hoje. O PONTO deste
@@ -171,10 +174,10 @@ describe('user_avatar_historico — teto (arquivarFigurinhaAntiga)', () => {
   const TETO = authRouter.TETO_HISTORICO_FIGURINHAS || 10;
   const ALEM_DO_TETO = TETO + 1;
 
-  before(async () => { ({ userId } = await novoUsuario('historico')); });
-  after(async () => limparConta(userId));
+  before(async () => { if (!COM_BANCO) return; ({ userId } = await novoUsuario('historico')); });
+  after(async () => { if (!COM_BANCO) return; return limparConta(userId); });
 
-  test(`a ${ALEM_DO_TETO}ª arquivada apaga a mais antiga (linha + arquivo no Storage)`, async (t) => {
+  test(`a ${ALEM_DO_TETO}ª arquivada apaga a mais antiga (linha + arquivo no Storage)`, { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
     if (typeof authRouter.arquivarFigurinhaAntiga !== 'function') {
       return t.skip('arquivarFigurinhaAntiga não exportado — rodada 19 não aplicada nesta base?');
     }

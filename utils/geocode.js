@@ -19,7 +19,7 @@ async function geocodar(cidade) {
 
   try {
     const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(termo)}`;
-    const resp = await fetch(url, { headers: { 'User-Agent': 'Futty/1.0 (https://futty.app; suporte@futty.app)' } });
+    const resp = await fetch(url, { headers: { 'User-Agent': 'Futty/1.0 (https://futtyapp.com.br; contato@futtyapp.com)' } });
     if (!resp.ok) { cache.set(chave, null); return null; }
     const arr = await resp.json();
     if (!Array.isArray(arr) || !arr.length) { cache.set(chave, null); return null; }
