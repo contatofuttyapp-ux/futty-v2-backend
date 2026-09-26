@@ -35,10 +35,37 @@ const TABELAS = [
   'gasto_ia_diario', 'gols_jogadores', 'geracao_ia_log', 'app_config', 'user_blocks',
   'share_declarations', 'rsvp_respostas', 'user_avatar_slots',
   'pedidos_ativacao', 'brilhantes_time',
+  // Manutenção 26-set: ficaram para trás quando entraram (057/058/061).
+  'user_avatar_historico', 'convite_usos', 'telemetria_velocidade',
 ];
+
+// Modelo de campeonato N-times (migração 039) — fora de propósito (comentário acima),
+// nunca deve disparar o AVISO de "tabela nova sem backup".
+const TABELAS_EXCLUIDAS = ['campeonatos_v2', 'campeonato_times', 'campeonato_confrontos'];
 
 const PASTA_BACKUPS = 'C:\\Users\\phfer\\Desktop\\FUT\\BACKUPS';
 const TAMANHO_PAGINA = 1000; // limite por pedido do PostgREST (default Supabase)
+
+/** Lê backend/db/migrations/*.sql e devolve toda tabela criada por lá que não está em
+ * TABELAS nem em TABELAS_EXCLUIDAS — a migração 052 é o exemplo de por que isto existe:
+ * uma tabela criada fora de uma migração rastreada não aparece aqui (não tem como), mas
+ * uma CREATE TABLE normal que alguém esqueça de acrescentar a TABELAS, sim. */
+function tabelasSemBackup() {
+  const pastaMigracoes = path.join(__dirname, '..', 'db', 'migrations');
+  const arquivos = fs.readdirSync(pastaMigracoes).filter((f) => f.endsWith('.sql'));
+  const conhecidas = new Set([...TABELAS, ...TABELAS_EXCLUIDAS]);
+  const encontradas = new Set();
+  const regex = /create\s+table\s+(?:if\s+not\s+exists\s+)?public\.(\w+)/gi;
+  for (const arquivo of arquivos) {
+    const texto = fs.readFileSync(path.join(pastaMigracoes, arquivo), 'utf8');
+    let m;
+    // eslint-disable-next-line no-cond-assign
+    while ((m = regex.exec(texto))) {
+      if (!conhecidas.has(m[1])) encontradas.add(m[1]);
+    }
+  }
+  return [...encontradas];
+}
 
 function hojeISO() {
   const d = new Date();
@@ -68,6 +95,11 @@ async function main() {
   // (process.exit(1) se faltarem) — nada a checar aqui.
   const pastaHoje = path.join(PASTA_BACKUPS, hojeISO());
   fs.mkdirSync(pastaHoje, { recursive: true });
+
+  const semBackup = tabelasSemBackup();
+  for (const nome of semBackup) {
+    console.log(`[backup] AVISO: tabela '${nome}' existe numa migração mas não está em TABELAS nem em TABELAS_EXCLUIDAS — fica de fora do backup. Acrescenta em scripts/backup-banco.js.`);
+  }
 
   console.log(`[backup] destino: ${pastaHoje}`);
   let totalLinhas = 0;
@@ -106,6 +138,8 @@ async function main() {
   } catch (e) {
     console.error(`[backup] aviso: não consegui gravar 'ultimo_backup' em app_config — ${e.message}`);
   }
+
+  if (semBackup.length) process.exitCode = 2; // tabelas ok, mas há tabela nova sem backup — ver AVISO acima
 }
 
 main();
