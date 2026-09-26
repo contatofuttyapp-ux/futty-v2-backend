@@ -222,3 +222,13 @@ test('resumirReceita: produção creditada soma; sandbox, reembolso e ignorada �
   });
   assert.equal(resumirReceita([]).receita_mes, 0);
 });
+
+test('P2: manto comprado na loja SEM pedido antes cria o pedido pendente (fila do Gabinete)', async () => {
+  const { compras, tabelas } = montar();
+  tabelas.teams[0].brilhante_ativo = true;
+  await compras.aplicarCompra({ userId: DONO, teamId: TIME, produto: 'manto', loja: 'play_store', transacaoId: 'GPA.manto' });
+  const pedidos = tabelas.pedidos_ativacao.filter((p) => p.produto === 'manto');
+  assert.equal(pedidos.length, 1);
+  assert.equal(pedidos[0].team_id, TIME);
+  assert.equal(pedidos[0].user_id, DONO);
+});

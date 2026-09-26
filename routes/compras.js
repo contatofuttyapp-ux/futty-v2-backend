@@ -159,7 +159,9 @@ function criarRotasCompras({
           return await ignorar('USUARIO_DESCONHECIDO');
         }
         const teamIdAttr = atributo(ev.subscriber_attributes, 'team_id');
-        const teamId = teamIdAttr && UUID.test(teamIdAttr) ? teamIdAttr : null;
+        // P2: o atributo team_id fica no assinante depois de um pacote; a Minha Figurinha é da
+        // pessoa e não leva o time (senão a linha em `compras` apontava para o time errado).
+        const teamId = produto !== 'minha' && teamIdAttr && UUID.test(teamIdAttr) ? teamIdAttr : null;
         try {
           const r = await compras.aplicarCompra({ ...base, userId, teamId });
           guardarAppUserId(userId, base.appUserId);

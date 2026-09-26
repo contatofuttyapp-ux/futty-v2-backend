@@ -320,3 +320,10 @@ test('minhas: lista as compras da pessoa, sem as ignoradas nem as dos outros', a
   assert.equal(r.status, 200);
   assert.deepEqual(json.compras.map((c) => c.id), ['c1']);
 });
+
+test('P2: a Minha Figurinha não leva o team_id que ficou no assinante depois de um pacote', async (t) => {
+  const { postar, tabelas } = await montar({}, t);
+  const r = await postar(evento({ id: 'evt-m', transaction_id: 'tx-minha-com-time', subscriber_attributes: { team_id: { value: TIME } } }));
+  assert.equal(r.json.estado, 'creditada');
+  assert.equal(tabelas.compras[0].team_id, null);
+});

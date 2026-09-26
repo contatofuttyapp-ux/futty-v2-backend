@@ -100,9 +100,14 @@ router.get(
       // os slots de todas as páginas, para o app não voltar a pedir por tela.
       ad: { ad: ads?.paginas?.inicio ?? null },
       ads: ads || null,
-      brilhante: brilhante
-        ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos, restantes: brilhante.restantes }
-        : { fonte: null, team_id: null, kit_id: null, creditos: 0, restantes: 0 },
+      // Pagamentos P2: `loja_pronta` (PAGAMENTOS_ATIVOS no motor) vai junto — a Figurinha abre a partir
+      // deste payload e decide aqui se o convite é "Comprar" ou "Pedir ativação", sem pedir o /estado.
+      brilhante: {
+        ...(brilhante
+          ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos, restantes: brilhante.restantes }
+          : { fonte: null, team_id: null, kit_id: null, creditos: 0, restantes: 0 }),
+        loja_pronta: process.env.PAGAMENTOS_ATIVOS === 'true',
+      },
       // Nome próprio: `pedidos` (acima) são os pedidos de ENTRADA em times —
       // coisa completamente diferente.
       pedidos_brilhante: pedidos_brilhante || [],

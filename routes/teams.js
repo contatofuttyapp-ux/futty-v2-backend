@@ -16,6 +16,7 @@ const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
 const { presentearCriador } = require('../utils/direitoBrilhante');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
+const { escolherUniforme } = require('../utils/uniformeDoPacote');
 
 const router = express.Router();
 
@@ -410,6 +411,25 @@ router.patch(
     }
     if (error) throw new HttpError(500, error.message);
     res.json({ team: updated });
+  })
+);
+
+/**
+ * PUT /api/teams/:slug/brilhante-kit { kitId } — Pagamentos P2: o dono escolhe o uniforme das
+ * figurinhas do time (o pacote comprado na loja chega sem uniforme). Só admin, só com o pacote
+ * ativo; trocar só antes da primeira geração. Regras em utils/uniformeDoPacote.js.
+ */
+router.put(
+  '/api/teams/:slug/brilhante-kit',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+    // eslint-disable-next-line global-require
+    const { KITS_IA } = require('./auth');
+    const kitsValidos = Object.entries(KITS_IA || {}).filter(([, k]) => k?.ativo).map(([id]) => id);
+    const r = await escolherUniforme({ teamId: team.id, userId: req.user.id, kitId: String(req.body?.kitId || ''), kitsValidos });
+    res.json({ ok: true, ...r });
   })
 );
 

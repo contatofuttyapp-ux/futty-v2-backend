@@ -54,6 +54,17 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
     }
   }
 
+  /** O pedido 'manto' pendente do time existe (cria se faltar). Best-effort: nunca derruba a compra. */
+  async function garantirPedidoManto(userId, teamId) {
+    try {
+      const { error } = await supabase.from('pedidos_ativacao').insert({ user_id: userId, team_id: teamId, produto: 'manto' });
+      // 23505: o índice único parcial da 054 — já há um pendente igual, que é o que se queria.
+      if (error && error.code !== '23505') throw new Error(error.message);
+    } catch (e) {
+      console.warn('[compras] pedido do manto não criado:', e.message);
+    }
+  }
+
   async function buscarCompra(loja, transacaoId) {
     const { data, error } = await supabase
       .from('compras')
@@ -205,6 +216,9 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
       } else {
         // Manto: gravado e pago; o uniforme próprio é montado à mão (fase 2). O pedido
         // 'manto' fica pendente — é por ele que o dono vê o que tem de fazer.
+        // P2: comprado na loja SEM pedido antes, o pedido nasce aqui — é ele que põe o manto
+        // na fila do Gabinete e que faz o app mostrar "Manto pedido" em vez de vender de novo.
+        await garantirPedidoManto(userId, teamId);
         notificar([userId], {
           title: 'Manto próprio confirmado ✨',
           body: `Recebemos o manto do ${time.nome}. A gente avisa quando o uniforme estiver pronto.`,
