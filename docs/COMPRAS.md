@@ -1,6 +1,6 @@
 # Compras — como o dinheiro vira figurinha
 
-Pagamentos P1 (26-set). O código: `routes/compras.js` (rotas), `utils/compras.js` (regra de crédito), migração `064_compras.sql`.
+Pagamentos P1 e P2 (26-set). O código: no motor, `routes/compras.js` (rotas), `utils/compras.js` (regra de crédito), migração `064_compras.sql`; no app, `frontend/src/lib/loja.js` (o único lugar que fala com o SDK) e `frontend/src/pages/Planos.jsx` (a loja na tela).
 
 ## O fluxo
 
@@ -13,7 +13,7 @@ app (SDK RevenueCat) → App Store / Play Store cobra
 - **Uma linha por transação.** O índice único `(loja, transacao_id)` impede crédito em dobro: o RevenueCat reenvia webhooks, e o "Restaurar compras" pode chegar antes ou depois dele.
 - **O app nunca credita sozinho.** `POST /api/compras/sincronizar` só diz ao motor *que transações procurar*; o motor pergunta à API do RevenueCat (`RC_API_KEY`) e credita só o que ela confirmar.
 - **O Gabinete também passa por aqui:** créditos e pacote dados à mão viram linha `loja='gabinete'`, `transacao_id='gab-<uuid>'`, preço 0.
-- `app_user_id` no RevenueCat = `users.id` (o app faz `Purchases.logIn(users.id)`). O pacote e o manto levam o time no atributo de assinante `team_id`.
+- `app_user_id` no RevenueCat = `users.id` (o app faz `Purchases.configure({ appUserID: users.id })` e `logIn`/`logOut` na troca de conta). O pacote e o manto levam o time no atributo de assinante `team_id` (a Minha Figurinha não leva time).
 
 ## Produtos (iguais nas duas lojas)
 
@@ -23,7 +23,9 @@ app (SDK RevenueCat) → App Store / Play Store cobra
 | `futty_pacote` | pacote | liga o pacote do time (só o dono do time — `team_members.role='admin'`) |
 | `futty_manto` | manto | gravado e pago; o uniforme próprio é montado à mão (fica pendente no Gabinete) |
 
-O pacote comprado na loja herda o uniforme que o time já tiver. Se não tiver, liga com o uniforme vazio (ninguém gera ainda) e o uniforme é fixado no Gabinete ("Ativar pacote" num time já ativo só grava o uniforme).
+O pacote comprado na loja herda o uniforme que o time já tiver. Se não tiver, liga com o uniforme vazio (ninguém gera ainda) e o **dono escolhe** logo depois da compra (P2: `PUT /api/teams/:slug/brilhante-kit` — só o admin, só com o pacote ativo, trocar só antes da 1ª geração; o Início mostra o recado enquanto faltar). O Gabinete também fixa ("Ativar pacote" num time já ativo só grava o uniforme).
+
+O manto comprado na loja cria o pedido `manto` pendente do time: é a fila do Gabinete, e o app mostra "Manto pedido — a gente desenha e avisa" em vez de vender de novo.
 
 ## Eventos do webhook
 
@@ -45,6 +47,19 @@ Project settings → Integrations → **Webhooks** → Add:
 - Ambiente: *Production and Sandbox*
 
 E a chave secreta: Project settings → API keys → **Secret API key** (`sk_…`) → vai para `RC_API_KEY` no Cloud Run. Nunca no app.
+
+## O app (P2)
+
+A loja só aparece com as três coisas: `PAGAMENTOS_ATIVOS=true` no motor (vira `loja_pronta` no `/api/brilhantes/estado` e no `/api/inicio` — liga e desliga sem build novo), o app nativo, e a chave PÚBLICA do SDK no build. Faltando uma, a tela fica no "Pedir ativação" (o Gabinete ativa à mão). A web nunca vende.
+
+| variável (frontend) | onde |
+|---|---|
+| `VITE_RC_APPLE_KEY` | chave pública do app iOS no RevenueCat (`appl_…`) |
+| `VITE_RC_GOOGLE_KEY` | chave pública do app Android no RevenueCat (`goog_…`) |
+
+As duas vão em `frontend/.env` e `frontend/.env.production` (o `.aab` é compilado aqui), na Cloudflare Pages (Production e Preview) e nos GitHub Secrets do frontend (o `ios.yml` escreve o `.env.production` do iPhone). São públicas — vão dentro do app — mas nunca a `sk_…`.
+
+No painel do RevenueCat: os 3 produtos criados como **consumíveis** na App Store Connect (Consumable) e na Play Console (produto único), importados no RevenueCat e marcados como consumíveis (o Google precisa "consumir" para dar para comprar de novo). A tela pede primeiro as ofertas (`getOfferings`, a oferta atual com os 3 pacotes) e o que faltar busca pelo id (`getProducts`) — as duas configurações funcionam. O preço mostrado é sempre o da loja (`priceString`), na moeda da conta da pessoa.
 
 ## Variáveis (Cloud Run)
 
