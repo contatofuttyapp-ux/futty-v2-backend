@@ -108,7 +108,8 @@ function pareceSegredo(texto) {
 
 function validarAcessos(lista) {
   for (const a of lista) {
-    if (pareceSegredo(a?.obs)) {
+    // P2 (26-set): a coluna "Custo €/mês" (custo_eur, texto livre) passa pela mesma trava.
+    if (pareceSegredo(a?.obs) || pareceSegredo(a?.custo_eur)) {
       throw new HttpError(400, 'Senhas não entram aqui. Guarde no Gerenciador de Senhas do Google.');
     }
   }
@@ -182,4 +183,5 @@ function novoId() {
   return randomUUID().slice(0, 8);
 }
 
-module.exports = { ler, lerRaw, gravar, invalidar, SEED, novoId };
+// validarAcessos exportada só para o teste provar a trava SEM gravar nada (tests/semear-acessos.test.js).
+module.exports = { ler, lerRaw, gravar, invalidar, SEED, novoId, validarAcessos };
