@@ -1,0 +1,106 @@
+// Futty v2.0 — Supabase falso EM MEMÓRIA para os testes de compras (Pagamentos P1).
+//
+// Diferente do falso de tests/direito-brilhante.test.js (que responde por função), este
+// guarda as linhas de verdade: inserir, ler de volta, atualizar e contar batem entre si, e o
+// índice único de `compras` (loja, transacao_id) dispara 23505 como no Postgres. É o que
+// deixa provar a idempotência sem banco.
+//
+// Cobre só o que utils/compras.js, routes/compras.js e a leitura do Gabinete usam:
+// from().select/insert/update/delete + eq/neq/in/is/gt/gte/lt/lte/order/limit +
+// maybeSingle/single/await, e rpc('creditar_brilhante').
+const crypto = require('node:crypto');
+
+const UNICOS_PADRAO = { compras: [['loja', 'transacao_id']] };
+
+function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null } = {}) {
+  const tabelas = {};
+  for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map((l) => ({ ...l }));
+  const linhasDe = (nome) => (tabelas[nome] ||= []);
+
+  function builder(tabela) {
+    const e = { op: 'select', filtros: [], ordem: null, limite: null, count: false, head: false, retorna: false };
+    const passa = (l) => e.filtros.every((f) => f(l));
+
+    function executar() {
+      const erroForcado = falhar && falhar(tabela, e.op, e);
+      if (erroForcado) return { data: null, error: erroForcado };
+      const todas = linhasDe(tabela);
+      if (e.op === 'insert') {
+        const novas = e.linhas.map((l) => ({ id: crypto.randomUUID(), criada_em: new Date().toISOString(), ...l }));
+        for (const n of novas) {
+          for (const cols of unicos[tabela] || []) {
+            if (todas.some((l) => cols.every((c) => l[c] === n[c]))) {
+              return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint (${cols.join(',')})` } };
+            }
+          }
+        }
+        todas.push(...novas);
+        return { data: e.retorna ? novas.map((l) => ({ ...l })) : null, error: null };
+      }
+      let alvo = todas.filter(passa);
+      if (e.op === 'update') {
+        for (const l of alvo) Object.assign(l, e.patch);
+        return { data: e.retorna ? alvo.map((l) => ({ ...l })) : null, error: null };
+      }
+      if (e.op === 'delete') {
+        tabelas[tabela] = todas.filter((l) => !passa(l));
+        return { data: null, error: null };
+      }
+      if (e.ordem) {
+        const { col, asc } = e.ordem;
+        alvo = [...alvo].sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (asc ? 1 : -1));
+      }
+      if (e.limite != null) alvo = alvo.slice(0, e.limite);
+      return { data: e.head ? null : alvo.map((l) => ({ ...l })), error: null, count: e.count ? alvo.length : undefined };
+    }
+
+    const umSo = (obrigatorio) => async () => {
+      const r = executar();
+      if (r.error) return r;
+      const lista = r.data || [];
+      if (lista.length > 1) return { data: null, error: { message: 'mais de uma linha' } };
+      if (!lista.length && obrigatorio) return { data: null, error: { code: 'PGRST116', message: 'nenhuma linha' } };
+      return { data: lista[0] || null, error: null };
+    };
+
+    const api = {
+      select(cols, opts) {
+        if (e.op !== 'select') e.retorna = true;
+        if (opts?.count) e.count = true;
+        if (opts?.head) e.head = true;
+        return api;
+      },
+      insert(linhas) { e.op = 'insert'; e.linhas = Array.isArray(linhas) ? linhas : [linhas]; return api; },
+      update(patch) { e.op = 'update'; e.patch = patch; return api; },
+      delete() { e.op = 'delete'; return api; },
+      eq(c, v) { e.filtros.push((l) => l[c] === v); return api; },
+      neq(c, v) { e.filtros.push((l) => l[c] !== v); return api; },
+      in(c, vs) { e.filtros.push((l) => vs.includes(l[c])); return api; },
+      is(c, v) { e.filtros.push((l) => (l[c] ?? null) === v); return api; },
+      gt(c, v) { e.filtros.push((l) => l[c] > v); return api; },
+      gte(c, v) { e.filtros.push((l) => l[c] >= v); return api; },
+      lt(c, v) { e.filtros.push((l) => l[c] < v); return api; },
+      lte(c, v) { e.filtros.push((l) => l[c] <= v); return api; },
+      order(col, { ascending = true } = {}) { e.ordem = { col, asc: ascending }; return api; },
+      limit(n) { e.limite = n; return api; },
+      maybeSingle: umSo(false),
+      single: umSo(true),
+      then(ok, falha) { return Promise.resolve().then(executar).then(ok, falha); },
+    };
+    return api;
+  }
+
+  const cliente = { from: builder };
+  if (!semRpc) {
+    cliente.rpc = async (nome, args) => {
+      if (nome !== 'creditar_brilhante') return { data: null, error: { code: 'PGRST202', message: `função ${nome} não existe` } };
+      const u = linhasDe('users').find((l) => l.id === args.p_user);
+      if (!u) return { data: null, error: null };
+      u.brilhante_creditos = Math.max(0, (Number(u.brilhante_creditos) || 0) + args.p_qtd);
+      return { data: u.brilhante_creditos, error: null };
+    };
+  }
+  return { cliente, tabelas };
+}
+
+module.exports = { criarSupabaseFalso };

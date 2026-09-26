@@ -11,7 +11,8 @@ const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
-const { ehMigracaoEmFalta, somarCreditos } = require('../utils/direitoBrilhante');
+const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
+const { aplicarCompra, resolverPedidos, novaTransacaoGabinete, ErroCompra } = require('../utils/compras');
 const { custoDoTimePorMes } = require('../utils/custoPorTime');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
@@ -351,18 +352,6 @@ function porId(linhas) {
   return Object.fromEntries((linhas || []).map((l) => [l.id, l]));
 }
 
-/** Resolve pedidos pendentes (estado 'ativado'). Best-effort: nunca derruba a ativação. */
-async function resolverPedidos(filtro) {
-  try {
-    let q = supabase.from('pedidos_ativacao').update({ estado: 'ativado', resolvido_em: new Date().toISOString() }).eq('estado', 'pendente');
-    for (const [col, val] of Object.entries(filtro)) q = q.eq(col, val);
-    const { error } = await q;
-    if (error) throw new Error(error.message);
-  } catch (e) {
-    console.warn('[gabinete/brilhantes] pedidos não resolvidos:', e.message);
-  }
-}
-
 /**
  * GET /api/super/gabinete/brilhantes — as três listas da aba:
  * pedidos pendentes (com quem pediu e de que time), times com pacote ou com
@@ -512,32 +501,52 @@ router.post(
     if (!KITS_DISPONIVEIS.includes(kitId)) throw new HttpError(400, `Uniforme inválido. Um de: ${KITS_DISPONIVEIS.join(', ')}.`);
 
     try {
-      const { data: time, error: erroLer } = await supabase.from('teams').select('id, nome, slug, brilhante_ativo').eq('id', teamId).maybeSingle();
+      const { data: time, error: erroLer } = await supabase.from('teams').select('id, nome, slug, brilhante_ativo, criado_por').eq('id', teamId).maybeSingle();
       if (erroLer) throw new Error(erroLer.message);
       if (!time) throw new HttpError(404, 'Time não encontrado.');
 
-      const { error } = await supabase
-        .from('teams')
-        .update({ brilhante_ativo: true, brilhante_kit: kitId, brilhante_ativado_em: new Date().toISOString() })
-        .eq('id', teamId);
-      if (error) throw new Error(error.message);
+      if (time.brilhante_ativo) {
+        // Já ativo (comprado na loja sem uniforme, ou ativado antes): aqui só se fixa ou
+        // troca o uniforme. Não é concessão nova — não vira linha em `compras` nem muda
+        // `brilhante_origem` (o reembolso da loja depende dela).
+        const { error } = await supabase.from('teams').update({ brilhante_kit: kitId }).eq('id', teamId);
+        if (error) throw new Error(error.message);
+        await resolverPedidos({ team_id: teamId, produto: 'pacote' });
+        // Aviso aos membros: é o push que os faz abrir. Fire-and-forget.
+        const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
+        const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
+        enviarNotificacao(ids, {
+          title: 'Sua figurinha foi liberada ✨',
+          body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`,
+          url: '/figurinha',
+        });
+        console.log('[gabinete/brilhantes] uniforme do pacote fixado', { teamId, kitId, membros: ids.length });
+        return res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: ids.length });
+      }
 
-      await resolverPedidos({ team_id: teamId, produto: 'pacote' });
-
-      // Aviso aos membros: o cartão dourado já está lá quando abrirem, mas é o
-      // push que os faz abrir. Fire-and-forget — nunca derruba a ativação.
-      const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
-      const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
-      enviarNotificacao(ids, {
-        title: 'Sua figurinha foi liberada ✨',
-        body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`,
-        url: '/figurinha',
+      // Pagamentos P1: a concessão manual é uma "compra" da loja 'gabinete', preço 0 — fica
+      // em `compras` e aparece na receita como R$0. O comprador é quem pediu o pacote (ou
+      // quem criou o time, sem pedido). Ninguém é gerado aqui (geração preguiçosa).
+      const { data: pedido } = await supabase
+        .from('pedidos_ativacao').select('user_id').eq('team_id', teamId).eq('produto', 'pacote').eq('estado', 'pendente')
+        .order('criado_em', { ascending: true }).limit(1).maybeSingle();
+      const r = await aplicarCompra({
+        userId: pedido?.user_id || time.criado_por,
+        teamId,
+        produto: 'pacote',
+        loja: 'gabinete',
+        transacaoId: novaTransacaoGabinete(),
+        kitId,
+        moeda: 'BRL',
+        preco: 0,
+        precoUsd: 0,
       });
 
-      console.log('[gabinete/brilhantes] pacote ativado', { teamId, kitId, membros: ids.length });
-      res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: ids.length });
+      console.log('[gabinete/brilhantes] pacote ativado', { teamId, kitId, membros: r.membrosAvisados });
+      res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: r.membrosAvisados || 0 });
     } catch (e) {
       if (e instanceof HttpError) throw e;
+      if (e instanceof ErroCompra) throw new HttpError(400, e.message, e.codigo);
       if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
       throw new HttpError(500, e.message);
     }
@@ -580,21 +589,24 @@ router.post(
       }
       if (!pessoa) throw new HttpError(404, 'Pessoa não encontrada.');
 
-      // Soma atómica (função da migração 064); sem ela, o ler-e-gravar antigo.
-      const novo = await somarCreditos(userId, quantidade);
-
-      await resolverPedidos({ user_id: userId, produto: 'minha' });
-
-      enviarNotificacao([userId], {
-        title: 'Sua figurinha foi liberada ✨',
-        body: novo === 1 ? 'Você tem 1 geração. Abra e faça a sua.' : `Você tem ${novo} gerações. Abra e faça a sua.`,
-        url: '/figurinha',
+      // Pagamentos P1: a concessão vira linha 'gabinete' (preço 0) em `compras`; a soma é a
+      // atómica da 064, o pedido 'minha' é resolvido e a pessoa recebe o push — tudo lá dentro.
+      const { creditos: novo } = await aplicarCompra({
+        userId,
+        produto: 'minha',
+        loja: 'gabinete',
+        transacaoId: novaTransacaoGabinete(),
+        quantidade,
+        moeda: 'BRL',
+        preco: 0,
+        precoUsd: 0,
       });
 
       console.log('[gabinete/brilhantes] créditos dados', { userId, quantidade, total: novo });
       res.json({ ok: true, user_id: userId, creditos: novo });
     } catch (e) {
       if (e instanceof HttpError) throw e;
+      if (e instanceof ErroCompra) throw new HttpError(400, e.message, e.codigo);
       if (ehMigracaoEmFalta(e.message)) throw new HttpError(503, 'A migração 054 ainda não foi corrida no Supabase.', 'MIGRACAO_EM_FALTA');
       throw new HttpError(500, e.message);
     }
