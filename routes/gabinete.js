@@ -11,7 +11,7 @@ const { supabase } = require('../utils/db');
 const denunciaStore = require('../utils/denunciaStore');
 const gabineteStore = require('../utils/gabineteStore');
 const adsStore = require('../utils/adsStore');
-const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
+const { ehMigracaoEmFalta, somarCreditos } = require('../utils/direitoBrilhante');
 const { custoDoTimePorMes } = require('../utils/custoPorTime');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
@@ -580,12 +580,8 @@ router.post(
       }
       if (!pessoa) throw new HttpError(404, 'Pessoa não encontrada.');
 
-      // Soma lida-e-escrita, como o debitar(): o PostgREST não faz `x = x + n`
-      // sem uma função no banco, e duas mãos de dono na mesma conta ao mesmo
-      // segundo não é um cenário real.
-      const novo = (Number(pessoa.brilhante_creditos) || 0) + quantidade;
-      const { error } = await supabase.from('users').update({ brilhante_creditos: novo }).eq('id', userId);
-      if (error) throw new Error(error.message);
+      // Soma atómica (função da migração 064); sem ela, o ler-e-gravar antigo.
+      const novo = await somarCreditos(userId, quantidade);
 
       await resolverPedidos({ user_id: userId, produto: 'minha' });
 

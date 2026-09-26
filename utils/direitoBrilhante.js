@@ -155,6 +155,39 @@ async function temDireito(userId) {
   return { ...escolhido, creditos, opcoes };
 }
 
+/** A função creditar_brilhante (migração 064) ainda não existe neste banco? */
+function ehFuncaoEmFalta(erro) {
+  return /creditar_brilhante|PGRST202|could not find the function|does not exist|schema cache/i.test(`${erro?.code || ''} ${erro?.message || ''}`);
+}
+
+/**
+ * Soma `qtd` (negativo debita) a `users.brilhante_creditos` e devolve o saldo
+ * novo — nunca abaixo de zero. Pagamentos P1: pela função atómica da migração
+ * 064 (`update ... set x = x + n` num passo só); o ler-e-gravar antigo perdia
+ * uma soma quando duas escritas caíam juntas (webhook + restaurar compras).
+ * Sem a 064 no banco, cai no ler-e-gravar de sempre com aviso — nunca quebra.
+ * `cliente` injetável para os testes de utils/compras.js (Supabase falso).
+ */
+async function somarCreditos(userId, qtd, cliente = supabase) {
+  if (typeof cliente.rpc === 'function') {
+    const { data, error } = await cliente.rpc('creditar_brilhante', { p_user: userId, p_qtd: qtd });
+    if (!error) {
+      if (data == null) throw new Error('Pessoa não encontrada para creditar.');
+      return Number(data);
+    }
+    if (!ehFuncaoEmFalta(error)) throw new Error(error.message);
+  }
+  console.warn('[direitoBrilhante] creditar_brilhante indisponível (migração 064 aplicada?) — soma lida-e-gravada');
+  const { data, error: erroLer } = await cliente
+    .from('users').select('brilhante_creditos').eq('id', userId).maybeSingle();
+  if (erroLer) throw new Error(erroLer.message);
+  if (!data) throw new Error('Pessoa não encontrada para creditar.');
+  const novo = Math.max(0, (Number(data.brilhante_creditos) || 0) + qtd);
+  const { error } = await cliente.from('users').update({ brilhante_creditos: novo }).eq('id', userId);
+  if (error) throw new Error(error.message);
+  return novo;
+}
+
 /**
  * Debita o direito DEPOIS de a geração ter corrido bem — nunca antes: uma
  * geração que falha (fal fora do ar, coroa cortada no retry, foto
@@ -168,8 +201,8 @@ async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
     if (direito?.fonte === 'time') {
       // Rodadas 21/22 — o pacote passou a dar 5 gerações por jogador, não 1:
       // `geracoes` conta quantas essa pessoa já usou NESTE time, e o upsert
-      // tem de a SOMAR, não substituir. Lê-e-escreve, mesmo padrão do crédito
-      // abaixo — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
+      // tem de a SOMAR, não substituir. Lê-e-escreve (uma pessoa não gera
+      // duas ao mesmo tempo) — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
       const { usadas, custoCents: jaGasto, colunaExiste } = await geracoesNoTime(direito.teamId, userId);
       const linha = {
         team_id: direito.teamId,
@@ -189,16 +222,7 @@ async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
       return true;
     }
     if (direito?.fonte === 'credito') {
-      // Lê-e-escreve em vez de um decremento atómico: o Supabase não expõe
-      // `update ... set x = x - 1` pelo PostgREST sem uma função, e uma
-      // pessoa não gera duas Brilhantes ao mesmo tempo (o botão desativa
-      // durante os ~45 s). GREATEST(0) no cliente para nunca ir a negativo.
-      const { data, error: erroLer } = await supabase
-        .from('users').select('brilhante_creditos').eq('id', userId).maybeSingle();
-      if (erroLer) throw new Error(erroLer.message);
-      const novo = Math.max(0, (Number(data?.brilhante_creditos) || 0) - 1);
-      const { error } = await supabase.from('users').update({ brilhante_creditos: novo }).eq('id', userId);
-      if (error) throw new Error(error.message);
+      const novo = await somarCreditos(userId, -1);
       console.log('[direitoBrilhante] crédito debitado', { userId, restam: novo });
       return true;
     }
@@ -245,4 +269,4 @@ async function presentearCriador(userId) {
   }
 }
 
-module.exports = { temDireito, debitar, presentearCriador, ehMigracaoEmFalta, somarCusto, PRESENTE_CRIADOR_CREDITOS };
+module.exports = { temDireito, debitar, somarCreditos, presentearCriador, ehMigracaoEmFalta, somarCusto, PRESENTE_CRIADOR_CREDITOS };

@@ -43,10 +43,11 @@ function fakeSupabase(respostas) {
 }
 
 /** Carrega utils/direitoBrilhante.js com o Supabase falso por baixo. */
-function carregarCom(respostas) {
+function carregarCom(respostas, { rpc } = {}) {
   const caminhoDb = require.resolve('../utils/db');
   const caminhoAlvo = require.resolve('../utils/direitoBrilhante');
   const { cliente, chamadas } = fakeSupabase(respostas);
+  if (rpc) cliente.rpc = rpc; // Pagamentos P1: a soma atómica da migração 064
   const dbAntigo = require.cache[caminhoDb];
   require.cache[caminhoDb] = {
     id: caminhoDb, filename: caminhoDb, loaded: true, exports: { supabase: cliente },
@@ -336,6 +337,30 @@ test('debitar("credito") tira 1 e nunca vai a negativo', async () => {
   });
   await mod.debitar({ fonte: 'credito' }, { userId: PESSOA, kitId: 'dark-gold', custoCents: 11 });
   assert.equal(patch.brilhante_creditos, 0, 'zero menos um continua zero');
+});
+
+test('debitar("credito") com a 064 usa a soma ATÓMICA (rpc creditar_brilhante, -1) e não lê-e-grava', async () => {
+  let chamadaRpc = null;
+  let escreveuDireto = false;
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users' && estado.patch) escreveuDireto = true;
+    return semErro({ brilhante_creditos: 5 });
+  }, { rpc: async (nome, args) => { chamadaRpc = { nome, args }; return semErro(4); } });
+  const ok = await mod.debitar({ fonte: 'credito' }, { userId: PESSOA, kitId: 'dark-gold', custoCents: 11 });
+  assert.equal(ok, true);
+  assert.deepEqual(chamadaRpc, { nome: 'creditar_brilhante', args: { p_user: PESSOA, p_qtd: -1 } });
+  assert.equal(escreveuDireto, false, 'com a função no banco, nada de ler-e-gravar');
+});
+
+test('somarCreditos sem a 064 (função em falta) cai no ler-e-gravar e soma na mesma', async () => {
+  let patch = null;
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users' && estado.patch) { patch = estado.patch; return semErro(null); }
+    return semErro({ brilhante_creditos: 2 });
+  }, { rpc: async () => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function public.creditar_brilhante' } }) });
+  const novo = await mod.somarCreditos(PESSOA, 10);
+  assert.equal(novo, 12);
+  assert.equal(patch.brilhante_creditos, 12);
 });
 
 test('debitar que falha NÃO derruba nada — a pessoa fica com a figurinha', async () => {

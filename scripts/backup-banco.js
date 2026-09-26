@@ -37,6 +37,8 @@ const TABELAS = [
   'pedidos_ativacao', 'brilhantes_time',
   // Manutenção 26-set: ficaram para trás quando entraram (057/058/061).
   'user_avatar_historico', 'convite_usos', 'telemetria_velocidade',
+  // Pagamentos P1 (064).
+  'compras',
 ];
 
 // Modelo de campeonato N-times (migração 039) — fora de propósito (comentário acima),
