@@ -31,6 +31,9 @@ const {
 // Quem pode gerar uma Brilhante (SPEC-FIGURINHA-3, §5). Desde 22-set toda
 // geração nasce paga: crédito comprado/presenteado ou pacote do time.
 const { temDireito, debitar, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
+// Rodada 29B (bloco 2, A): a pintura roda em segundo plano, numa fila em memória (uma por vez por pessoa).
+const geracaoJobs = require('../utils/geracaoJobs');
+const { enviarNotificacao } = require('./push'); // o "Sua figurinha ficou pronta" (avisarQuePintou)
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
 // que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
@@ -811,6 +814,368 @@ async function baixarFotoConferida(caminho, hashEsperado) {
 }
 
 /**
+ * A PINTURA em si — era o corpo de POST /api/me/avatar/ai (Rodada 29B, bloco 2, A: passou a rodar em
+ * segundo plano, pela fila de utils/geracaoJobs.js). Baixa a foto conferida, pinta (fal), audita a
+ * coroa, grava a figurinha e o slot e, SÓ DEPOIS de ela existir, debita o direito. `etapa(nome)` avisa
+ * em que pé está (o app mostra 'preparando a foto → pintando o uniforme → acabamento'). Lança HttpError
+ * como sempre lançou; quem chama transforma isso no desfecho do job (e, como antes, no status
+ * 'falhou' do usuário). O pedido HTTP pode já ter respondido: `req` só serve para o IP, o usuário e
+ * a invalidação da sessão.
+ */
+async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitId, kit, slot }, { etapa }) {
+  // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
+  // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
+  // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
+  // Porquê quadrado: ganhou em 6 das 7 fotos (4,1/5 contra 4,0 do retrato) e
+  // custa menos — a fal cobra os tokens da imagem de ENTRADA, e o quadrado
+  // baixou a chamada de US$0,132 para US$0,112. A SAÍDA continua 1024×1536.
+  // Upload no Supabase (URL assinado) em vez de data URI: é o formato de input
+  // confirmado no schema do fal — não se arrisca uma geração paga noutro.
+  // Tudo o que é temporário nesta geração (o pad e a imagem entre passadas)
+  // fica aqui para ser apagado no fim — com nomes por versão, ninguém os
+  // sobrescreve, portanto é a limpeza que tem de os levar.
+  const temporarios = [];
+  const caminhoFoto = caminhoNoBucket(perfil.foto_url, 'avatars');
+  let inputUrl = caminhoFoto ? await assinarUrlAvatars(caminhoFoto) : perfil.foto_url;
+  let formaEntrada = 'foto-crua';
+  try {
+    if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
+    // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
+    // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
+    // TRAVA ANTES DE GASTAR (22-set). A foto que se baixou tem de ser a que a
+    // tabela diz ser a atual — senão a figurinha sairia da foto errada e o
+    // dinheiro já estaria gasto quando alguém percebesse. Três tentativas com
+    // 2 s de intervalo: se for atraso de propagação, passa; se for outra
+    // coisa, ninguém paga por ela.
+    //
+    // Só corre quando há `foto_hash` gravado: contas antigas (antes da
+    // migração 048) não têm, e barrá-las seria inventar um defeito.
+    const fotoBuf = await baixarFotoConferida(caminhoFoto, perfil.foto_hash);
+    // O quadrado é a receita de produção; se ele falhar (foto estranha, sharp a
+    // recusar o corte), cai-se no retrato com faixa — NUNCA na foto crua, que
+    // é o que fazia a IA comer a coroa da cabeça.
+    let entradaBuf;
+    try {
+      entradaBuf = await preprocessarQuadrado(fotoBuf);
+      formaEntrada = 'quadrada-1024';
+    } catch (eq) {
+      console.error('[avatar-ai] corte quadrado falhou, uso o retrato com faixa:', eq.message);
+      entradaBuf = await preprocessarRetrato(fotoBuf);
+      formaEntrada = 'retrato-faixa';
+    }
+    // Nome por versão também aqui: esta é a imagem que a fal vai BUSCAR por
+    // URL. Um caminho reutilizado é a única peça do caminho que um cache
+    // externo poderia servir velha — e a fal está do outro lado do mundo.
+    const caminhoPad = `tmp/${userId}-${Date.now()}-pad.jpg`;
+    temporarios.push(caminhoPad);
+    const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, entradaBuf, {
+      contentType: 'image/jpeg',
+      upsert: true,
+      cacheControl: '3600',
+    });
+    if (padErr) throw new Error(padErr.message);
+    inputUrl = await assinarUrlAvatars(caminhoPad);
+    console.log('[avatar-ai] etapa 0 - entrada pronta', { forma: formaEntrada, bytes: entradaBuf.length });
+  } catch (e) {
+    // A trava do hash (FOTO_DESATUALIZADA) é uma RECUSA, não uma falha de
+    // preparação: tem de subir inteira até ao cliente. Cair para a foto crua
+    // aqui seria gerar exactamente a figurinha errada que ela existe para
+    // impedir — e cobrar por ela.
+    if (e instanceof HttpError) throw e;
+    console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
+  }
+  // A RECEITA vive em utils/geracaoFigurinha.js — endpoints, qualidades e
+  // fidelidade são constantes de lá, com override por ambiente. Esta rota
+  // não decide mais nada sobre COMO se gera: só trata da foto, do kit, da
+  // rede de segurança e do dinheiro.
+  console.log('[avatar-ai] a chamar fal com:', {
+    receita: RECEITA,
+    ...(RECEITA === 'v6'
+      ? { endpoint: V6_ENDPOINT, input_fidelity: FIDELIDADE_V6 }
+      : { passada1: PASSADA1_ENDPOINT, passada2: PASSADA2_ENDPOINT, input_fidelity_passada2: FIDELIDADE_PASSADA2 }),
+    kit: kitId,
+    origem,
+    fonte_do_direito: direitoUsado.fonte,
+    prompt_length: promptFutty(kitId).length,
+    quality: QUALIDADE,
+    image_size: TAMANHO_1_5,
+    entrada: formaEntrada,
+  });
+
+  // O DINHEIRO desta geração, somado de TODAS as tentativas: um retry por
+  // cabeça cortada são DUAS passadas novas, e isso é dinheiro que tem de
+  // aparecer no contador do dia. `parcelas` guarda quanto custou cada etapa,
+  // para o log dizer de onde veio o total.
+  const conta = { usd: 0, chamadas: 0, semHeader: 0, parcelas: {} };
+
+  // A fal só lê URLs públicos. A imagem do meio (o jogador sobre o cinza,
+  // entre as duas passadas) vai para o bucket privado `avatars` com URL
+  // ASSINADO de vida curta — nunca para um bucket público, porque é a cara
+  // do utilizador. É apagada no fim, dê no que der.
+  const publicar = async (nomeFicheiro, buffer, tipo) => {
+    const caminho = `tmp/${userId}-${Date.now()}-${nomeFicheiro}`;
+    const { error } = await supabase.storage.from('avatars').upload(caminho, buffer, {
+      contentType: tipo, upsert: true, cacheControl: '3600',
+    });
+    if (error) throw new Error(`upload do passo intermédio: ${error.message}`);
+    temporarios.push(caminho);
+    return assinarUrlAvatars(caminho);
+  };
+
+  // ETAPA 1+2 (retriáveis) — as duas passadas + birefnet → buffer recortado.
+  const gerarERecortar = async () => {
+    let saida;
+    try {
+      saida = await gerarFigurinha({
+        fotoUrl: inputUrl,
+        kitUrl: kit.url,
+        kitId,
+        publicar,
+        etiqueta: 'fig',
+      });
+    } catch (err) {
+      // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
+      // inteira do fal (body/response, que pode incluir o inputUrl assinado
+      // enviado no pedido) — fica só o código de erro e a mensagem curta.
+      console.error('[avatar-ai] erro fal:', { status: err.status, message: err.message });
+      // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (ficheiro
+      // corrompido ou inacessível) — causa acionável (fotografia, não instabilidade
+      // do serviço). Código próprio para o frontend distinguir sem depender do texto.
+      let corpo = err.body;
+      if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
+      // Bug corrigido (14-set): em 401/403 a fal devolve `detail` como STRING
+      // ("Forbidden"), não array — .some() nessa string derrubava com
+      // TypeError e escondia a causa real. Só chama .some() se for array.
+      if (Array.isArray(corpo?.detail) && corpo.detail.some((d) => d.type === 'file_download_error')) {
+        throw new HttpError(422, 'Sua foto não pôde ser processada. Tente enviar uma foto nova.', 'FOTO_INVALIDA');
+      }
+      // Chave inválida, conta sem permissão ou sem crédito na fal — falha do
+      // MOTOR, não da foto do utilizador (não sugerir "tente outra foto").
+      // ALERTA no log: precisa de ação humana (chave/plano fal), não é
+      // instabilidade passageira.
+      if ([401, 403, 402].includes(err.status)) {
+        console.error('[avatar-ai] ALERTA: fal recusou', { status: err.status });
+        throw new HttpError(503, 'A geração de figurinha está indisponível agora. Tente de novo mais tarde.', 'IA_INDISPONIVEL');
+      }
+      throw err;
+    }
+
+    // O custo desta tentativa entra na conta da geração (o retry soma por cima).
+    conta.usd += saida.custo.usd;
+    conta.chamadas += saida.custo.chamadas;
+    conta.semHeader += saida.custo.semHeader;
+    for (const [nome, p] of Object.entries(saida.custo.parcelas)) {
+      conta.parcelas[nome] = (conta.parcelas[nome] || 0) + (p.usd || 0);
+    }
+    console.log(`[avatar-ai] ${saida.receita || RECEITA} OK`, {
+      segundos: saida.tempos,
+      custo_usd: Number(saida.custo.usd.toFixed(4)),
+    });
+    return { recorteBuffer: saida.recorteBuffer };
+  };
+  // REDE DE DETECÇÃO 1 — contacto com a borda, ANTES do trim. Topo (linhas
+  // y=0..2, como antes): cabeça cortada. Laterais (colunas x=0..2 e
+  // x=w-3..w-1, opacos > 15% da ALTURA): braço cortado pela borda.
+  const bordaCortada = async (buf) => {
+    const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width: w, height: h, channels: c } = info;
+    const opaco = (x, y) => data[(y * w + x) * c + 3] > 200;
+
+    let topoCount = 0;
+    for (let y = 0; y <= 2 && y < h; y++) {
+      let cnt = 0;
+      for (let x = 0; x < w; x++) if (opaco(x, y)) cnt++;
+      if (cnt > topoCount) topoCount = cnt;
+    }
+    const topoLimiar = Math.round(w * 0.15);
+
+    const contarColuna = (x0) => {
+      let cnt = 0;
+      for (let y = 0; y < h; y++) if (opaco(x0, y)) cnt++;
+      return cnt;
+    };
+    let esqCount = 0;
+    for (let x = 0; x <= 2 && x < w; x++) esqCount = Math.max(esqCount, contarColuna(x));
+    let dirCount = 0;
+    for (let x = Math.max(0, w - 3); x < w; x++) dirCount = Math.max(dirCount, contarColuna(x));
+    // HIERARQUIA DOS DEFEITOS (11-ago, dono): braço tocando a borda lateral NÃO
+    // reprova — é linguagem de cromo (Panini/FIFA cortam braço na moldura) e era
+    // a causa nº1 de retry (~31% de custo a mais). Vira AVISO no log. Rede de
+    // segurança: contacto EXTREMO (>60% da altura colada) ainda reprova.
+    const lateralAviso = Math.round(h * 0.15);
+    const lateralExtremo = Math.round(h * 0.6);
+
+    const topo = { cortado: topoCount > topoLimiar, count: topoCount, limiar: topoLimiar };
+    const esquerda = { cortado: esqCount > lateralExtremo, aviso: esqCount > lateralAviso, count: esqCount };
+    const direita = { cortado: dirCount > lateralExtremo, aviso: dirCount > lateralAviso, count: dirCount };
+    if ((esquerda.aviso && !esquerda.cortado) || (direita.aviso && !direita.cortado)) {
+      console.log('[avatar-ai] AVISO: braço na borda lateral, aceite como enquadramento', { esq: esqCount, dir: dirCount, h });
+    }
+    return { cortada: topo.cortado || esquerda.cortado || direita.cortado, topo, esquerda, direita };
+  };
+
+  // REDE DE DETECÇÃO 2 — achatamento da coroa, APÓS o trim: largura da 1ª
+  // linha opaca ÷ largura máxima nas primeiras ~10% de linhas da figura.
+  // > 0,5 = coroa comida. (scripts/_bench/prova-producao.js)
+  const achatamentoCoroa = async (buf) => {
+    const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    const { width: w, height: h, channels: c } = info;
+    const larg = (y) => { let n = 0; for (let x = 0; x < w; x++) if (data[(y * w + x) * c + 3] > 200) n++; return n; };
+    let y0 = -1;
+    for (let y = 0; y < h && y0 < 0; y++) if (larg(y) > 0) y0 = y;
+    if (y0 < 0) return { razao: null, cortada: false };
+    const faixa = Math.min(h, y0 + Math.max(8, Math.round(h * 0.10)));
+    const primeira = larg(y0);
+    let maxima = 0;
+    for (let y = y0; y < faixa; y++) maxima = Math.max(maxima, larg(y));
+    const razao = maxima ? primeira / maxima : 0;
+    return { razao, cortada: razao > 0.5 };
+  };
+
+  // As duas verificações por geração: borda (pré-trim) + achatamento (pós-trim).
+  // Guarda o buffer já trimado para reaproveitar na ETAPA 3 sem trim duplo.
+  const verificarQualidade = async (recorteBuffer) => {
+    const borda = await bordaCortada(recorteBuffer);
+    const trimado = await sharp(recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
+    const achatamento = await achatamentoCoroa(trimado);
+    return { ok: !borda.cortada && !achatamento.cortada, borda, achatamento, trimado };
+  };
+
+  await etapa('pintando');
+  let gen = await gerarERecortar();
+  let verif = await verificarQualidade(gen.recorteBuffer);
+  console.log('[avatar-ai] verificação de qualidade:', { borda: verif.borda, achatamento: verif.achatamento });
+  if (!verif.ok) {
+    console.log('[avatar-ai] retry: reprovada na 1ª geração', { borda: verif.borda, achatamento: verif.achatamento });
+    try {
+      const gen2 = await gerarERecortar();
+      const verif2 = await verificarQualidade(gen2.recorteBuffer);
+      console.log('[avatar-ai] verificação de qualidade (pós-retry):', { borda: verif2.borda, achatamento: verif2.achatamento });
+      gen = gen2;
+      verif = verif2;
+    } catch (e) {
+      console.error('[avatar-ai] retry falhou, mantém 1ª geração:', e.message);
+    }
+  }
+  if (!verif.ok) {
+    // Lei da casa: cabeça cortada nunca sai. Falhou nas duas rondas → não
+    // entrega, não grava slot, não consome quota (o throw acontece antes
+    // de qualquer um dos três, mais abaixo neste handler).
+    console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
+    throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra: de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
+  }
+
+  await etapa('acabamento');
+
+  // ETAPA 3 — redimensiona o PNG já recortado e trimado (sharp). A troca de cor do kit é feita no frontend.
+  const buffer = await sharp(verif.trimado)
+    // Rede de segurança: garante 40px de margem transparente acima de QUALQUER
+    // conteúdo, mesmo que a IA cole a cabeça à borda do PNG.
+    .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize({ height: 640, width: 512, fit: 'inside' })
+    .png()
+    .toBuffer();
+  console.log('[avatar-ai] etapa 3 - resize OK');
+
+  await ensureUserRow(req.user);
+  // Um ficheiro POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
+  // a figurinha nova não escreve por cima da velha (22-set). Sem upsert: o
+  // carimbo de tempo torna colisão impossível, e se algum dia houvesse, o
+  // certo é rebentar aqui em vez de apagar o trabalho de outra chamada.
+  const caminho = caminhoFigurinhaNova(userId, kitId);
+  const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
+    contentType: 'image/png',
+    upsert: false,
+    cacheControl: '3600',
+  });
+  if (upErr) throw new HttpError(500, upErr.message);
+
+  const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
+  const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+  // Guarda o SLOT deste kit (upsert por (user_id, kit_id)) → a próxima vez que o
+  // utilizador pedir este kit COM A MESMA FOTO é servido do slot, sem gerar
+  // nem gastar quota. foto_fingerprint = foto_hash atual (migração 052) —
+  // é o que a checagem de reuso acima compara na próxima chamada.
+  const { error: slotErr } = await supabase
+    .from('user_avatar_slots')
+    .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl, foto_fingerprint: perfil.foto_hash || null }, { onConflict: 'user_id,kit_id' });
+  if (slotErr) throw new HttpError(500, slotErr.message);
+
+  // Persiste o novo avatar + kit vestido. A quota mensal por plano
+  // (avatar_ia_mes/reset) saiu daqui na SPEC-FIGURINHA-3: quem manda agora é
+  // o direito, e ele é debitado mais abaixo — depois de a figurinha existir.
+  const dadosUpdate = { avatar_url: avatarUrl, kit_ativo: kitId };
+  const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
+  if (updErr) throw new HttpError(500, updErr.message);
+  // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
+  marcarFigurinhaStatus(userId, 'pronta');
+  invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
+
+  // RODADA 19 (decisão do dono, 23-set): a figurinha anterior DESTE kit
+  // já não é apontada por ninguém (o slot e o users.avatar_url acabaram de
+  // mudar) — mas em vez de sair do bucket, vai para "Minhas figurinhas"
+  // (user_avatar_historico, migração 057). custo_cents fica null: é o custo
+  // de QUANDO ELA foi gerada, que não foi guardado antes desta rodada — só
+  // passa a existir para gerações futuras (não há como recuperar retroativo).
+  const figurinhaAntiga = caminhoNoBucket(slot?.avatar_url, 'avatars');
+  if (figurinhaAntiga && figurinhaAntiga !== caminho) {
+    await arquivarFigurinhaAntiga(userId, kitId, slot.avatar_url);
+  }
+
+  // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
+  // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
+  // derruba a resposta — a figurinha já foi entregue ao utilizador).
+  // 17-set: vai o custo REAL em cêntimos, somado de todas as chamadas desta
+  // geração (retry incluído). `null` só quando a fal não mandou header nenhum
+  // — nesse caso quem decide o valor é o antiAbusoIA, não este sítio.
+  const custoCents = conta.semHeader === conta.chamadas ? null : conta.usd * 100;
+  console.log('[avatar-ai] custo da geração', {
+    chamadas: conta.chamadas,
+    sem_header: conta.semHeader,
+    custo_usd: Number(conta.usd.toFixed(4)),
+    // De onde veio o total: se um dia a conta disparar, é aqui que se vê qual
+    // das quatro chamadas mudou de preço.
+    parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
+  });
+  // Rodada 28: o time que pagou (pacote) vai junto — é o custo por time e por mês do Gabinete.
+  registrarGeracao({ userId, ip: req.ip, custoCents, teamId: direitoUsado?.fonte === 'time' ? direitoUsado.teamId : null }).catch(() => {});
+
+  // DEBITA O DIREITO — só AGORA, com a figurinha gravada e entregue
+  // (SPEC-FIGURINHA-3 §5). Uma geração que falhou a meio (fal fora do ar,
+  // coroa cortada nas duas tentativas, foto desatualizada) nunca chega
+  // aqui, e por isso nunca custa o crédito de ninguém. `await` de propósito:
+  // o job só termina (e a pessoa só pode abrir outra pintura) depois de o débito
+  // estar decidido, senão um toque rápido em "Gerar" duas vezes gastaria um
+  // direito e cobraria dois.
+  await debitar(direitoUsado, { userId, kitId, avatarUrl, custoCents });
+
+  // A imagem do meio (o jogador sobre o cinza, entre as duas passadas) é a
+  // cara do utilizador num ficheiro temporário: sai daqui assim que a
+  // figurinha está entregue. Fire-and-forget — falhar a limpeza não pode
+  // derrubar a resposta, e o pior caso é um ficheiro a mais no tmp/.
+  if (temporarios.length) {
+    supabase.storage.from('avatars').remove(temporarios)
+      .catch((e) => console.error('[avatar-ai] limpeza do tmp falhou:', e.message));
+  }
+
+  return { avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false, figurinha_ativa: avatarEhFigurinhaNossa(avatarUrl) };
+}
+
+/** O push "Sua figurinha ficou pronta" — só se a pessoa NÃO está olhando o card (não consultou o job há 6 s). */
+async function avisarQuePintou(job) {
+  if (job.estado !== 'pronta') return;
+  if (Date.now() - job.ultimaConsulta < 6000) return;
+  enviarNotificacao([job.userId], { title: 'Futty', body: 'Sua figurinha ficou pronta', url: '/figurinha' });
+}
+
+/** Já há uma pintura desta pessoa em curso: o app novo acompanha a que existe; o antigo (que espera a figurinha na resposta) recebe um aviso claro. */
+function respostaDePinturaEmCurso(res, jobId, estimativaSegundos, assincrono) {
+  if (!assincrono) throw new HttpError(409, 'Sua figurinha já está sendo criada. Espere terminar.', 'PINTURA_EM_CURSO');
+  return res.status(202).json({ jobId, estimativaSegundos, jaEmAndamento: true });
+}
+
+/**
  * POST /api/me/avatar/ai — gera a Figurinha BRILHANTE a partir da foto atual
  * (receita V6 por omissão, ver utils/geracaoFigurinha.js) e guarda em
  * avatars/public/{userId}-ai-{kit}-{carimbo}.png, separada da foto real.
@@ -829,6 +1194,12 @@ router.post(
     const userId = req.user.id;
     const perfil = await getUserById(userId, 'foto_url, foto_hash, is_super_admin, created_at');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
+
+    // RODADA 29B (bloco 2, A) — uma pintura por vez por pessoa: quem já está pintando acompanha a que existe,
+    // não abre uma segunda (e não se debita duas vezes). Antes do slot-reuse de propósito.
+    const assincrono = req.body?.assincrono === true;
+    const emCurso = await geracaoJobs.emCursoDoUsuario(userId);
+    if (emCurso) return respostaDePinturaEmCurso(res, emCurso.id, emCurso.estimativaSegundos, assincrono);
 
     // Origem: só para log. O 'cadastro' do Onboarding DEIXOU DE EXISTIR
     // (SPEC-FIGURINHA-3 §3: o cadastro não gera nada) — se ainda chegar aqui,
@@ -948,349 +1319,42 @@ router.post(
       if (freeze.congelado) {
         throw new HttpError(503, 'Estamos com procura recorde. Tente de novo mais tarde.', 'TETO_DIARIO_ATINGIDO');
       }
-
-    // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
-    // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
-    // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
-    // Porquê quadrado: ganhou em 6 das 7 fotos (4,1/5 contra 4,0 do retrato) e
-    // custa menos — a fal cobra os tokens da imagem de ENTRADA, e o quadrado
-    // baixou a chamada de US$0,132 para US$0,112. A SAÍDA continua 1024×1536.
-    // Upload no Supabase (URL assinado) em vez de data URI: é o formato de input
-    // confirmado no schema do fal — não se arrisca uma geração paga noutro.
-    // Tudo o que é temporário nesta geração (o pad e a imagem entre passadas)
-    // fica aqui para ser apagado no fim — com nomes por versão, ninguém os
-    // sobrescreve, portanto é a limpeza que tem de os levar.
-    const temporarios = [];
-    const caminhoFoto = caminhoNoBucket(perfil.foto_url, 'avatars');
-    let inputUrl = caminhoFoto ? await assinarUrlAvatars(caminhoFoto) : perfil.foto_url;
-    let formaEntrada = 'foto-crua';
-    try {
-      if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
-      // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
-      // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
-      // TRAVA ANTES DE GASTAR (22-set). A foto que se baixou tem de ser a que a
-      // tabela diz ser a atual — senão a figurinha sairia da foto errada e o
-      // dinheiro já estaria gasto quando alguém percebesse. Três tentativas com
-      // 2 s de intervalo: se for atraso de propagação, passa; se for outra
-      // coisa, ninguém paga por ela.
-      //
-      // Só corre quando há `foto_hash` gravado: contas antigas (antes da
-      // migração 048) não têm, e barrá-las seria inventar um defeito.
-      const fotoBuf = await baixarFotoConferida(caminhoFoto, perfil.foto_hash);
-      // O quadrado é a receita de produção; se ele falhar (foto estranha, sharp a
-      // recusar o corte), cai-se no retrato com faixa — NUNCA na foto crua, que
-      // é o que fazia a IA comer a coroa da cabeça.
-      let entradaBuf;
-      try {
-        entradaBuf = await preprocessarQuadrado(fotoBuf);
-        formaEntrada = 'quadrada-1024';
-      } catch (eq) {
-        console.error('[avatar-ai] corte quadrado falhou, uso o retrato com faixa:', eq.message);
-        entradaBuf = await preprocessarRetrato(fotoBuf);
-        formaEntrada = 'retrato-faixa';
-      }
-      // Nome por versão também aqui: esta é a imagem que a fal vai BUSCAR por
-      // URL. Um caminho reutilizado é a única peça do caminho que um cache
-      // externo poderia servir velha — e a fal está do outro lado do mundo.
-      const caminhoPad = `tmp/${userId}-${Date.now()}-pad.jpg`;
-      temporarios.push(caminhoPad);
-      const { error: padErr } = await supabase.storage.from('avatars').upload(caminhoPad, entradaBuf, {
-        contentType: 'image/jpeg',
-        upsert: true,
-        cacheControl: '3600',
-      });
-      if (padErr) throw new Error(padErr.message);
-      inputUrl = await assinarUrlAvatars(caminhoPad);
-      console.log('[avatar-ai] etapa 0 - entrada pronta', { forma: formaEntrada, bytes: entradaBuf.length });
-    } catch (e) {
-      // A trava do hash (FOTO_DESATUALIZADA) é uma RECUSA, não uma falha de
-      // preparação: tem de subir inteira até ao cliente. Cair para a foto crua
-      // aqui seria gerar exactamente a figurinha errada que ela existe para
-      // impedir — e cobrar por ela.
-      if (e instanceof HttpError) throw e;
-      console.error('[avatar-ai] etapa 0 falhou, usa foto original (assinada):', e.message);
-    }
-    // A RECEITA vive em utils/geracaoFigurinha.js — endpoints, qualidades e
-    // fidelidade são constantes de lá, com override por ambiente. Esta rota
-    // não decide mais nada sobre COMO se gera: só trata da foto, do kit, da
-    // rede de segurança e do dinheiro.
-    console.log('[avatar-ai] a chamar fal com:', {
-      receita: RECEITA,
-      ...(RECEITA === 'v6'
-        ? { endpoint: V6_ENDPOINT, input_fidelity: FIDELIDADE_V6 }
-        : { passada1: PASSADA1_ENDPOINT, passada2: PASSADA2_ENDPOINT, input_fidelity_passada2: FIDELIDADE_PASSADA2 }),
-      kit: kitId,
-      origem,
-      fonte_do_direito: direitoUsado.fonte,
-      prompt_length: promptFutty(kitId).length,
-      quality: QUALIDADE,
-      image_size: TAMANHO_1_5,
-      entrada: formaEntrada,
-    });
-
-    // O DINHEIRO desta geração, somado de TODAS as tentativas: um retry por
-    // cabeça cortada são DUAS passadas novas, e isso é dinheiro que tem de
-    // aparecer no contador do dia. `parcelas` guarda quanto custou cada etapa,
-    // para o log dizer de onde veio o total.
-    const conta = { usd: 0, chamadas: 0, semHeader: 0, parcelas: {} };
-
-    // A fal só lê URLs públicos. A imagem do meio (o jogador sobre o cinza,
-    // entre as duas passadas) vai para o bucket privado `avatars` com URL
-    // ASSINADO de vida curta — nunca para um bucket público, porque é a cara
-    // do utilizador. É apagada no fim, dê no que der.
-    const publicar = async (nomeFicheiro, buffer, tipo) => {
-      const caminho = `tmp/${userId}-${Date.now()}-${nomeFicheiro}`;
-      const { error } = await supabase.storage.from('avatars').upload(caminho, buffer, {
-        contentType: tipo, upsert: true, cacheControl: '3600',
-      });
-      if (error) throw new Error(`upload do passo intermédio: ${error.message}`);
-      temporarios.push(caminho);
-      return assinarUrlAvatars(caminho);
-    };
-
-    // ETAPA 1+2 (retriáveis) — as duas passadas + birefnet → buffer recortado.
-    const gerarERecortar = async () => {
-      let saida;
-      try {
-        saida = await gerarFigurinha({
-          fotoUrl: inputUrl,
-          kitUrl: kit.url,
-          kitId,
-          publicar,
-          etiqueta: 'fig',
-        });
-      } catch (err) {
-        // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
-        // inteira do fal (body/response, que pode incluir o inputUrl assinado
-        // enviado no pedido) — fica só o código de erro e a mensagem curta.
-        console.error('[avatar-ai] erro fal:', { status: err.status, message: err.message });
-        // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (ficheiro
-        // corrompido ou inacessível) — causa acionável (fotografia, não instabilidade
-        // do serviço). Código próprio para o frontend distinguir sem depender do texto.
-        let corpo = err.body;
-        if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
-        // Bug corrigido (14-set): em 401/403 a fal devolve `detail` como STRING
-        // ("Forbidden"), não array — .some() nessa string derrubava com
-        // TypeError e escondia a causa real. Só chama .some() se for array.
-        if (Array.isArray(corpo?.detail) && corpo.detail.some((d) => d.type === 'file_download_error')) {
-          throw new HttpError(422, 'Sua foto não pôde ser processada. Tente enviar uma foto nova.', 'FOTO_INVALIDA');
-        }
-        // Chave inválida, conta sem permissão ou sem crédito na fal — falha do
-        // MOTOR, não da foto do utilizador (não sugerir "tente outra foto").
-        // ALERTA no log: precisa de ação humana (chave/plano fal), não é
-        // instabilidade passageira.
-        if ([401, 403, 402].includes(err.status)) {
-          console.error('[avatar-ai] ALERTA: fal recusou', { status: err.status });
-          throw new HttpError(503, 'A geração de figurinha está indisponível agora. Tente de novo mais tarde.', 'IA_INDISPONIVEL');
-        }
-        throw err;
-      }
-
-      // O custo desta tentativa entra na conta da geração (o retry soma por cima).
-      conta.usd += saida.custo.usd;
-      conta.chamadas += saida.custo.chamadas;
-      conta.semHeader += saida.custo.semHeader;
-      for (const [nome, p] of Object.entries(saida.custo.parcelas)) {
-        conta.parcelas[nome] = (conta.parcelas[nome] || 0) + (p.usd || 0);
-      }
-      console.log(`[avatar-ai] ${saida.receita || RECEITA} OK`, {
-        segundos: saida.tempos,
-        custo_usd: Number(saida.custo.usd.toFixed(4)),
-      });
-      return { recorteBuffer: saida.recorteBuffer };
-    };
-    // REDE DE DETECÇÃO 1 — contacto com a borda, ANTES do trim. Topo (linhas
-    // y=0..2, como antes): cabeça cortada. Laterais (colunas x=0..2 e
-    // x=w-3..w-1, opacos > 15% da ALTURA): braço cortado pela borda.
-    const bordaCortada = async (buf) => {
-      const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      const { width: w, height: h, channels: c } = info;
-      const opaco = (x, y) => data[(y * w + x) * c + 3] > 200;
-
-      let topoCount = 0;
-      for (let y = 0; y <= 2 && y < h; y++) {
-        let cnt = 0;
-        for (let x = 0; x < w; x++) if (opaco(x, y)) cnt++;
-        if (cnt > topoCount) topoCount = cnt;
-      }
-      const topoLimiar = Math.round(w * 0.15);
-
-      const contarColuna = (x0) => {
-        let cnt = 0;
-        for (let y = 0; y < h; y++) if (opaco(x0, y)) cnt++;
-        return cnt;
-      };
-      let esqCount = 0;
-      for (let x = 0; x <= 2 && x < w; x++) esqCount = Math.max(esqCount, contarColuna(x));
-      let dirCount = 0;
-      for (let x = Math.max(0, w - 3); x < w; x++) dirCount = Math.max(dirCount, contarColuna(x));
-      // HIERARQUIA DOS DEFEITOS (11-ago, dono): braço tocando a borda lateral NÃO
-      // reprova — é linguagem de cromo (Panini/FIFA cortam braço na moldura) e era
-      // a causa nº1 de retry (~31% de custo a mais). Vira AVISO no log. Rede de
-      // segurança: contacto EXTREMO (>60% da altura colada) ainda reprova.
-      const lateralAviso = Math.round(h * 0.15);
-      const lateralExtremo = Math.round(h * 0.6);
-
-      const topo = { cortado: topoCount > topoLimiar, count: topoCount, limiar: topoLimiar };
-      const esquerda = { cortado: esqCount > lateralExtremo, aviso: esqCount > lateralAviso, count: esqCount };
-      const direita = { cortado: dirCount > lateralExtremo, aviso: dirCount > lateralAviso, count: dirCount };
-      if ((esquerda.aviso && !esquerda.cortado) || (direita.aviso && !direita.cortado)) {
-        console.log('[avatar-ai] AVISO: braço na borda lateral, aceite como enquadramento', { esq: esqCount, dir: dirCount, h });
-      }
-      return { cortada: topo.cortado || esquerda.cortado || direita.cortado, topo, esquerda, direita };
-    };
-
-    // REDE DE DETECÇÃO 2 — achatamento da coroa, APÓS o trim: largura da 1ª
-    // linha opaca ÷ largura máxima nas primeiras ~10% de linhas da figura.
-    // > 0,5 = coroa comida. (scripts/_bench/prova-producao.js)
-    const achatamentoCoroa = async (buf) => {
-      const { data, info } = await sharp(buf).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-      const { width: w, height: h, channels: c } = info;
-      const larg = (y) => { let n = 0; for (let x = 0; x < w; x++) if (data[(y * w + x) * c + 3] > 200) n++; return n; };
-      let y0 = -1;
-      for (let y = 0; y < h && y0 < 0; y++) if (larg(y) > 0) y0 = y;
-      if (y0 < 0) return { razao: null, cortada: false };
-      const faixa = Math.min(h, y0 + Math.max(8, Math.round(h * 0.10)));
-      const primeira = larg(y0);
-      let maxima = 0;
-      for (let y = y0; y < faixa; y++) maxima = Math.max(maxima, larg(y));
-      const razao = maxima ? primeira / maxima : 0;
-      return { razao, cortada: razao > 0.5 };
-    };
-
-    // As duas verificações por geração: borda (pré-trim) + achatamento (pós-trim).
-    // Guarda o buffer já trimado para reaproveitar na ETAPA 3 sem trim duplo.
-    const verificarQualidade = async (recorteBuffer) => {
-      const borda = await bordaCortada(recorteBuffer);
-      const trimado = await sharp(recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
-      const achatamento = await achatamentoCoroa(trimado);
-      return { ok: !borda.cortada && !achatamento.cortada, borda, achatamento, trimado };
-    };
-
-    let gen = await gerarERecortar();
-    let verif = await verificarQualidade(gen.recorteBuffer);
-    console.log('[avatar-ai] verificação de qualidade:', { borda: verif.borda, achatamento: verif.achatamento });
-    if (!verif.ok) {
-      console.log('[avatar-ai] retry: reprovada na 1ª geração', { borda: verif.borda, achatamento: verif.achatamento });
-      try {
-        const gen2 = await gerarERecortar();
-        const verif2 = await verificarQualidade(gen2.recorteBuffer);
-        console.log('[avatar-ai] verificação de qualidade (pós-retry):', { borda: verif2.borda, achatamento: verif2.achatamento });
-        gen = gen2;
-        verif = verif2;
-      } catch (e) {
-        console.error('[avatar-ai] retry falhou, mantém 1ª geração:', e.message);
-      }
-    }
-    if (!verif.ok) {
-      // Lei da casa: cabeça cortada nunca sai. Falhou nas duas rondas → não
-      // entrega, não grava slot, não consome quota (o throw acontece antes
-      // de qualquer um dos três, mais abaixo neste handler).
-      console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
-      throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra: de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
-    }
-
-    // ETAPA 3 — redimensiona o PNG já recortado e trimado (sharp). A troca de cor do kit é feita no frontend.
-    const buffer = await sharp(verif.trimado)
-      // Rede de segurança: garante 40px de margem transparente acima de QUALQUER
-      // conteúdo, mesmo que a IA cole a cabeça à borda do PNG.
-      .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })
-      .resize({ height: 640, width: 512, fit: 'inside' })
-      .png()
-      .toBuffer();
-    console.log('[avatar-ai] etapa 3 - resize OK');
-
-    await ensureUserRow(req.user);
-    // Um ficheiro POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
-    // a figurinha nova não escreve por cima da velha (22-set). Sem upsert: o
-    // carimbo de tempo torna colisão impossível, e se algum dia houvesse, o
-    // certo é rebentar aqui em vez de apagar o trabalho de outra chamada.
-    const caminho = caminhoFigurinhaNova(userId, kitId);
-    const { error: upErr } = await supabase.storage.from('avatars').upload(caminho, buffer, {
-      contentType: 'image/png',
-      upsert: false,
-      cacheControl: '3600',
-    });
-    if (upErr) throw new HttpError(500, upErr.message);
-
-    const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
-    const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
-
-    // Guarda o SLOT deste kit (upsert por (user_id, kit_id)) → a próxima vez que o
-    // utilizador pedir este kit COM A MESMA FOTO é servido do slot, sem gerar
-    // nem gastar quota. foto_fingerprint = foto_hash atual (migração 052) —
-    // é o que a checagem de reuso acima compara na próxima chamada.
-    const { error: slotErr } = await supabase
-      .from('user_avatar_slots')
-      .upsert({ user_id: userId, kit_id: kitId, avatar_url: avatarUrl, foto_fingerprint: perfil.foto_hash || null }, { onConflict: 'user_id,kit_id' });
-    if (slotErr) throw new HttpError(500, slotErr.message);
-
-    // Persiste o novo avatar + kit vestido. A quota mensal por plano
-    // (avatar_ia_mes/reset) saiu daqui na SPEC-FIGURINHA-3: quem manda agora é
-    // o direito, e ele é debitado mais abaixo — depois de a figurinha existir.
-    const dadosUpdate = { avatar_url: avatarUrl, kit_ativo: kitId };
-    const { error: updErr } = await supabase.from('users').update(dadosUpdate).eq('id', userId);
-    if (updErr) throw new HttpError(500, updErr.message);
-    // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
-    marcarFigurinhaStatus(userId, 'pronta');
-    invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
-
-    // RODADA 19 (decisão do dono, 23-set): a figurinha anterior DESTE kit
-    // já não é apontada por ninguém (o slot e o users.avatar_url acabaram de
-    // mudar) — mas em vez de sair do bucket, vai para "Minhas figurinhas"
-    // (user_avatar_historico, migração 057). custo_cents fica null: é o custo
-    // de QUANDO ELA foi gerada, que não foi guardado antes desta rodada — só
-    // passa a existir para gerações futuras (não há como recuperar retroativo).
-    const figurinhaAntiga = caminhoNoBucket(slot?.avatar_url, 'avatars');
-    if (figurinhaAntiga && figurinhaAntiga !== caminho) {
-      await arquivarFigurinhaAntiga(userId, kitId, slot.avatar_url);
-    }
-
-    // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
-    // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
-    // derruba a resposta — a figurinha já foi entregue ao utilizador).
-    // 17-set: vai o custo REAL em cêntimos, somado de todas as chamadas desta
-    // geração (retry incluído). `null` só quando a fal não mandou header nenhum
-    // — nesse caso quem decide o valor é o antiAbusoIA, não este sítio.
-    const custoCents = conta.semHeader === conta.chamadas ? null : conta.usd * 100;
-    console.log('[avatar-ai] custo da geração', {
-      chamadas: conta.chamadas,
-      sem_header: conta.semHeader,
-      custo_usd: Number(conta.usd.toFixed(4)),
-      // De onde veio o total: se um dia a conta disparar, é aqui que se vê qual
-      // das quatro chamadas mudou de preço.
-      parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
-    });
-    // Rodada 28: o time que pagou (pacote) vai junto — é o custo por time e por mês do Gabinete.
-    registrarGeracao({ userId, ip: req.ip, custoCents, teamId: direitoUsado?.fonte === 'time' ? direitoUsado.teamId : null }).catch(() => {});
-
-    // DEBITA O DIREITO — só AGORA, com a figurinha gravada e entregue
-    // (SPEC-FIGURINHA-3 §5). Uma geração que falhou a meio (fal fora do ar,
-    // coroa cortada nas duas tentativas, foto desatualizada) nunca chega
-    // aqui, e por isso nunca custa o crédito de ninguém. `await` de propósito:
-    // a resposta só sai depois de o débito estar decidido, senão um toque
-    // rápido em "Gerar" duas vezes gastaria um direito e cobraria dois.
-    await debitar(direitoUsado, { userId, kitId, avatarUrl, custoCents });
-
-    // A imagem do meio (o jogador sobre o cinza, entre as duas passadas) é a
-    // cara do utilizador num ficheiro temporário: sai daqui assim que a
-    // figurinha está entregue. Fire-and-forget — falhar a limpeza não pode
-    // derrubar a resposta, e o pior caso é um ficheiro a mais no tmp/.
-    if (temporarios.length) {
-      supabase.storage.from('avatars').remove(temporarios)
-        .catch((e) => console.error('[avatar-ai] limpeza do tmp falhou:', e.message));
-    }
-
-    res.json({ avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false, figurinha_ativa: avatarEhFigurinhaNossa(avatarUrl) });
     } catch (err) {
-      // Qualquer falha a partir do e-mail-gate (inclusive) até aqui → 'falhou',
-      // para o polling do Início parar de mostrar "criando..." e oferecer nova
-      // foto. Ver nota no início do try: o e-mail-gate é o caso mais provável
-      // no fluxo do cadastro.
+      // Qualquer gate reprovado → 'falhou', para o polling do Início parar de mostrar "criando...".
       await marcarFigurinhaStatus(userId, 'falhou');
       invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
       throw err;
     }
+
+    // RODADA 29B (bloco 2, A) — A PINTURA DEIXOU DE SEGURAR O PEDIDO. Reserva a vez (uma por vez por pessoa:
+    // o toque duplo recebe a pintura do primeiro), anota na tabela e devolve na hora `{ jobId,
+    // estimativaSegundos }`; o app consulta GET /api/figurinha/job/:id. O direito só é debitado lá dentro,
+    // DEPOIS da figurinha gravada — um job que morre a meio não custa nada a ninguém.
+    // `assincrono` vem do app novo. Os apps já publicados não o mandam e esperam a figurinha na resposta:
+    // para eles o pedido espera a MESMA pintura terminar, como sempre esperou (mesmos códigos de erro).
+    const { job, jaEmAndamento } = geracaoJobs.reservar({ userId, kitId });
+    if (jaEmAndamento) return respostaDePinturaEmCurso(res, job.id, job.estimativaSegundos, assincrono);
+    await geracaoJobs.registrar(job);
+    geracaoJobs.iniciar(
+      job,
+      async (controle) => {
+        try {
+          return await pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitId, kit, slot }, controle);
+        } catch (err) {
+          // Qualquer falha a partir do e-mail-gate (inclusive) → 'falhou', para o polling do Início parar
+          // de mostrar "criando..." e oferecer nova foto (como era no catch do handler).
+          await marcarFigurinhaStatus(userId, 'falhou');
+          invalidarSessaoDoPedido(req);
+          throw err;
+        }
+      },
+      assincrono ? { aoTerminar: avisarQuePintou } : undefined,
+    );
+
+    if (assincrono) return res.status(202).json({ jobId: job.id, estimativaSegundos: job.estimativaSegundos });
+    await job.promessa;
+    if (job.estado === 'falhou') throw job.erroOriginal;
+    return res.json(job.resultado);
   })
 );
 

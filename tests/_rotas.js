@@ -13,6 +13,7 @@ const { HttpError } = require('../utils/http');
 const RECARREGAR = [
   'utils/soOrganiza', 'utils/agregados', 'utils/direitoBrilhante', 'services/inicio', 'utils/cidade',
   'routes/rsvp', 'routes/games', 'routes/ranking', 'routes/teams', 'routes/brilhantes',
+  'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth',
 ];
 const caminho = (m) => require.resolve(`../${m}`);
 
@@ -72,13 +73,13 @@ function carregar(tabelas, modulos, opcoes = {}) {
   const exigirLogin = (req, _res, next) => {
     const quem = req.get('x-teste-usuario');
     if (!quem) return next(new HttpError(401, 'Sem sessão.'));
-    req.user = { id: quem, email: `${quem}@futtymock.com` };
+    req.user = { id: quem, email: `${quem}@futtymock.com`, email_confirmed_at: '2026-01-01T00:00:00Z', app_metadata: {} };
     return next();
   };
   const notificacoes = [];
   const restaurar = [
     injetar('utils/db', dbFalso(cliente)),
-    injetar('middleware/auth', { requireAuth: exigirLogin, optionalAuth: passaAdiante }),
+    injetar('middleware/auth', { requireAuth: exigirLogin, optionalAuth: passaAdiante, invalidarSessaoDoPedido: () => {} }),
     injetar('routes/push', { enviarNotificacao: (ids, payload) => { notificacoes.push({ ids, payload }); } }),
     injetar('utils/nsfwFilter', { filtroNSFWFailClosed: passaAdiante, filtroNSFW: passaAdiante }),
   ];
@@ -113,4 +114,4 @@ function subir(routers, t) {
   };
 }
 
-module.exports = { carregar, subir, dbFalso };
+module.exports = { carregar, subir, dbFalso, injetar };

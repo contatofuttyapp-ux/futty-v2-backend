@@ -81,6 +81,9 @@ const diagnosticoRoutes = require('./routes/diagnostico');
 const telemetriaRoutes = require('./routes/telemetria');
 const comprasRoutes = require('./routes/compras');
 const aviseMeRoutes = require('./routes/aviseMe');
+const figurinhaJobRoutes = require('./routes/figurinhaJob');
+const geracaoJobs = require('./utils/geracaoJobs');
+const { marcarFigurinhaStatus } = require('./services/inicio');
 
 const app = express();
 
@@ -257,6 +260,7 @@ app.use(brilhantesRoutes); // /api/brilhantes — direito, créditos e pedidos (
 app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app (VELOCIDADE 4)
 app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima (Rodada 28), sem sessão
 app.use(aviseMeRoutes); // POST /api/avise-me — lista de quem quer ser avisado do lançamento (pública, limiter por IP)
+app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano (29B)
 app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
 
 // 404 para rotas /api não encontradas
@@ -294,6 +298,12 @@ if (require.main === module) {
   // ainda encontra o handler — sem servidor para fechar, só sai.
   const encerrar = async (sinal) => {
     console.log(`[Futty] ${sinal} recebido — a gravar o que está pendente.`);
+    // Rodada 29B (bloco 2, A): o que está pintando aqui não termina — marca 'falhou' (sem cobrar) já, para quem
+    // consulta ver a mensagem em segundos e não esperar o prazo do batimento.
+    try {
+      const n = await geracaoJobs.interromperTodas({ aoMarcar: (id) => marcarFigurinhaStatus(id, 'falhou') });
+      if (n) console.log(`[Futty] ${n} pintura(s) de figurinha interrompida(s) pelo desligamento (nada cobrado).`);
+    } catch (e) { console.error('[Futty] interromper pinturas:', e.message); }
     try { await adsStore.descarregar(); } catch (e) { console.error('[Futty] flush de ads:', e.message); }
     if (servidor) servidor.close(() => process.exit(0));
     else process.exit(0);
@@ -334,6 +344,11 @@ if (require.main === module) {
       Promise.all([plataformaStore.ler(), gabineteStore.ler()])
         .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
         .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
+      // Rodada 29B (bloco 2, A): pintura "em andamento" sem batimento há mais de 60 s é de um processo que morreu
+      // (reinício, deploy): vira 'falhou' com a mensagem "interrompida, nada foi cobrado". A de outra instância
+      // viva tem batimento fresco e não é tocada.
+      geracaoJobs.varrerInterrompidas({ aoMarcar: (id) => marcarFigurinhaStatus(id, 'falhou') })
+        .catch((e) => console.error('[Futty] varrer pinturas interrompidas:', e.message));
       // Garante o bucket de avatares (idempotente; não bloqueia o arranque).
       ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
       ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
