@@ -10,6 +10,7 @@
 // Parte C (boas-vindas do time): dois MEMBROS (não-admin) do time "gratis":
 //   novato     sem foto nenhuma (avatar_url nulo)  → a 1ª visita à página do time abre as boas-vindas
 //   membroFoto com foto                            → só abre logo depois de aceitar um convite (state.primeiraEntrada)
+// Parte F ("Avise-me"): `super` — super-admin de prova para a aba do Gabinete.
 // Parte E ("só organizo"): o time "gratis" tem um jogo futuro (id em sessao-rodada29b.json → jogo) para as telas de presença.
 // Nada gera figurinha (custo de IA zero): as "figurinhas" são PNGs desenhados aqui, com `-ai-` no nome como as de verdade.
 // Tudo @futtymock; os times são só desta rodada. Só servidor LOCAL (CLAUDE.md, 25-set).
@@ -40,6 +41,7 @@ const CONTAS = {
   minhaFig: { email: 'prova-r29b-minha-fig@futtymock.com', nome: 'MINHAFIG29', nasc: '1989-06-21' },
   novato: { email: 'prova-r29b-novato@futtymock.com', nome: 'NOVATO29', nasc: '1995-03-09' },
   membroFoto: { email: 'prova-r29b-membro-foto@futtymock.com', nome: 'MEMBROFOTO29', nasc: '1994-12-01' },
+  super: { email: 'prova-r29b-super@futtymock.com', nome: 'SUPER29', nasc: '1988-01-20' },
 };
 
 const tem = (n) => process.argv.includes(`--${n}`);
@@ -158,12 +160,18 @@ async function subirFigurinha(userId, kit, corCamisa) {
     if (error) throw new Error(`users novato: ${error.message}`);
   }
 
+  // O super-admin de prova (aba Avise-me do Gabinete).
+  {
+    const { error } = await supabase.from('users').upsert({ ...linhaBase('super'), is_super_admin: true, figurinha_status: 'pronta' }, { onConflict: 'id' });
+    if (error) throw new Error(`users super: ${error.message}`);
+  }
+
   // Créditos da Minha Figurinha.
   for (const papel of ['minha', 'minhaFig']) {
     const { error } = await supabase.from('users').update({ brilhante_creditos: 3 }).eq('id', ids[papel]);
     if (error) throw new Error(`créditos ${papel}: ${error.message}`);
   }
-  ok(`${Object.keys(CONTAS).length} contas prontas (gratis, pacote, pacoteFig, minha, minhaFig, novato, membroFoto).`);
+  ok(`${Object.keys(CONTAS).length} contas prontas (gratis, pacote, pacoteFig, minha, minhaFig, novato, membroFoto, super).`);
 
   const criarTime = async (slug, nome, dono, extra = {}) => {
     const { data: time, error } = await supabase.from('teams')
@@ -208,6 +216,7 @@ async function subirFigurinha(userId, kit, corCamisa) {
     minhaFig: await sessaoDe(CONTAS.minhaFig.email),
     novato: await sessaoDe(CONTAS.novato.email),
     membroFoto: await sessaoDe(CONTAS.membroFoto.email),
+    super: await sessaoDe(CONTAS.super.email),
   };
   fs.mkdirSync(path.dirname(DESTINO), { recursive: true });
   fs.writeFileSync(DESTINO, JSON.stringify(sessoes, null, 2));
