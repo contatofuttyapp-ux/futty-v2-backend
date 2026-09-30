@@ -7,6 +7,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, loadGame, goleirosDoTime } = require('../utils/db');
 const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
+const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 
 const router = express.Router();
 
@@ -137,7 +138,9 @@ router.post(
       .select('user_id')
       .eq('game_id', game.id)
       .eq('status', 'confirmado');
-    const ids = (confirmados || []).map((r) => r.user_id).filter(Boolean);
+    // Rodada 29B (E): quem só organiza o time nunca entra no elenco (nem se respondeu antes de mudar de papel).
+    const organizam = await idsQueSoOrganizam(game.teams.id);
+    const ids = (confirmados || []).map((r) => r.user_id).filter((id) => id && !organizam.has(id));
     const { data: jaNoJogo } = ids.length
       ? await supabase.from('game_players').select('user_id, goleiro').eq('game_id', game.id).in('user_id', ids)
       : { data: [] };
@@ -164,6 +167,8 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const game = await jogoComoMembro(req);
+    // Rodada 29B (E): quem só organiza o time não entra na lista de presença.
+    if (await soOrganiza(game.teams.id, req.user.id)) throw new HttpError(403, MSG_SO_ORGANIZA);
     const { status } = req.body || {};
     if (!['confirmado', 'recusado'].includes(status)) throw new HttpError(400, 'Estado inválido.');
     if (!game.rsvp_aberto || game.rsvp_fechado) throw new HttpError(400, 'O RSVP não está aberto.');

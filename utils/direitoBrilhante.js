@@ -24,6 +24,7 @@
 // dar" (o comportamento de antes da 059) — nunca deixa passar mais gerações
 // do que o banco sabe contar.
 const { supabase } = require('./db');
+const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('./soOrganiza');
 
 /** O erro é "a coluna/tabela ainda não existe" e não um problema real? */
 function ehMigracaoEmFalta(mensagem = '') {
@@ -125,9 +126,12 @@ async function temDireito(userId) {
       .eq('teams.brilhante_ativo', true);
     if (erroMembros) throw new Error(erroMembros.message);
 
+    // Rodada 29B (E): quem só organiza o time não joga — não usa o pacote (nem as gerações, nem uma das 25 vagas).
+    const soOrganiza = membros?.length ? await timesEmQueSoOrganiza(userId) : new Set();
     for (const m of membros || []) {
       const time = m.teams;
       if (!time?.brilhante_kit) continue; // pacote ativo sem uniforme escolhido: não dá para gerar
+      if (soOrganiza.has(time.id)) continue;
       // Quantas gerações já usou neste time, das que o pacote dá?
       const { usadas } = await geracoesNoTime(time.id, userId);
       // Fail-safe: `brilhante_por_jogador` também some se a 059 não rodou —
@@ -144,7 +148,20 @@ async function temDireito(userId) {
         .eq('team_id', time.id);
       if (erroConta) throw new Error(erroConta.message);
       const limite = Number(time.brilhante_limite) || 25;
-      if ((count || 0) >= limite && usadas === 0) continue; // já tem linha: refazer não esbarra no tecto de jogadores
+      // As 25 vagas são de JOGADORES: a linha de quem hoje só organiza (gerou antes de mudar de papel) não conta.
+      let ocupadas = count || 0;
+      if (ocupadas >= limite && usadas === 0) {
+        const organizam = await idsQueSoOrganizam(time.id);
+        if (organizam.size) {
+          const { count: doOrganizador } = await supabase
+            .from('brilhantes_time')
+            .select('user_id', { count: 'exact', head: true })
+            .eq('team_id', time.id)
+            .in('user_id', [...organizam]);
+          ocupadas -= doOrganizador || 0;
+        }
+      }
+      if (ocupadas >= limite && usadas === 0) continue; // já tem linha: refazer não esbarra no tecto de jogadores
       opcoes.push({ fonte: 'time', teamId: time.id, kitId: time.brilhante_kit, restantes: Math.max(0, porJogador - usadas) });
     }
   } catch (e) {

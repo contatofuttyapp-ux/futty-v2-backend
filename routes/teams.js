@@ -16,6 +16,7 @@ const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
+const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 
 const router = express.Router();
 
@@ -127,10 +128,18 @@ router.post(
     }
     if (!team) throw new HttpError(500, lastError?.message || 'Não foi possível criar o time.');
 
-    // Adiciona o criador como admin (rollback se falhar)
-    const { error: memberError } = await supabase
+    // Adiciona o criador como admin (rollback se falhar). RODADA 29B (E): "Só organizo o time" (`joga: false` no corpo)
+    // grava `team_members.joga = false` — ele administra tudo, mas fica fora da presença, do sorteio, do ranking e do
+    // pacote. Sem a migração 067 a coluna não existe: o time nasce com o criador jogando (a resposta diz `joga: true`).
+    const soOrganizo = req.body?.joga === false;
+    let { error: memberError } = await supabase
       .from('team_members')
-      .insert({ user_id: req.user.id, team_id: team.id, role: 'admin' });
+      .insert({ user_id: req.user.id, team_id: team.id, role: 'admin', ...(soOrganizo ? { joga: false } : {}) });
+    let jogaGravado = soOrganizo;
+    if (memberError && soOrganizo && /joga/i.test(memberError.message || '')) {
+      jogaGravado = false;
+      ({ error: memberError } = await supabase.from('team_members').insert({ user_id: req.user.id, team_id: team.id, role: 'admin' }));
+    }
     if (memberError) {
       await supabase.from('teams').delete().eq('id', team.id);
       throw new HttpError(500, memberError.message);
@@ -138,7 +147,7 @@ router.post(
     selosCache.invalidarMembro(team.id, req.user.id);
 
     // `geo` (29B, D): o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
-    res.status(201).json({ team, ...(cid.info ? { geo: cid.info } : {}) });
+    res.status(201).json({ team, ...(cid.info ? { geo: cid.info } : {}), joga: !jogaGravado });
   })
 );
 
@@ -321,13 +330,14 @@ router.get(
 
     // Achado 3/23: role e membros só dependem do team.id, não um do outro — em
     // paralelo em vez de dois round-trips seguidos ao Supabase.
-    const [role, { data: rawMembers, error }] = await Promise.all([
+    const [role, { data: rawMembers, error }, organizam] = await Promise.all([
       getRole(team.id, req.user.id),
       supabase
         .from('team_members')
         .select('role, created_at, categoria, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
         .eq('team_id', team.id)
         .order('created_at', { ascending: true }),
+      idsQueSoOrganizam(team.id), // Rodada 29B (E): em consulta à parte (a coluna `joga` é da migração 067)
     ]);
     if (!role) throw new HttpError(403, 'Você não é membro deste time.');
     if (error) throw new HttpError(500, error.message);
@@ -341,6 +351,7 @@ router.get(
       avatar_url: m.users?.avatar_url,
       avatar_generico: m.users?.avatar_generico || null,
       role: m.role,
+      joga: !organizam.has(m.users?.id), // 29B (E): false = só organiza o time
       // Rodada 10B: a FONTE é só categoria — a coluna `posicao` (Rodada 9) e a
       // `categoria` (que já mandava no ranking) eram a mesma decisão guardada
       // duas vezes; o dono escolheu ficar só com esta. `goleiro` é o campo novo
@@ -352,7 +363,7 @@ router.get(
       created_at: m.created_at,
     }));
 
-    res.json({ team: { ...team, role }, members });
+    res.json({ team: { ...team, role, joga: !organizam.has(req.user.id) }, members });
   })
 );
 
@@ -515,7 +526,7 @@ router.get(
     // Achado 3/23: estas 4 leituras só dependem de team.id, nenhuma do resultado
     // das outras — corriam em série. Em paralelo; só a busca de presenças (que
     // precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
-    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados] = await Promise.all([
+    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam] = await Promise.all([
       supabase
         .from('team_members')
         .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
@@ -528,6 +539,7 @@ router.get(
       supabase.from('games').select('id, data, created_at').eq('team_id', team.id).order('created_at', { ascending: false }).limit(5),
       // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
       agregadosDaEquipa(team.id),
+      idsQueSoOrganizam(team.id), // Rodada 29B (E)
     ]);
     if (error) throw new HttpError(500, error.message);
     const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = agregados;
@@ -576,6 +588,7 @@ router.get(
         posicao: m.categoria === 'GR' ? 'GL' : null,
         ausente_proximo: !!m.ausente_proximo,
         ativo: m.ativo !== false,
+        joga: !organizam.has(uid), // 29B (E): false = só organiza o time
         visivel_ranking: m.visivel_ranking !== false,
         nota_interna: m.nota_interna || null,
         nome: m.users?.nome || null,
@@ -644,6 +657,30 @@ router.patch(
     selosCache.invalidarMembro(team.id, targetUserId); // categoria mexe no ranking
 
     res.json({ ok: true, goleiro: ligado, posicao: ligado ? 'GL' : null });
+  })
+);
+
+/**
+ * PATCH /api/equipas/:slug/membros/joga — "Eu jogo" / "Só organizo o time" (Rodada 29B, E; migração 067). A pessoa muda o
+ * SEU papel (nunca o de outra). Só quem administra o time pode ficar só organizando (`joga: false`); voltar a jogar é de
+ * qualquer um. Quem só organiza administra tudo, mas não entra na presença, no sorteio, no ranking nem no pacote.
+ * Body: { joga: true|false }.
+ */
+router.patch(
+  '/api/equipas/:slug/membros/joga',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    if (typeof req.body?.joga !== 'boolean') throw new HttpError(400, 'Diga se você joga (joga: true ou false).');
+    const joga = req.body.joga;
+    if (!joga && role !== 'admin') throw new HttpError(403, 'Só quem administra o time pode ficar só organizando.');
+    const { error } = await supabase.from('team_members').update({ joga }).eq('team_id', team.id).eq('user_id', req.user.id);
+    if (error) {
+      if (/joga/i.test(error.message || '')) throw new HttpError(503, 'Essa opção ainda não está disponível. Tente de novo mais tarde.');
+      throw new HttpError(500, error.message);
+    }
+    selosCache.invalidarEquipa(team.id); // presença, sorteio e ranking mudam de quem entra
+    res.json({ ok: true, joga });
   })
 );
 
@@ -852,7 +889,7 @@ router.get(
     // RODADA 29B (A): a página nova mostra 3 fatos para dar vontade de entrar — quantos já estão no time, quando é o
     // próximo jogo e de que cidade. Entram na MESMA leva (a cidade vem no select do time; a contagem e o próximo
     // jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
-    const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }] = await Promise.all([
+    const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }, organizam] = await Promise.all([
       supabase
         .from('teams')
         .select('id, nome, slug, cor, logo_url, cor_fundo, cidade')
@@ -879,6 +916,7 @@ router.get(
         .order('data', { ascending: true })
         .limit(1)
         .maybeSingle(),
+      idsQueSoOrganizam(convite.team_id), // 29B (E): o fato é "N jogadores" — quem só organiza não conta
     ]);
 
     const motivo = new Date(convite.expires_at).getTime() < Date.now() ? 'expirado' : null;
@@ -895,7 +933,7 @@ router.get(
       usos,
       // Os fatos da página (29B, A): `membros` é a contagem, `proximoJogo` o instante do próximo jogo agendado
       // (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin declarou.
-      membros: membrosTotal ?? 0,
+      membros: Math.max(0, (membrosTotal ?? 0) - organizam.size),
       proximoJogo: proximo?.data || null,
       cidade: team?.cidade || null,
       team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null } : null,

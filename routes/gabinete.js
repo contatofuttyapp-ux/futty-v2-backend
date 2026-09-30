@@ -14,6 +14,7 @@ const adsStore = require('../utils/adsStore');
 const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
 const { aplicarCompra, resolverPedidos, novaTransacaoGabinete, ErroCompra, resumirReceita } = require('../utils/compras');
 const { custoDoTimePorMes } = require('../utils/custoPorTime');
+const { organizadoresPorTime } = require('../utils/soOrganiza');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
 const pkg = require('../package.json');
@@ -459,10 +460,11 @@ router.get(
       const membros = {};
       let custoPorMes = null; // null = migração 063 por correr
       if (idsTimes.length) {
-        const [linhas, { data: equipas }, log] = await Promise.all([
+        const [linhas, { data: equipas }, log, organizam] = await Promise.all([
           linhasDoPacote(idsTimes),
           supabase.from('team_members').select('team_id, user_id').in('team_id', idsTimes),
           supabase.from('geracao_ia_log').select('team_id, custo_cents, created_at').in('team_id', idsTimes).order('created_at', { ascending: false }).limit(5000),
+          organizadoresPorTime(idsTimes),
         ]);
         for (const l of linhas) {
           const u = uso[l.team_id] || (uso[l.team_id] = { geradas: 0, jogadores: 0, custo_cents: 0, sem_custo: 0 });
@@ -471,7 +473,8 @@ router.get(
           if (l.custo_cents == null) u.sem_custo += 1;
           else u.custo_cents += Number(l.custo_cents) || 0;
         }
-        for (const m of equipas || []) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
+        // Rodada 29B (E): quem só organiza o time não é jogador — não entra na conta dos jogadores do pacote.
+        for (const m of equipas || []) if (!organizam.get(m.team_id)?.has(m.user_id)) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
         if (!log.error) custoPorMes = custoDoTimePorMes(log.data);
         else console.warn('[gabinete/brilhantes] custo por mês indisponível (migração 063 aplicada?):', log.error.message);
       }

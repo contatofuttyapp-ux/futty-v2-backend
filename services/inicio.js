@@ -14,6 +14,7 @@ const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRe
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
 const { criarCache } = require('../utils/cacheQuente');
+const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
 const PERFIL_COLS_BASE =
@@ -181,6 +182,8 @@ async function obterMe(user) {
 
 // ─── GET /api/teams ───────────────────────────────────────────────────────────
 async function obterTeams(userId) {
+  // Rodada 29B (E): em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
+  const soOrganizaPromessa = timesEmQueSoOrganiza(userId);
   const { data, error } = await supabase
     .from('team_members')
     // VELOCIDADE 9: as quatro colunas do pacote de figurinhas entram no MESMO
@@ -193,7 +196,8 @@ async function obterTeams(userId) {
     .order('created_at', { ascending: true });
   if (error) throw new HttpError(500, error.message);
 
-  const teams = (data || []).filter((row) => row.teams).map((row) => ({ ...row.teams, role: row.role }));
+  const soOrganiza = await soOrganizaPromessa;
+  const teams = (data || []).filter((row) => row.teams).map((row) => ({ ...row.teams, role: row.role, joga: !soOrganiza.has(row.teams.id) }));
 
   // Pedidos de entrada pendentes por equipa (só onde sou admin) → badge no chip.
   const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
@@ -212,10 +216,14 @@ async function obterTeams(userId) {
 // game_players). As presenças passam a vir embutidas nos jogos (select do
 // PostgREST), o que junta as duas últimas: ficam 2.
 async function obterConvites(userId) {
-  const { data: memberships } = await supabase
-    .from('team_members')
-    .select('team_id, ausente_proximo, teams ( id, nome, slug )')
-    .eq('user_id', userId);
+  // Rodada 29B (E): `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
+  const [{ data: memberships }, soOrganiza] = await Promise.all([
+    supabase
+      .from('team_members')
+      .select('team_id, ausente_proximo, teams ( id, nome, slug )')
+      .eq('user_id', userId),
+    timesEmQueSoOrganiza(userId),
+  ]);
   const teamById = {};
   const ausenteByTeam = {};
   for (const m of memberships || []) {
@@ -261,6 +269,7 @@ async function obterConvites(userId) {
       team_name: team.nome || null,
       team_slug: team.slug || null,
       ausente_proximo: ausenteByTeam[g.team_id] || false,
+      eu_jogo: !soOrganiza.has(g.team_id),
     };
   });
 
@@ -433,15 +442,17 @@ async function obterRsvp(gameId, userId) {
   // carregados — nenhum depende dos outros 3 (13-set, "Velocidade 3": eram 4
   // awaits em série). O acesso só é confirmado depois — se `role` vier vazio
   // o resto é descartado a seguir.
-  const [role, { data: membros }, { data: respostas }, { data: filaRows }] = await Promise.all([
+  const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = await Promise.all([
     getRole(game.teams.id, userId),
     supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', game.teams.id),
     supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', game.id),
     supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', game.id).order('posicao', { ascending: true }),
+    idsQueSoOrganizam(game.teams.id), // Rodada 29B (E)
   ]);
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-  const users = (membros || []).map((m) => m.users).filter(Boolean);
+  // Rodada 29B (E): quem só organiza o time não está na lista de presença (nem como pendente).
+  const users = (membros || []).map((m) => m.users).filter((u) => u && !organizam.has(u.id));
   const statusPorUser = {};
   (respostas || []).forEach((r) => {
     statusPorUser[r.user_id] = r.status;
@@ -471,6 +482,7 @@ async function obterRsvp(gameId, userId) {
     pendentes: users.filter((u) => !statusPorUser[u.id]),
     espera,
     minha_posicao_espera: minhaEspera ? minhaEspera.posicao : null,
+    eu_jogo: !organizam.has(userId),
   };
 }
 

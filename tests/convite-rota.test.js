@@ -8,7 +8,8 @@
 //   3. o contrato de sempre continua igual: válido/expirado/não encontrado, autenticado, jaMembro, usos, convidadoPor.
 //
 // RODADA 29B (A): a página do convite mostra três fatos — `membros` (contagem), `proximoJogo` (o próximo agendado, só a
-// data) e `cidade` — e eles entram na MESMA leva paralela: 6 consultas juntas (5 sem sessão), ainda 2 idas no total.
+// data) e `cidade` — e eles entram na MESMA leva paralela: 7 consultas juntas (6 sem sessão), ainda 2 idas no total.
+// RODADA 29B (E): "N jogadores" não conta quem só organiza o time (team_members.joga = false).
 //
 // Uso: npm test  (ou: node --test tests/convite-rota.test.js)
 const path = require('node:path');
@@ -68,14 +69,14 @@ function observar(cliente, atrasoMs = 0) {
 }
 
 /** Sobe o router de equipas com o Supabase falso por baixo e devolve um `pedir(token, usuario)`. */
-async function montar({ teams, atrasoMs = 0, convites = null, games = null } = {}, t) {
+async function montar({ teams, atrasoMs = 0, convites = null, games = null, membros = null } = {}, t) {
   const { cliente: falso } = criarSupabaseFalso({
     convites: convites || [{ id: CONVITE, token: TOKEN, team_id: TIME, criado_por: DONO, expires_at: AMANHA }],
     teams: teams || [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc', cor: '#8b5cf6', logo_url: 'https://x.supabase.co/storage/v1/object/public/avatars/logos/t.png?v=1', cor_fundo: '#1a1a2e', cidade: 'Belo Horizonte' }],
     games: games || [],
     users: [{ id: DONO, nome: 'Antônio Silva', nome_jogador: 'Tonhão' }],
     convite_usos: [{ convite_id: CONVITE, user_id: MEMBRO }, { convite_id: CONVITE, user_id: FORA }],
-    team_members: [{ team_id: TIME, user_id: DONO, role: 'admin' }, { team_id: TIME, user_id: MEMBRO, role: 'member' }],
+    team_members: membros || [{ team_id: TIME, user_id: DONO, role: 'admin' }, { team_id: TIME, user_id: MEMBRO, role: 'member' }],
   });
   const { cliente, obs } = observar(falso, atrasoMs);
 
@@ -104,10 +105,15 @@ async function montar({ teams, atrasoMs = 0, convites = null, games = null } = {
     id: caminhoNsfw, filename: caminhoNsfw, loaded: true, path: path.dirname(caminhoNsfw), children: [], paths: [],
     exports: { filtroNSFWFailClosed: passaAdiante, filtroNSFW: passaAdiante },
   };
+  // Os módulos que guardam o `supabase` na hora do require (soOrganiza, o serviço do Início) têm de nascer de novo com o
+  // falso DESTE cenário — senão o primeiro teste do processo prende o banco dele nos seguintes.
+  const presos = ['../utils/soOrganiza', '../services/inicio'].map((m) => require.resolve(m));
+  for (const p of presos) delete require.cache[p];
   delete require.cache[caminhoAlvo];
   // eslint-disable-next-line global-require
   const router = require('../routes/teams');
   delete require.cache[caminhoAlvo];
+  for (const p of presos) delete require.cache[p];
   if (dbAntigo) require.cache[caminhoDb] = dbAntigo; else delete require.cache[caminhoDb];
   if (nsfwAntigo) require.cache[caminhoNsfw] = nsfwAntigo; else delete require.cache[caminhoNsfw];
 
@@ -166,6 +172,18 @@ test('os três fatos da página: membros (contagem), cidade e próximo jogo (só
   assert.ok(!JSON.stringify(json).includes('Quadra'), 'o local do jogo nunca sai por um link de convite');
 });
 
+test('"N jogadores" não conta quem só organiza o time', async (t) => {
+  const { pedir } = await montar({
+    membros: [
+      { team_id: TIME, user_id: DONO, role: 'admin', joga: false }, // o dono só organiza
+      { team_id: TIME, user_id: MEMBRO, role: 'member' },
+      { team_id: TIME, user_id: FORA, role: 'member' },
+    ],
+  }, t);
+  const { json } = await pedir();
+  assert.equal(json.membros, 2, '3 membros, um só organiza');
+});
+
 test('time sem jogo agendado e sem cidade: proximoJogo e cidade vêm null, membros continua contando', async (t) => {
   const { pedir } = await montar({ teams: [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc', cor: 'verde' }] }, t);
   const { json } = await pedir();
@@ -191,21 +209,21 @@ test('time sem logo: logo_url e cor_fundo vêm null (a página cai nas iniciais)
   assert.equal(json.team.nome, 'Várzea FC');
 });
 
-test('as consultas do time, de quem convidou, dos usos, do papel, da contagem e do próximo jogo saem JUNTAS (Promise.all)', async (t) => {
+test('as consultas do time, de quem convidou, dos usos, do papel, da contagem, do próximo jogo e de quem só organiza saem JUNTAS (Promise.all)', async (t) => {
   const { pedir, obs } = await montar({ atrasoMs: 60 }, t);
   const inicio = Date.now();
   const { json } = await pedir(TOKEN, MEMBRO);
   const ms = Date.now() - inicio;
   assert.equal(json.jaMembro, true);
-  assert.equal(obs.pico, 6, `pico de consultas simultâneas: ${obs.pico} (o convite vai sozinho, depois as seis juntas)`);
+  assert.equal(obs.pico, 7, `pico de consultas simultâneas: ${obs.pico} (o convite vai sozinho, depois as sete juntas)`);
   // Em fila eram 5 idas (convite, time, quem convidou, usos, papel) = 300 ms só de atraso; juntas são 2 idas (120 ms).
   assert.ok(ms < 280, `levou ${ms} ms — devia ser ~2 idas de 60 ms, não 5`);
 });
 
-test('anônimo: o papel nem é consultado (5 consultas juntas; team_members só para a contagem)', async (t) => {
+test('anônimo: o papel nem é consultado (6 consultas juntas; team_members só para a contagem)', async (t) => {
   const { pedir, obs } = await montar({ atrasoMs: 30 }, t);
   await pedir();
-  assert.equal(obs.pico, 5);
+  assert.equal(obs.pico, 6);
   const dosMembros = (obs.selects.team_members || []).join(' | ');
   assert.ok(!/role/.test(dosMembros), 'sem sessão não há papel para ler — só a contagem toca team_members');
 });

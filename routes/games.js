@@ -9,6 +9,7 @@ const { executarSorteio } = require('../utils/sorteio');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
 const { enviarNotificacao } = require('./push');
+const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 
 const router = express.Router();
 
@@ -434,6 +435,8 @@ router.post(
 
     const role = await getRole(game.teams.id, req.user.id);
     if (!role) throw new HttpError(403, 'Não é membro deste time.');
+    // Rodada 29B (E): quem só organiza o time não entra na lista de presença (desmarcar continua valendo).
+    if (confirmado && (await soOrganiza(game.teams.id, req.user.id))) throw new HttpError(403, MSG_SO_ORGANIZA);
 
     await ensureUserRow(req.user);
 
@@ -478,9 +481,11 @@ router.post(
     // valida que cada user_id é membro da equipa
     const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', game.teams.id);
     const membroIds = new Set((membros || []).map((m) => m.user_id));
+    // Rodada 29B (E): quem só organiza o time não joga — não entra no elenco nem pela checklist do admin.
+    const organizam = await idsQueSoOrganizam(game.teams.id);
     const escolhidos = [];
     for (const j of lista) {
-      if (j && j.user_id && membroIds.has(j.user_id)) escolhidos.push({ game_id: game.id, user_id: j.user_id, confirmado: true, goleiro: !!j.goleiro });
+      if (j && j.user_id && membroIds.has(j.user_id) && !organizam.has(j.user_id)) escolhidos.push({ game_id: game.id, user_id: j.user_id, confirmado: true, goleiro: !!j.goleiro });
     }
     const escolhidosSet = new Set(escolhidos.map((e) => e.user_id));
 
@@ -614,7 +619,9 @@ router.post(
       .eq('team_id', game.teams.id)
       .eq('ativo', false);
     const inativos = new Set((inativosRows || []).map((m) => m.user_id));
-    const confirmados = (gp || []).filter((p) => p.users && !inativos.has(p.users.id));
+    // Rodada 29B (E): o sorteio só recebe quem joga — quem só organiza o time fica de fora (utils/soOrganiza.js).
+    const organizam = await idsQueSoOrganizam(game.teams.id);
+    const confirmados = (gp || []).filter((p) => p.users && !inativos.has(p.users.id) && !organizam.has(p.users.id));
 
     // (o mínimo de 2 times valida-se mais abaixo, já com os convidados contados)
 

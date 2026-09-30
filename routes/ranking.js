@@ -12,6 +12,7 @@ const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
+const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 
 const router = express.Router();
 
@@ -34,7 +35,7 @@ function notaValida(n) {
 async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
   // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado
   // dos outros (13-set, "Velocidade 3": eram 3 awaits em série).
-  const [{ data: membros }, { data: votos }, { data: jogos }] = await Promise.all([
+  const [{ data: membros }, { data: votos }, { data: jogos }, organizam] = await Promise.all([
     // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
     // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
     // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
@@ -46,6 +47,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     // Votos do time (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
     jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
+    idsQueSoOrganizam(teamId), // Rodada 29B (E): quem só organiza o time não aparece no ranking
   ]);
   const gameIds = (jogos || []).map((g) => g.id);
 
@@ -64,7 +66,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
   for (const gp of gps || []) jogosMap[gp.user_id] = (jogosMap[gp.user_id] || 0) + 1;
 
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
-  const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false);
+  const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false && !organizam.has(m.user_id));
 
   const agg = {};
   const minhaNota = {};

@@ -12,6 +12,9 @@ const crypto = require('node:crypto');
 
 const UNICOS_PADRAO = { compras: [['loja', 'transacao_id']] };
 
+// Coluna com caminho pontuado ("teams.brilhante_ativo", o filtro sobre um embed do PostgREST) lê dentro da linha.
+const valorDe = (linha, coluna) => (coluna.includes('.') ? coluna.split('.').reduce((o, k) => o?.[k], linha) : linha[coluna]);
+
 function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null } = {}) {
   const tabelas = {};
   for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map((l) => ({ ...l }));
@@ -36,6 +39,21 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         }
         todas.push(...novas);
         return { data: e.retorna ? novas.map((l) => ({ ...l })) : null, error: null };
+      }
+      if (e.op === 'upsert') {
+        const saida = [];
+        for (const nova of e.linhas) {
+          const i = todas.findIndex((l) => e.onConflict.every((c) => l[c] === nova[c]));
+          if (i >= 0) {
+            if (!e.ignorarDuplicadas) Object.assign(todas[i], nova);
+            saida.push({ ...todas[i] });
+          } else {
+            const criada = { id: crypto.randomUUID(), ...nova };
+            todas.push(criada);
+            saida.push({ ...criada });
+          }
+        }
+        return { data: e.retorna ? saida : null, error: null };
       }
       let alvo = todas.filter(passa);
       if (e.op === 'update') {
@@ -72,8 +90,16 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       },
       insert(linhas) { e.op = 'insert'; e.linhas = Array.isArray(linhas) ? linhas : [linhas]; return api; },
       update(patch) { e.op = 'update'; e.patch = patch; return api; },
+      upsert(linhas, opts = {}) {
+        e.op = 'upsert';
+        e.linhas = Array.isArray(linhas) ? linhas : [linhas];
+        e.onConflict = String(opts.onConflict || 'id').split(',').map((s) => s.trim());
+        e.ignorarDuplicadas = !!opts.ignoreDuplicates;
+        return api;
+      },
       delete() { e.op = 'delete'; return api; },
-      eq(c, v) { e.filtros.push((l) => l[c] === v); return api; },
+      // `colunas`: os nomes filtrados com eq(), para um teste simular "esta coluna não existe" (falhar(tabela, op, e)).
+      eq(c, v) { (e.colunas ||= []).push(c); e.filtros.push((l) => valorDe(l, c) === v); return api; },
       neq(c, v) { e.filtros.push((l) => l[c] !== v); return api; },
       in(c, vs) { e.filtros.push((l) => vs.includes(l[c])); return api; },
       is(c, v) { e.filtros.push((l) => (l[c] ?? null) === v); return api; },
