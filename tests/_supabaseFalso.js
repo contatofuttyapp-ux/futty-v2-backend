@@ -68,6 +68,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         const { col, asc } = e.ordem;
         alvo = [...alvo].sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (asc ? 1 : -1));
       }
+      if (e.faixa) alvo = alvo.slice(e.faixa[0], e.faixa[1] + 1);
       if (e.limite != null) alvo = alvo.slice(0, e.limite);
       return { data: e.head ? null : alvo.map((l) => ({ ...l })), error: null, count: e.count ? alvo.length : undefined };
     }
@@ -108,6 +109,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       lt(c, v) { e.filtros.push((l) => l[c] < v); return api; },
       lte(c, v) { e.filtros.push((l) => l[c] <= v); return api; },
       order(col, { ascending = true } = {}) { e.ordem = { col, asc: ascending }; return api; },
+      range(de, ate) { e.faixa = [de, ate]; return api; },
       limit(n) { e.limite = n; return api; },
       maybeSingle: umSo(false),
       single: umSo(true),

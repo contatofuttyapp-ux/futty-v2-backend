@@ -39,6 +39,8 @@ const TABELAS = [
   'user_avatar_historico', 'convite_usos', 'telemetria_velocidade',
   // Pagamentos P1 (064).
   'compras',
+  // Rodada 29B (068): quem quer ser avisado do lançamento.
+  'avisos_lancamento',
 ];
 
 // Modelo de campeonato N-times (migração 039) — fora de propósito (comentário acima),

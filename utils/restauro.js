@@ -14,7 +14,7 @@ const ORDEM_TABELAS = [
   'convites', 'convite_usos', 'game_players', 'rsvp_espera', 'rsvp_respostas',
   'push_subscriptions', 'campeonatos', 'campeonato_jornadas', 'gols_jogadores',
   'user_blocks', 'share_declarations', 'user_avatar_slots', 'user_avatar_historico',
-  'pedidos_ativacao', 'brilhantes_time', 'compras',
+  'pedidos_ativacao', 'brilhantes_time', 'compras', 'avisos_lancamento',
 ];
 
 const TAMANHO_LOTE = 500;

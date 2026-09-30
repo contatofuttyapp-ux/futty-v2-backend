@@ -15,6 +15,7 @@ const { ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
 const { aplicarCompra, resolverPedidos, novaTransacaoGabinete, ErroCompra, resumirReceita } = require('../utils/compras');
 const { custoDoTimePorMes } = require('../utils/custoPorTime');
 const { organizadoresPorTime } = require('../utils/soOrganiza');
+const { lerTodos: lerAvisosDoLancamento, resumir: resumirAvisos, montarCsv: csvDosAvisos } = require('../utils/aviseMe');
 const { enviarNotificacao } = require('./push');
 const { KITS_IA } = require('./auth');
 const pkg = require('../package.json');
@@ -48,6 +49,7 @@ const RATE_LIMITS_ATIVOS = [
   { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
   { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por utilizador (partilhado)' },
   { rota: 'POST /api/diagnostico', limite: '10/hora por utilizador' },
+  { rota: 'POST /api/avise-me (pública, sem sessão)', limite: '10/hora por IP (o IP não é gravado)' },
 ];
 
 // Série CUMULATIVA por semana (últimas 8): quantos existiam até ao fim de cada semana.
@@ -742,6 +744,31 @@ router.get(
       throw new HttpError(500, error.message);
     }
     res.json({ indisponivel: false, dias, medicoes: 0, por_tela: [], rotas_lentas: [], ...(data || {}) });
+  }),
+);
+
+/**
+ * GET /api/super/gabinete/avise-me — a lista "Avise-me" (Rodada 29B, F; migração 068): total, por origem e os mais
+ * recentes. Com `?formato=csv` devolve o arquivo com TODOS os e-mails (para o dia do lançamento). Só o super-admin.
+ * O ENVIO do "chegou nas lojas" não existe ainda: é no dia do lançamento.
+ */
+router.get(
+  '/api/super/gabinete/avise-me',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const { indisponivel, linhas } = await lerAvisosDoLancamento(supabase);
+    if (indisponivel) {
+      console.warn('[gabinete/avise-me] migração 068 em falta');
+      if (req.query.formato === 'csv') throw new HttpError(409, 'A migração 068 ainda não foi aplicada no Supabase.');
+      return res.json({ indisponivel: true, motivo: 'A migração 068 ainda não foi aplicada no Supabase.', total: 0, por_origem: [], recentes: [] });
+    }
+    if (req.query.formato === 'csv') {
+      const dia = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="avise-me-${dia}.csv"`);
+      return res.send(csvDosAvisos(linhas));
+    }
+    return res.json({ indisponivel: false, ...resumirAvisos(linhas) });
   }),
 );
 

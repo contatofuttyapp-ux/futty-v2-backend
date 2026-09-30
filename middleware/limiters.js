@@ -218,6 +218,22 @@ function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
 }
 
 /**
+ * POST /api/avise-me (Rodada 29B, F): a lista de quem quer ser avisado do lançamento. Pública, sem sessão: conta pelo
+ * IP real (o mesmo da telemetria — pela Cloudflare vem em CF-Connecting-IP), 10 por HORA. Uma pessoa não precisa de mais
+ * que isso; e o IP só vive na memória do limiter, não vai para a tabela.
+ */
+function criarLimiteDeAviseMe({ max = 10 } = {}) {
+  return rateLimit({
+    windowMs: HORA,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveDoPedido,
+    message: { error: 'Você já mandou alguns pedidos nesta hora. Tente de novo mais tarde.' },
+  });
+}
+
+/**
  * POST /api/compras/webhook/revenuecat (Pagamentos P1): sem sessão — a autorização é o segredo
  * no header. Conta por IP real, 120 por minuto.
  */
@@ -235,6 +251,7 @@ function criarLimiteDeWebhook({ limites = LIMITES } = {}) {
 module.exports = {
   criarLimiter,
   criarLimiteDeTelemetria,
+  criarLimiteDeAviseMe,
   criarLimiteDeWebhook,
   conviteLimiter,
   pushAdminLimiter,
