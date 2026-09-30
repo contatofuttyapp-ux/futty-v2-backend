@@ -813,29 +813,30 @@ router.get(
       return res.json({ valido: false, motivo: 'nao_encontrado', team: null });
     }
 
-    const { data: team } = await supabase
-      .from('teams')
-      .select('id, nome, slug, cor')
-      .eq('id', convite.team_id)
-      .single();
-    const { data: inviter } = await supabase
-      .from('users')
-      .select('nome, nome_jogador')
-      .eq('id', convite.criado_por)
-      .maybeSingle();
+    // RODADA 29A (item 11, "o link demora a abrir"): o time, quem convidou, os usos e o papel de quem abre só
+    // dependem do CONVITE, que já foi lido — iam em fila, uma ida a São Paulo atrás da outra (de Lisboa, ~300 ms
+    // cada). Agora saem juntos: 2 idas no total (o convite, depois estas quatro ao mesmo tempo). O select do
+    // time leva também logo_url e cor_fundo, para a página do convite mostrar o escudo de verdade.
+    const [{ data: team }, { data: inviter }, { data: usosRows }, role] = await Promise.all([
+      supabase
+        .from('teams')
+        .select('id, nome, slug, cor, logo_url, cor_fundo')
+        .eq('id', convite.team_id)
+        .single(),
+      supabase
+        .from('users')
+        .select('nome, nome_jogador')
+        .eq('id', convite.criado_por)
+        .maybeSingle(),
+      // RODADA 20 — 'usado' deixou de existir: o link é reutilizável, só 'expirado' (ou 'nao_encontrado',
+      // acima) barra. `usos` é best-effort (migração 058); sem ela, 0 — nunca derruba a validação do convite.
+      supabase.from('convite_usos').select('user_id').eq('convite_id', convite.id),
+      req.user ? getRole(convite.team_id, req.user.id) : null,
+    ]);
 
-    // RODADA 20 — 'usado' deixou de existir: o link é reutilizável, só
-    // 'expirado' (ou 'nao_encontrado', acima) barra. `usos` é best-effort
-    // (migração 058); sem ela, 0 — nunca derruba a validação do convite.
     const motivo = new Date(convite.expires_at).getTime() < Date.now() ? 'expirado' : null;
-    const { data: usosRows } = await supabase.from('convite_usos').select('user_id').eq('convite_id', convite.id);
     const usos = (usosRows || []).length;
-
-    let jaMembro = false;
-    if (req.user && team) {
-      const role = await getRole(team.id, req.user.id);
-      jaMembro = !!role;
-    }
+    const jaMembro = !!(req.user && team && role);
 
     res.json({
       valido: motivo === null,
@@ -845,7 +846,7 @@ router.get(
       convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
       expires_at: convite.expires_at,
       usos,
-      team: team ? { nome: team.nome, slug: team.slug, cor: team.cor } : null,
+      team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null } : null,
     });
   })
 );
