@@ -101,9 +101,9 @@ async function limpar() {
   ]);
   if (erroMembros) { console.error('team_members:', erroMembros.message); process.exit(1); }
 
-  // O dono cria o time por fora, portanto não passa pelo POST /api/teams —
-  // logo não recebe o presente do criador. É de propósito: esta prova é do
-  // PACOTE, e um crédito solto no dono mascararia o direito que se quer medir.
+  // O dono cria o time por fora, portanto não passa pelo POST /api/teams.
+  // É de propósito: esta prova é do PACOTE, e um crédito solto no dono
+  // mascararia o direito que se quer medir.
   const sessoes = { time, ids };
   for (const papel of Object.keys(PAPEIS)) sessoes[papel] = await sessaoDe(PAPEIS[papel]);
 

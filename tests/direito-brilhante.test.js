@@ -112,50 +112,87 @@ test('o time manda à frente do crédito — o direito do time é grátis e tem 
   assert.equal(d.opcoes[1].fonte, 'credito');
 });
 
-// ─── 2B. PACOTE COM SALDO (RODADAS 21/22, migração 059) ──────────────────────
-// O pacote passou a dar 5 gerações por jogador (era 1): `geracoes` conta
+// ─── 2B. PACOTE COM SALDO (RODADAS 21/22/29A, migrações 059 e 065) ───────────
+// O pacote dá 2 gerações por jogador (Rodada 29A — "nunca prejuízo"; eram 5): `geracoes` conta
 // quantas essa pessoa já usou NESTE time, e o direito só acaba quando bate no
 // `teams.brilhante_por_jogador`.
-test('pacote com 4 de 5 gerações usadas → ainda tem direito, restantes=1', async () => {
+const TIME_DE_2 = { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 2 };
+
+test('pacote com 1 de 2 gerações usadas → ainda tem direito, restantes=1', async () => {
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
-    if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
+    if (tabela === 'brilhantes_time') {
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 1 });
     }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, 'time');
+  assert.equal(d.restantes, 1, 'usou 1 de 2 — resta 1');
+});
+
+test('pacote novo (nenhuma geração usada) → restantes=2', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
+    if (tabela === 'brilhantes_time') return estado.count ? semErro(null, { count: 3 }) : semErro(null);
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, 'time');
+  assert.equal(d.restantes, 2, 'o pacote dá 2 por jogador');
+});
+
+test('pacote com as 2 gerações usadas → sem direito (a 3ª é recusada)', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
+    if (tabela === 'brilhantes_time') {
+      return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 2 });
+    }
+    return semErro(null);
+  });
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.fonte, null, 'as 2 gerações do pacote já foram usadas — nada de uma 3ª');
+  assert.equal(d.restantes, 0);
+});
+
+test('quem já gastou MAIS de 2 antes da mudança (5 → 2): sem direito e restantes nunca negativo', async () => {
+  const { mod } = carregarCom((tabela, estado) => {
+    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
     if (tabela === 'brilhantes_time') {
       return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 4 });
     }
     return semErro(null);
   });
   const d = await mod.temDireito(PESSOA);
-  assert.equal(d.fonte, 'time');
-  assert.equal(d.restantes, 1, 'usou 4 de 5 — resta 1');
+  assert.equal(d.fonte, null, '4 usadas num pacote de 2: nada de geração nova');
+  assert.equal(d.restantes, 0, 'o contador nunca mostra −2');
+  assert.ok(d.opcoes.every((o) => o.restantes >= 0));
 });
 
-test('pacote com as 5 gerações usadas → sem direito (a 6ª é recusada)', async () => {
+test('quem gastou mais de 2 mas tem crédito: o crédito segue valendo e restantes é o do crédito', async () => {
   const { mod } = carregarCom((tabela, estado) => {
-    if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
-    if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
-    }
+    if (tabela === 'users') return semErro({ brilhante_creditos: 3 });
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
     if (tabela === 'brilhantes_time') {
       return estado.count ? semErro(null, { count: 5 }) : semErro({ user_id: PESSOA, geracoes: 5 });
     }
     return semErro(null);
   });
   const d = await mod.temDireito(PESSOA);
-  assert.equal(d.fonte, null, 'as 5 gerações do pacote já foram usadas — nada de uma 6ª');
-  assert.equal(d.restantes, 0);
+  assert.equal(d.fonte, 'credito');
+  assert.equal(d.restantes, 3);
 });
 
-test('refazer (2ª a 5ª geração) não esbarra no tecto de 25 JOGADORES — só um jogador novo esbarra', async () => {
+test('refazer (2ª geração) não esbarra no tecto de 25 JOGADORES — só um jogador novo esbarra', async () => {
   // Time já tem 25 jogadores (tecto batido), mas a pessoa já é UM DELES (só
-  // usou 1 das 5) — refazer não é "mais um jogador", é a mesma vaga de novo.
+  // usou 1 das 2) — refazer não é "mais um jogador", é a mesma vaga de novo.
   const { mod } = carregarCom((tabela, estado) => {
     if (tabela === 'users') return semErro({ brilhante_creditos: 0 });
-    if (tabela === 'team_members') {
-      return semErro([{ team_id: TIME, teams: { id: TIME, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: 5 } }]);
-    }
+    if (tabela === 'team_members') return semErro([{ team_id: TIME, teams: TIME_DE_2 }]);
     if (tabela === 'brilhantes_time') {
       return estado.count ? semErro(null, { count: 25 }) : semErro({ user_id: PESSOA, geracoes: 1 });
     }
@@ -163,7 +200,7 @@ test('refazer (2ª a 5ª geração) não esbarra no tecto de 25 JOGADORES — s�
   });
   const d = await mod.temDireito(PESSOA);
   assert.equal(d.fonte, 'time', 'time cheio não pode travar quem já está dentro dele');
-  assert.equal(d.restantes, 4);
+  assert.equal(d.restantes, 1);
 });
 
 test('migração 059 (coluna geracoes) ainda não rodou → comportamento antigo: 1 linha = já usou a única que se sabia dar', async () => {
@@ -369,25 +406,14 @@ test('debitar que falha NÃO derruba nada — a pessoa fica com a figurinha', as
   assert.equal(ok, false, 'devolve false e segue: cobrar sem entregar seria pior do que entregar sem cobrar');
 });
 
-// ─── Presente do criador (RODADA 21: 1 → 3) ──────────────────────────────────
-test('presentearCriador dá 3 créditos (era 1) a quem cria o 1º time', async () => {
-  let patch = null;
-  const { mod } = carregarCom((tabela, estado) => {
-    if (tabela === 'users' && estado.patch) { patch = estado.patch; return semErro(null); }
-    if (tabela === 'users') return semErro({ brilhante_creditos: 0, presente_criador_em: null });
-    return semErro(null);
-  });
-  const deu = await mod.presentearCriador(PESSOA);
-  assert.equal(deu, true);
-  assert.equal(patch.brilhante_creditos, 3, 'RODADA 21 — o presente subiu de 1 para 3');
-  assert.equal(mod.PRESENTE_CRIADOR_CREDITOS, 3);
+// ─── Presente do criador: ABOLIDO (dono, 26-set; Rodada 29A) ─────────────────
+test('o presente do criador não existe mais no módulo', () => {
+  const { mod } = carregarCom(() => semErro(null));
+  assert.equal(mod.presentearCriador, undefined, 'conta grátis não gera nada, nunca');
+  assert.equal(mod.PRESENTE_CRIADOR_CREDITOS, undefined);
 });
 
-test('presentearCriador não dá 2 vezes — quem já recebeu não ganha de novo', async () => {
-  const { mod } = carregarCom((tabela) => {
-    if (tabela === 'users') return semErro({ brilhante_creditos: 3, presente_criador_em: '2026-09-24T00:00:00.000Z' });
-    return semErro(null);
-  });
-  const deu = await mod.presentearCriador(PESSOA);
-  assert.equal(deu, false, 'presente_criador_em já preenchido — é uma vez na vida');
+test('POST /api/teams não devolve mais presente_brilhante nem chama presentearCriador', () => {
+  const fonte = require('node:fs').readFileSync(path.join(__dirname, '..', 'routes', 'teams.js'), 'utf8');
+  assert.ok(!/presente_brilhante|presentearCriador/.test(fonte), 'criar time não dá nada de graça');
 });

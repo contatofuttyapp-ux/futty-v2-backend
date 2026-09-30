@@ -2,14 +2,16 @@
 //
 // Desde 22-set toda geração de IA nasce paga. Há dois direitos:
 //
-//   1. CRÉDITO  `users.brilhante_creditos > 0` — comprou a "Minha Brilhante"
-//      (+10, Rodada 21) ou ganhou o presente de criador de time (+3, Rodada
-//      21, uma vez na vida). O uniforme é à escolha entre os 5.
+//   1. CRÉDITO  `users.brilhante_creditos > 0` — comprou a "Minha Figurinha"
+//      (+10) ou recebeu crédito à mão pelo Gabinete. O uniforme é à escolha
+//      entre os 5. (O presente do criador de time, +3 ao criar o time, foi
+//      ABOLIDO em 26-set pelo dono: conta grátis não gera nada, nunca.)
 //   2. TIME     é membro de um time com `teams.brilhante_ativo` e ainda tem
 //      geração no pacote: sem linha em `brilhantes_time` para
-//      (team_id, user_id) OU `geracoes < teams.brilhante_por_jogador` (5,
-//      migração 059), dentro de `teams.brilhante_limite` (25 jogadores). O
-//      uniforme é o do time (`teams.brilhante_kit`), fixado pelo dono.
+//      (team_id, user_id) OU `geracoes < teams.brilhante_por_jogador` (2,
+//      migração 065; era 5 na 059), dentro de `teams.brilhante_limite` (25
+//      jogadores). O uniforme é o do time (`teams.brilhante_kit`), fixado
+//      pelo dono.
 //
 // Depende da migração 054. SEM ela aplicada tudo aqui falha SEGURO: devolve
 // `{ fonte: null }` e regista um aviso — ninguém gera, ninguém gasta dinheiro.
@@ -25,7 +27,7 @@ const { supabase } = require('./db');
 
 /** O erro é "a coluna/tabela ainda não existe" e não um problema real? */
 function ehMigracaoEmFalta(mensagem = '') {
-  return /brilhante|pedidos_ativacao|manto_proprio|presente_criador|does not exist|schema cache/i.test(mensagem);
+  return /brilhante|pedidos_ativacao|manto_proprio|does not exist|schema cache/i.test(mensagem);
 }
 
 /**
@@ -131,6 +133,8 @@ async function temDireito(userId) {
       // Fail-safe: `brilhante_por_jogador` também some se a 059 não rodou —
       // 1 mantém o comportamento de antes dela (uma geração por jogador).
       const porJogador = Number(time.brilhante_por_jogador) || 1;
+      // Rodada 29A: o pacote caiu de 5 para 2. Quem já tinha gasto mais de 2 antes da mudança
+      // fica sem geração nova — e `restantes` nunca sai negativo (clamp em 0 logo abaixo).
       if (usadas >= porJogador) continue;
       // O time ainda cabe no tecto de JOGADORES (25), não de gerações: uma
       // pessoa que já gerou conta 1 só, mesmo tendo refeito 2 vezes.
@@ -141,7 +145,7 @@ async function temDireito(userId) {
       if (erroConta) throw new Error(erroConta.message);
       const limite = Number(time.brilhante_limite) || 25;
       if ((count || 0) >= limite && usadas === 0) continue; // já tem linha: refazer não esbarra no tecto de jogadores
-      opcoes.push({ fonte: 'time', teamId: time.id, kitId: time.brilhante_kit, restantes: porJogador - usadas });
+      opcoes.push({ fonte: 'time', teamId: time.id, kitId: time.brilhante_kit, restantes: Math.max(0, porJogador - usadas) });
     }
   } catch (e) {
     console.warn('[direitoBrilhante] direito de time indisponível (migração 054 aplicada?):', e.message);
@@ -149,7 +153,7 @@ async function temDireito(userId) {
     // Sem a tabela do pacote fica só o crédito — que já foi lido acima.
   }
 
-  if (creditos > 0) opcoes.push({ fonte: 'credito', teamId: null, kitId: null, restantes: creditos });
+  if (creditos > 0) opcoes.push({ fonte: 'credito', teamId: null, kitId: null, restantes: Math.max(0, creditos) });
 
   const escolhido = opcoes[0] || { fonte: null, teamId: null, kitId: null, restantes: 0 };
   return { ...escolhido, creditos, opcoes };
@@ -199,7 +203,7 @@ async function somarCreditos(userId, qtd, cliente = supabase) {
 async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
   try {
     if (direito?.fonte === 'time') {
-      // Rodadas 21/22 — o pacote passou a dar 5 gerações por jogador, não 1:
+      // Rodadas 21/22/29A — o pacote dá várias gerações por jogador (2 desde a 29A), não 1:
       // `geracoes` conta quantas essa pessoa já usou NESTE time, e o upsert
       // tem de a SOMAR, não substituir. Lê-e-escreve (uma pessoa não gera
       // duas ao mesmo tempo) — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
@@ -234,39 +238,4 @@ async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
   return false;
 }
 
-// Rodada 21 (24-set): o presente do criador subiu de 1 para 3 gerações.
-const PRESENTE_CRIADOR_CREDITOS = 3;
-
-/**
- * O presente de quem cria o primeiro time: +3 créditos (Rodada 21), uma vez
- * na vida (`users.presente_criador_em`). Devolve true se o presente foi dado
- * agora. Best-effort: um time nunca deixa de ser criado por causa disto.
- */
-async function presentearCriador(userId) {
-  try {
-    const { data, error } = await supabase
-      .from('users')
-      .select('brilhante_creditos, presente_criador_em')
-      .eq('id', userId)
-      .maybeSingle();
-    if (error) throw new Error(error.message);
-    if (data?.presente_criador_em) return false; // já recebeu
-
-    const { error: erroUpd } = await supabase
-      .from('users')
-      .update({
-        brilhante_creditos: (Number(data?.brilhante_creditos) || 0) + PRESENTE_CRIADOR_CREDITOS,
-        presente_criador_em: new Date().toISOString(),
-      })
-      .eq('id', userId)
-      .is('presente_criador_em', null); // corrida: só ganha quem chegar primeiro
-    if (erroUpd) throw new Error(erroUpd.message);
-    console.log('[direitoBrilhante] presente do criador dado', { userId });
-    return true;
-  } catch (e) {
-    console.warn('[direitoBrilhante] presente do criador não dado (migração 054 aplicada?):', e.message);
-    return false;
-  }
-}
-
-module.exports = { temDireito, debitar, somarCreditos, presentearCriador, ehMigracaoEmFalta, somarCusto, PRESENTE_CRIADOR_CREDITOS };
+module.exports = { temDireito, debitar, somarCreditos, ehMigracaoEmFalta, somarCusto };

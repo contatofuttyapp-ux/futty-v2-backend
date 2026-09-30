@@ -488,7 +488,7 @@ router.get(
 
       const { data: comCredito, error: erroCredito } = await supabase
         .from('users')
-        .select('id, nome_jogador, email, brilhante_creditos, presente_criador_em')
+        .select('id, nome_jogador, email, brilhante_creditos')
         .gt('brilhante_creditos', 0)
         .order('brilhante_creditos', { ascending: false });
       if (erroCredito) throw new Error(erroCredito.message);
@@ -540,7 +540,6 @@ router.get(
           nome: u.nome_jogador || null,
           email: u.email,
           creditos: Number(u.brilhante_creditos) || 0,
-          presente_criador_em: u.presente_criador_em || null,
         })),
         compras, // null = migração 064 por correr
       });

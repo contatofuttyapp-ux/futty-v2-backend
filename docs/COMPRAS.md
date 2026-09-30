@@ -25,6 +25,10 @@ app (SDK RevenueCat) → App Store / Play Store cobra
 
 O pacote comprado na loja herda o uniforme que o time já tiver. Se não tiver, liga com o uniforme vazio (ninguém gera ainda) e o **dono escolhe** logo depois da compra (P2: `PUT /api/teams/:slug/brilhante-kit` — só o admin, só com o pacote ativo, trocar só antes da 1ª geração; o Início mostra o recado enquanto faltar). O Gabinete também fixa ("Ativar pacote" num time já ativo só grava o uniforme).
 
+**Quanto o pacote dá (Rodada 29A, 30-set — "nunca prejuízo", dono 26-set):** **2 gerações por jogador** (`teams.brilhante_por_jogador`, padrão 2 pela migração `065_pacote_2_geracoes.sql`; eram 5), até 25 jogadores, só o uniforme do time. Pior caso: 50 gerações × US$0,112 = US$5,60 contra US$8,18 que sobram depois dos 15% da loja (margem de 31%). Quem já tinha gasto mais de 2 antes da mudança fica sem geração nova — nunca com saldo negativo (`restantes` é limitado a 0). A Minha Figurinha dá 10 gerações (US$1,12 de custo máximo contra US$1,62 que sobram).
+
+**Não existe presente do criador:** criar um time não dá geração nenhuma (abolido em 26-set). `users.presente_criador_em` fica na tabela só como histórico, ninguém mais escreve nela; quem já recebeu as 3 gerações mantém o que tem. `POST /api/teams` devolve só `{ team }`.
+
 O manto comprado na loja cria o pedido `manto` pendente do time: é a fila do Gabinete, e o app mostra "Manto pedido — a gente desenha e avisa" em vez de vender de novo.
 
 ## Eventos do webhook

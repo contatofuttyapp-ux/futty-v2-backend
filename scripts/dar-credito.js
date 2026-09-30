@@ -47,12 +47,12 @@ async function ativarPacote(slug, kit) {
 async function mostrar(email) {
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, nome_jogador, brilhante_creditos, presente_criador_em')
+    .select('id, email, nome_jogador, brilhante_creditos')
     .eq('email', email)
     .maybeSingle();
   if (error) { console.error('erro (migração 054 aplicada?):', error.message); process.exit(1); }
   if (!data) { console.error(`conta "${email}" não existe.`); process.exit(1); }
-  console.log(`${data.email} · créditos: ${data.brilhante_creditos ?? '—'} · presente do criador: ${data.presente_criador_em || 'ainda não'}`);
+  console.log(`${data.email} · créditos: ${data.brilhante_creditos ?? '—'}`);
   return data;
 }
 
