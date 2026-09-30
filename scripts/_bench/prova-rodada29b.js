@@ -10,6 +10,7 @@
 // Parte C (boas-vindas do time): dois MEMBROS (não-admin) do time "gratis":
 //   novato     sem foto nenhuma (avatar_url nulo)  → a 1ª visita à página do time abre as boas-vindas
 //   membroFoto com foto                            → só abre logo depois de aceitar um convite (state.primeiraEntrada)
+// Parte E ("só organizo"): o time "gratis" tem um jogo futuro (id em sessao-rodada29b.json → jogo) para as telas de presença.
 // Nada gera figurinha (custo de IA zero): as "figurinhas" são PNGs desenhados aqui, com `-ai-` no nome como as de verdade.
 // Tudo @futtymock; os times são só desta rodada. Só servidor LOCAL (CLAUDE.md, 25-set).
 //
@@ -189,11 +190,17 @@ async function subirFigurinha(userId, kit, corCamisa) {
     const { error } = await supabase.from('team_members').insert({ team_id: times.gratis.id, user_id: ids[papel], role: 'member', categoria: 'linha', pode_postar: true });
     if (error) throw new Error(`team_members ${papel}: ${error.message}`);
   }
-  ok('times criados (o de pacote fig já gastou 1 geração); novato e membroFoto entraram no time grátis.');
+  // Um jogo futuro no time "gratis" (a tela do jogo e o card do Início precisam de um jogo de verdade).
+  const { data: jogo, error: eJogo } = await supabase.from('games')
+    .insert({ team_id: times.gratis.id, data: new Date(Date.now() + 3 * 86400000).toISOString(), local: 'Quadra da prova 29B', status: 'agendado', jogadores_por_time: 5 })
+    .select().single();
+  if (eJogo) throw new Error(`games: ${eJogo.message}`);
+  ok('times criados (o de pacote fig já gastou 1 geração); novato e membroFoto entraram no time grátis; um jogo futuro no time grátis.');
 
   const sessoes = {
     ids,
     times: Object.fromEntries(Object.entries(times).map(([k, t]) => [k, { id: t.id, slug: t.slug }])),
+    jogo: { id: jogo.id, team_id: times.gratis.id },
     gratis: await sessaoDe(CONTAS.gratis.email),
     pacote: await sessaoDe(CONTAS.pacote.email),
     pacoteFig: await sessaoDe(CONTAS.pacoteFig.email),
