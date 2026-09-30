@@ -7,6 +7,9 @@
 //   2. o select do time pede logo_url e cor_fundo e a resposta os devolve (null quando o time não tem);
 //   3. o contrato de sempre continua igual: válido/expirado/não encontrado, autenticado, jaMembro, usos, convidadoPor.
 //
+// RODADA 29B (A): a página do convite mostra três fatos — `membros` (contagem), `proximoJogo` (o próximo agendado, só a
+// data) e `cidade` — e eles entram na MESMA leva paralela: 6 consultas juntas (5 sem sessão), ainda 2 idas no total.
+//
 // Uso: npm test  (ou: node --test tests/convite-rota.test.js)
 const path = require('node:path');
 const { test } = require('node:test');
@@ -22,6 +25,8 @@ const FORA = '55555555-5555-5555-5555-555555555555';
 const TOKEN = 'token-de-teste';
 const AMANHA = new Date(Date.now() + 86400000).toISOString();
 const ONTEM = new Date(Date.now() - 86400000).toISOString();
+const SABADO = new Date(Date.now() + 3 * 86400000).toISOString();
+const DOMINGO = new Date(Date.now() + 4 * 86400000).toISOString();
 
 /** Envolve o cliente falso: atraso por consulta, pico de consultas em voo e os select() pedidos por tabela. */
 function observar(cliente, atrasoMs = 0) {
@@ -63,10 +68,11 @@ function observar(cliente, atrasoMs = 0) {
 }
 
 /** Sobe o router de equipas com o Supabase falso por baixo e devolve um `pedir(token, usuario)`. */
-async function montar({ teams, atrasoMs = 0, convites = null } = {}, t) {
+async function montar({ teams, atrasoMs = 0, convites = null, games = null } = {}, t) {
   const { cliente: falso } = criarSupabaseFalso({
     convites: convites || [{ id: CONVITE, token: TOKEN, team_id: TIME, criado_por: DONO, expires_at: AMANHA }],
-    teams: teams || [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc', cor: '#8b5cf6', logo_url: 'https://x.supabase.co/storage/v1/object/public/avatars/logos/t.png?v=1', cor_fundo: '#1a1a2e' }],
+    teams: teams || [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc', cor: '#8b5cf6', logo_url: 'https://x.supabase.co/storage/v1/object/public/avatars/logos/t.png?v=1', cor_fundo: '#1a1a2e', cidade: 'Belo Horizonte' }],
+    games: games || [],
     users: [{ id: DONO, nome: 'Antônio Silva', nome_jogador: 'Tonhão' }],
     convite_usos: [{ convite_id: CONVITE, user_id: MEMBRO }, { convite_id: CONVITE, user_id: FORA }],
     team_members: [{ team_id: TIME, user_id: DONO, role: 'admin' }, { team_id: TIME, user_id: MEMBRO, role: 'member' }],
@@ -143,12 +149,38 @@ test('convite válido, anônimo: devolve o time COM logo_url e cor_fundo, quem c
   });
 });
 
-test('o select do time pede logo_url e cor_fundo', async (t) => {
+test('os três fatos da página: membros (contagem), cidade e próximo jogo (só a data, nunca o local)', async (t) => {
+  const { pedir } = await montar({
+    games: [
+      { id: 'g-velho', team_id: TIME, data: ONTEM, status: 'terminado', local: 'Quadra velha' },
+      { id: 'g-cancelado', team_id: TIME, data: SABADO, status: 'cancelado', local: 'Quadra cancelada' },
+      { id: 'g-domingo', team_id: TIME, data: DOMINGO, status: 'agendado', local: 'Quadra do Zé' },
+      { id: 'g-sabado', team_id: TIME, data: SABADO, status: 'agendado', local: 'Quadra do Tonhão' },
+      { id: 'g-outro-time', team_id: FORA, data: new Date(Date.now() + 3600000).toISOString(), status: 'agendado' },
+    ],
+  }, t);
+  const { json } = await pedir();
+  assert.equal(json.membros, 2, 'DONO + MEMBRO');
+  assert.equal(json.cidade, 'Belo Horizonte');
+  assert.equal(json.proximoJogo, SABADO, 'o primeiro AGENDADO daqui pra frente: nem o passado, nem o cancelado, nem o de outro time');
+  assert.ok(!JSON.stringify(json).includes('Quadra'), 'o local do jogo nunca sai por um link de convite');
+});
+
+test('time sem jogo agendado e sem cidade: proximoJogo e cidade vêm null, membros continua contando', async (t) => {
+  const { pedir } = await montar({ teams: [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc', cor: 'verde' }] }, t);
+  const { json } = await pedir();
+  assert.equal(json.proximoJogo, null);
+  assert.equal(json.cidade, null);
+  assert.equal(json.membros, 2);
+});
+
+test('o select do time pede logo_url, cor_fundo e cidade', async (t) => {
   const { pedir, obs } = await montar({}, t);
   await pedir();
   const doTime = (obs.selects.teams || []).join(' | ');
   assert.match(doTime, /logo_url/);
   assert.match(doTime, /cor_fundo/);
+  assert.match(doTime, /cidade/);
 });
 
 test('time sem logo: logo_url e cor_fundo vêm null (a página cai nas iniciais)', async (t) => {
@@ -159,22 +191,23 @@ test('time sem logo: logo_url e cor_fundo vêm null (a página cai nas iniciais)
   assert.equal(json.team.nome, 'Várzea FC');
 });
 
-test('as consultas do time, de quem convidou, dos usos e do papel saem JUNTAS (Promise.all)', async (t) => {
+test('as consultas do time, de quem convidou, dos usos, do papel, da contagem e do próximo jogo saem JUNTAS (Promise.all)', async (t) => {
   const { pedir, obs } = await montar({ atrasoMs: 60 }, t);
   const inicio = Date.now();
   const { json } = await pedir(TOKEN, MEMBRO);
   const ms = Date.now() - inicio;
   assert.equal(json.jaMembro, true);
-  assert.equal(obs.pico, 4, `pico de consultas simultâneas: ${obs.pico} (o convite vai sozinho, depois as quatro juntas)`);
+  assert.equal(obs.pico, 6, `pico de consultas simultâneas: ${obs.pico} (o convite vai sozinho, depois as seis juntas)`);
   // Em fila eram 5 idas (convite, time, quem convidou, usos, papel) = 300 ms só de atraso; juntas são 2 idas (120 ms).
   assert.ok(ms < 280, `levou ${ms} ms — devia ser ~2 idas de 60 ms, não 5`);
 });
 
-test('anônimo: o papel nem é consultado (3 consultas juntas, sem team_members)', async (t) => {
+test('anônimo: o papel nem é consultado (5 consultas juntas; team_members só para a contagem)', async (t) => {
   const { pedir, obs } = await montar({ atrasoMs: 30 }, t);
   await pedir();
-  assert.equal(obs.pico, 3);
-  assert.ok(!obs.consultas.includes('team_members'), 'sem sessão não há papel para ler');
+  assert.equal(obs.pico, 5);
+  const dosMembros = (obs.selects.team_members || []).join(' | ');
+  assert.ok(!/role/.test(dosMembros), 'sem sessão não há papel para ler — só a contagem toca team_members');
 });
 
 test('quem abre logado: membro → jaMembro true; quem não é → false; autenticado sempre true', async (t) => {

@@ -815,12 +815,15 @@ router.get(
 
     // RODADA 29A (item 11, "o link demora a abrir"): o time, quem convidou, os usos e o papel de quem abre só
     // dependem do CONVITE, que já foi lido — iam em fila, uma ida a São Paulo atrás da outra (de Lisboa, ~300 ms
-    // cada). Agora saem juntos: 2 idas no total (o convite, depois estas quatro ao mesmo tempo). O select do
+    // cada). Agora saem juntos: 2 idas no total (o convite, depois estas ao mesmo tempo). O select do
     // time leva também logo_url e cor_fundo, para a página do convite mostrar o escudo de verdade.
-    const [{ data: team }, { data: inviter }, { data: usosRows }, role] = await Promise.all([
+    // RODADA 29B (A): a página nova mostra 3 fatos para dar vontade de entrar — quantos já estão no time, quando é o
+    // próximo jogo e de que cidade. Entram na MESMA leva (a cidade vem no select do time; a contagem e o próximo
+    // jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
+    const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }] = await Promise.all([
       supabase
         .from('teams')
-        .select('id, nome, slug, cor, logo_url, cor_fundo')
+        .select('id, nome, slug, cor, logo_url, cor_fundo, cidade')
         .eq('id', convite.team_id)
         .single(),
       supabase
@@ -832,6 +835,18 @@ router.get(
       // acima) barra. `usos` é best-effort (migração 058); sem ela, 0 — nunca derruba a validação do convite.
       supabase.from('convite_usos').select('user_id').eq('convite_id', convite.id),
       req.user ? getRole(convite.team_id, req.user.id) : null,
+      supabase.from('team_members').select('user_id', { count: 'exact', head: true }).eq('team_id', convite.team_id),
+      // Próximo jogo = o primeiro ainda agendado daqui pra frente (cancelado/terminado não contam). Só a DATA sai
+      // daqui: o local do jogo nunca vai para quem só tem o link.
+      supabase
+        .from('games')
+        .select('data')
+        .eq('team_id', convite.team_id)
+        .eq('status', 'agendado')
+        .gte('data', new Date().toISOString())
+        .order('data', { ascending: true })
+        .limit(1)
+        .maybeSingle(),
     ]);
 
     const motivo = new Date(convite.expires_at).getTime() < Date.now() ? 'expirado' : null;
@@ -846,6 +861,11 @@ router.get(
       convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
       expires_at: convite.expires_at,
       usos,
+      // Os fatos da página (29B, A): `membros` é a contagem, `proximoJogo` o instante do próximo jogo agendado
+      // (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin declarou.
+      membros: membrosTotal ?? 0,
+      proximoJogo: proximo?.data || null,
+      cidade: team?.cidade || null,
       team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null } : null,
     });
   })
