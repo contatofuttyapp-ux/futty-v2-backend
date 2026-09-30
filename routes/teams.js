@@ -10,7 +10,7 @@ const { obterTeams, obterPedidos } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
 const { verificarImagemReal } = require('../utils/imagemReal');
-const { geocodar } = require('../utils/geocode');
+const { resolverCidade, lerEscolhaDaLista, normalizarCidade, condicaoPorCidade } = require('../utils/cidade');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
@@ -58,23 +58,20 @@ router.post(
   '/api/teams',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { nome, cor, publica, localizacao, descricao, cidade } = req.body || {};
+    const { nome, cor, publica, localizacao, descricao } = req.body || {};
     if (!nome || !nome.trim()) throw new HttpError(400, 'O nome do time é obrigatório.');
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
 
-    // GEO (14-set, mesma regra do PATCH /api/teams/:slug): guarda o nome da
-    // CIDADE (texto) + geocodifica (Nominatim) → geo_lat/geo_lng ARREDONDADOS
-    // no servidor (a morada exacta nunca entra). Se a geocodificação falhar,
-    // guarda só o texto e segue — nunca bloqueia a criação do time por isso.
-    const cidadeFinal = cidade ? String(cidade).trim().slice(0, 100) : null;
-    let geoLat = null;
-    let geoLng = null;
-    if (cidadeFinal) {
-      const g = await geocodar(cidadeFinal);
-      if (g) { geoLat = g.lat; geoLng = g.lng; }
-    }
+    // GEO (14-set, mesma regra do PATCH /api/teams/:slug): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO
+    // (a morada exacta nunca entra). RODADA 29B (D), regra completa em utils/cidade.js: cidade DA LISTA do app →
+    // a coordenada vem da lista (sem Nominatim); fora dela → Nominatim; se nada achar, guarda só o texto (normalizado
+    // em `cidade_normalizada`, para o Explorar casar por texto) e segue — nunca bloqueia a criação do time.
+    const cid = await resolverCidade(req.body || {});
+    const cidadeFinal = cid.cidade;
+    const geoLat = cid.geo?.lat ?? null;
+    const geoLng = cid.geo?.lng ?? null;
 
     await ensureUserRow(req.user);
 
@@ -83,22 +80,30 @@ router.post(
     let lastError = null;
     for (let attempt = 0; attempt < 3 && !team; attempt += 1) {
       const slug = slugify(nome);
+      const linhaDoTime = {
+        nome: nome.trim(),
+        slug,
+        cor: corFinal,
+        criado_por: req.user.id,
+        publica: !!publica,
+        localizacao: localizacaoFinal,
+        descricao: descricaoFinal,
+      };
+      const colunasDaCidade = { cidade: cidadeFinal, cidade_normalizada: cid.normalizada, geo_lat: geoLat, geo_lng: geoLng };
       let { data, error } = await supabase
         .from('teams')
-        .insert({
-          nome: nome.trim(),
-          slug,
-          cor: corFinal,
-          criado_por: req.user.id,
-          publica: !!publica,
-          localizacao: localizacaoFinal,
-          descricao: descricaoFinal,
-          cidade: cidadeFinal,
-          geo_lat: geoLat,
-          geo_lng: geoLng,
-        })
+        .insert({ ...linhaDoTime, ...colunasDaCidade })
         .select()
         .single();
+      // Migração 066 por aplicar: sem `cidade_normalizada` o resto da cidade (texto e ponto) continua a valer.
+      if (error && /cidade_normalizada/i.test(error.message || '')) {
+        const { cidade_normalizada: _sem066, ...semNormalizada } = colunasDaCidade; // eslint-disable-line no-unused-vars
+        ({ data, error } = await supabase
+          .from('teams')
+          .insert({ ...linhaDoTime, ...semNormalizada })
+          .select()
+          .single());
+      }
       // Resiliência: se as colunas geo ainda não existirem, repete sem elas
       // (mesmo fallback do PATCH /api/teams/:slug).
       if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
@@ -132,7 +137,8 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    res.status(201).json({ team });
+    // `geo` (29B, D): o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
+    res.status(201).json({ team, ...(cid.info ? { geo: cid.info } : {}) });
   })
 );
 
@@ -160,24 +166,33 @@ router.get(
 
     // geo_lat/geo_lng (arredondados) vão no payload → o cliente calcula a distância
     // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
-    let query = supabase
-      .from('teams')
-      .select('id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng')
-      .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
-    // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
-    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
-    // string de filtro do .or() — vírgula separa condições, parênteses
-    // agrupam, ponto separa coluna.operador.valor no PostgREST; um q com esses
-    // caracteres conseguia adicionar/alterar condições do filtro. O PostgREST
-    // suporta valores com esses caracteres se o valor inteiro vier entre aspas
-    // duplas — é o que valorFiltroOr faz quando encontra algum deles.
-    if (q) {
-      const padrao = valorFiltroOr(`%${q}%`);
-      query = query.or(`nome.ilike.${padrao},localizacao.ilike.${padrao}`);
-    }
-    if (loc) query = query.ilike('localizacao', `%${loc}%`);
+    const COLUNAS = 'id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
+    const montar = (comNormalizada) => {
+      let query = supabase
+        .from('teams')
+        .select(comNormalizada ? `${COLUNAS}, cidade_normalizada` : COLUNAS)
+        .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
+      // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
+      // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
+      // string de filtro do .or() — vírgula separa condições, parênteses
+      // agrupam, ponto separa coluna.operador.valor no PostgREST; um q com esses
+      // caracteres conseguia adicionar/alterar condições do filtro. O PostgREST
+      // suporta valores com esses caracteres se o valor inteiro vier entre aspas
+      // duplas — é o que valorFiltroOr faz quando encontra algum deles.
+      if (q) {
+        const padrao = valorFiltroOr(`%${q}%`);
+        // RODADA 29B (D): time SEM coordenada (cidade que o Nominatim não achou) casa pelo texto da cidade,
+        // normalizado — igual à busca normalizada. Com coordenada, quem manda é a distância (app).
+        const porCidade = comNormalizada ? condicaoPorCidade(q, valorFiltroOr) : '';
+        query = query.or(`nome.ilike.${padrao},localizacao.ilike.${padrao}${porCidade}`);
+      }
+      if (loc) query = query.ilike('localizacao', `%${loc}%`);
+      return query;
+    };
 
-    const { data: teamsRaw, error } = await query;
+    let { data: teamsRaw, error } = await montar(true);
+    // Migração 066 por aplicar: sem a coluna a busca continua como era.
+    if (error && /cidade_normalizada/i.test(error.message || '')) ({ data: teamsRaw, error } = await montar(false));
     if (error) throw new HttpError(500, error.message);
 
     // Equipa suspensa = invisível na descoberta.
@@ -216,6 +231,7 @@ router.get(
         modo_visibilidade: t.modo_visibilidade,
         localizacao: t.localizacao,
         cidade: t.cidade || null,
+        cidade_normalizada: t.cidade_normalizada || null, // 29B (D): o app casa por texto quando não há ponto
         descricao: t.descricao,
         geo_lat: t.geo_lat ?? null, // arredondado ~1km; só entra na busca por distância se não-nulo
         geo_lng: t.geo_lng ?? null,
@@ -367,17 +383,28 @@ router.patch(
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
-    // GEO (opt-in): guarda o nome da CIDADE (texto) + geocodifica (Nominatim) →
-    // geo_lat/geo_lng ARREDONDADOS no servidor (a morada exacta nunca entra). Limpar a
-    // cidade tira a equipa da busca por distância.
+    // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra). Limpar a
+    // cidade tira a equipa da busca por distância. RODADA 29B (D), regra em utils/cidade.js: cidade DA LISTA → o ponto
+    // vem da lista; fora dela → Nominatim; nada achou → guarda o texto e LIMPA o ponto (o de antes era de outra cidade;
+    // sem ponto o Explorar casa por texto). Cidade igual à de antes (o painel reenvia o campo a cada "Salvar") não
+    // geocodifica de novo nem mexe no ponto.
+    let geoInfo = null;
     if ('cidade' in b) {
-      const v = b.cidade ? String(b.cidade).trim().slice(0, 100) : null;
-      patch.cidade = v;
-      if (v) {
-        const g = await geocodar(v);
-        if (g) { patch.geo_lat = g.lat; patch.geo_lng = g.lng; } // senão, mantém o geo anterior
+      if (!String(b.cidade ?? '').trim()) {
+        patch.cidade = null; patch.cidade_normalizada = null; patch.geo_lat = null; patch.geo_lng = null;
       } else {
-        patch.geo_lat = null; patch.geo_lng = null;
+        const { data: atual } = await supabase.from('teams').select('cidade').eq('id', team.id).maybeSingle();
+        const igualDeAntes = !lerEscolhaDaLista(b) && !!atual?.cidade && normalizarCidade(atual.cidade) === normalizarCidade(b.cidade);
+        if (igualDeAntes) {
+          patch.cidade_normalizada = normalizarCidade(b.cidade); // só completa a coluna nova em time antigo
+        } else {
+          const cid = await resolverCidade(b);
+          patch.cidade = cid.cidade;
+          patch.cidade_normalizada = cid.normalizada;
+          patch.geo_lat = cid.geo?.lat ?? null;
+          patch.geo_lng = cid.geo?.lng ?? null;
+          geoInfo = cid.info;
+        }
       }
     }
     if ('cor_fundo' in b) {
@@ -395,13 +422,18 @@ router.patch(
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
     let { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
+    // Migração 066 por aplicar: sem `cidade_normalizada` o texto e o ponto da cidade continuam a valer.
+    if (error && /cidade_normalizada/i.test(error.message || '')) {
+      const sem066 = { ...patch }; delete sem066.cidade_normalizada;
+      ({ data: updated, error } = await supabase.from('teams').update(sem066).eq('id', team.id).select().single());
+    }
     // Resiliência: se as colunas geo ainda não existirem (DDL 041 por correr), repete sem elas.
     if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
-      const semGeo = { ...patch }; delete semGeo.geo_lat; delete semGeo.geo_lng; delete semGeo.cidade;
+      const semGeo = { ...patch }; delete semGeo.geo_lat; delete semGeo.geo_lng; delete semGeo.cidade; delete semGeo.cidade_normalizada;
       ({ data: updated, error } = await supabase.from('teams').update(semGeo).eq('id', team.id).select().single());
     }
     if (error) throw new HttpError(500, error.message);
-    res.json({ team: updated });
+    res.json({ team: updated, ...(geoInfo ? { geo: geoInfo } : {}) });
   })
 );
 
