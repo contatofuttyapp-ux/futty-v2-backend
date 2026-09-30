@@ -71,6 +71,77 @@ function comEstiloRico(prompt) {
 
 const flag = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d; };
 
+// ─── RODADA 29B (30-set): --jovens — 3 modelos novos para as REDES (onboarding/anúncios) ────────────────
+// Dono pediu 15–25 anos; a Freaky recomendou 18+ (modelo com cara de menor num app com compra e cadastro 13+ é
+// bandeira vermelha na revisão da Apple e do Google) — o prompt diz "clearly an adult in their early twenties".
+// Dois homens e uma mulher, traços brasileiros/europeus, kit Dark Gold. Usa a RECEITA REAL da produção
+// (utils/geracaoFigurinha.js, V6) e não a esteira antiga deste arquivo (que lia o prompt de routes/auth.js e já
+// não existe lá). Teto US$1 (estimativa ~US$0,40: 3 fotos + 3 V6). Só o cartão final importa: um por modelo.
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens
+// Saída: scripts/_bench/saida-modelos-jovens/ e cópia dos 3 cartões em FUT/REDES/modelos/ (fora do bundle do app).
+const MODELOS_JOVENS = [
+  { id: 'j1-homem-claro',   desc: 'Brazilian man, around 22, light olive skin, short dark wavy hair, clean-shaven' },
+  { id: 'j2-mulher-parda',  desc: 'Brazilian woman, around 21, light brown skin, dark wavy shoulder-length hair' },
+  { id: 'j3-homem-europeu', desc: 'Portuguese man, around 24, fair skin, short light-brown hair, light stubble' },
+];
+const TETO_JOVENS = 1.0;
+
+async function rodarJovens() {
+  const { chamarFal, emDolares } = require('../../utils/falFila');
+  const { gerarFigurinha } = require('../../utils/geracaoFigurinha');
+  const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
+  const { lerKit, achatamento: medirCoroa, montarFigurinha } = require('./comum');
+  const saida = path.join(__dirname, 'saida-modelos-jovens');
+  const REDES = path.join(__dirname, '..', '..', '..', '..', 'REDES', 'modelos');
+  fs.mkdirSync(saida, { recursive: true });
+  fs.mkdirSync(REDES, { recursive: true });
+  const kit = lerKit('dark-gold');
+  const temporarios = [];
+  const subir = async (nome, buf, tipo) => {
+    const caminho = `tmp-modelos-jovens/${Date.now()}-${nome}`;
+    const { error } = await supabase.storage.from('kits').upload(caminho, buf, { contentType: tipo, upsert: true });
+    if (error) throw new Error(`upload ${caminho}: ${error.message}`);
+    temporarios.push(caminho);
+    return `${supabase.storage.from('kits').getPublicUrl(caminho).data.publicUrl}?v=${Date.now()}`;
+  };
+  console.log(`\n3 MODELOS JOVENS (18–25) · receita real da produção · estimativa ~US$0,40 · teto US$${TETO_JOVENS.toFixed(2)}\n`);
+  let gasto = 0;
+  const feitos = [];
+  for (const M of MODELOS_JOVENS) {
+    if (gasto >= TETO_JOVENS - 0.15) { console.error(`PAREI antes de ${M.id}: gasto US$${gasto.toFixed(3)} perto do teto`); break; }
+    try {
+      const pedido = await chamarFal('fal-ai/gpt-image-1.5', {
+        prompt: `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
+        image_size: '1024x1536', quality: 'low', num_images: 1,
+      });
+      gasto += emDolares('fal-ai/gpt-image-1.5', pedido.custo).usd || 0.02;
+      const urlFoto = pedido.dados?.images?.[0]?.url;
+      if (!urlFoto) throw new Error('t2i não devolveu foto');
+      const foto = Buffer.from(await (await fetch(urlFoto)).arrayBuffer());
+      fs.writeFileSync(path.join(saida, `${M.id}-foto.png`), foto);
+
+      const quadrada = await preprocessarQuadrado(foto);
+      const fotoUrl = await subir(`${M.id}-entrada.jpg`, quadrada, 'image/jpeg');
+      const r = await gerarFigurinha({ fotoUrl, kitUrl: kit.url, kitId: 'dark-gold', etiqueta: M.id, publicar: subir });
+      gasto += r.custo.usd || 0.114;
+      const recorte = await sharp(r.recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
+      const { razao: ach, cortada } = await medirCoroa(recorte);
+      const card = await montarFigurinha(recorte);
+      fs.writeFileSync(path.join(saida, `${M.id}-recorte.png`), recorte);
+      fs.writeFileSync(path.join(saida, `${M.id}-card.png`), card);
+      fs.writeFileSync(path.join(REDES, `modelo-jovem-${M.id}.png`), card);
+      feitos.push({ id: M.id, ach, cortada });
+      console.log(`OK ${M.id.padEnd(18)} achat ${ach === null ? '-' : ach.toFixed(2)}${cortada ? ' (CORTADA)' : ''}  custo acumulado US${gasto.toFixed(3)}`);
+    } catch (e) {
+      console.error(`FALHOU ${M.id}: ${e.message}`);
+    }
+  }
+  if (temporarios.length) await supabase.storage.from('kits').remove(temporarios).catch(() => {});
+  const ruins = feitos.filter((l) => l.ach !== null && l.ach > 0.5);
+  console.log(`\n${feitos.length}/3 cartões · defeitos de coroa: ${ruins.length} · custo real US$${gasto.toFixed(3)}`);
+  console.log(`saída: ${saida}\ncópias: ${REDES}\n`);
+}
+
 /** Prompt REAL de produção (auth.js já tem {{KIT}} e {{KIT_CHECKLIST}}). */
 function producao(kitId) {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'auth.js'), 'utf8');
@@ -121,6 +192,7 @@ async function gerarCard(fotoUrl, kit, prompt, quality) {
 
 (async () => {
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
+  if (process.argv.includes('--jovens')) { await rodarJovens(); return; }
 
   const refazer = (flag('refazer', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
   const estilo = flag('estilo', 'padrao');

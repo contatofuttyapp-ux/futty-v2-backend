@@ -7,6 +7,9 @@
 //   pacoteFig  figurinha do time vestida (Dark Purple), 1 geração gasta → vestido ✓, "Refazer" pequeno embaixo
 //   minha      card com a FOTO, 3 créditos (Minha Figurinha)       → os 5 abertos, com o selo "pintar · 1 geração · ~45 s"
 //   minhaFig   figurinha Dark Gold vestida + White Gold pintado, 3 créditos → vestido, pintado, 3 abertos, "Refazer"
+// Parte C (boas-vindas do time): dois MEMBROS (não-admin) do time "gratis":
+//   novato     sem foto nenhuma (avatar_url nulo)  → a 1ª visita à página do time abre as boas-vindas
+//   membroFoto com foto                            → só abre logo depois de aceitar um convite (state.primeiraEntrada)
 // Nada gera figurinha (custo de IA zero): as "figurinhas" são PNGs desenhados aqui, com `-ai-` no nome como as de verdade.
 // Tudo @futtymock; os times são só desta rodada. Só servidor LOCAL (CLAUDE.md, 25-set).
 //
@@ -34,6 +37,8 @@ const CONTAS = {
   pacoteFig: { email: 'prova-r29b-pacote-fig@futtymock.com', nome: 'PACFIG29', nasc: '1991-02-14' },
   minha: { email: 'prova-r29b-minha@futtymock.com', nome: 'MINHA29', nasc: '1993-11-30' },
   minhaFig: { email: 'prova-r29b-minha-fig@futtymock.com', nome: 'MINHAFIG29', nasc: '1989-06-21' },
+  novato: { email: 'prova-r29b-novato@futtymock.com', nome: 'NOVATO29', nasc: '1995-03-09' },
+  membroFoto: { email: 'prova-r29b-membro-foto@futtymock.com', nome: 'MEMBROFOTO29', nasc: '1994-12-01' },
 };
 
 const tem = (n) => process.argv.includes(`--${n}`);
@@ -126,7 +131,7 @@ async function subirFigurinha(userId, kit, corCamisa) {
   const linhaBase = (papel) => ({ id: ids[papel], email: CONTAS[papel].email, nome: CONTAS[papel].nome, nome_jogador: CONTAS[papel].nome, birthdate: CONTAS[papel].nasc });
 
   // Card com a FOTO: avatar_url = foto_url, sem nada de figurinha.
-  for (const [papel, cor] of [['gratis', [40, 110, 220]], ['pacote', [200, 70, 60]], ['minha', [60, 160, 90]]]) {
+  for (const [papel, cor] of [['gratis', [40, 110, 220]], ['pacote', [200, 70, 60]], ['minha', [60, 160, 90]], ['membroFoto', [150, 120, 40]]]) {
     foto[papel] = await subirFoto(ids[papel], cor);
     const { error } = await supabase.from('users').upsert({ ...linhaBase(papel), foto_url: foto[papel], avatar_url: foto[papel], figurinha_status: 'pronta' }, { onConflict: 'id' });
     if (error) throw new Error(`users ${papel}: ${error.message}`);
@@ -146,12 +151,18 @@ async function subirFigurinha(userId, kit, corCamisa) {
   await vestirFigurinha('pacoteFig', 'dark-purple', '#5b3fb5', ['dark-purple']);
   await vestirFigurinha('minhaFig', 'dark-gold', '#1b1b22', ['dark-gold', 'white-gold']);
 
+  // O novato: sem foto e sem avatar (o card do Início ainda é a silhueta).
+  {
+    const { error } = await supabase.from('users').upsert({ ...linhaBase('novato'), figurinha_status: 'pronta' }, { onConflict: 'id' });
+    if (error) throw new Error(`users novato: ${error.message}`);
+  }
+
   // Créditos da Minha Figurinha.
   for (const papel of ['minha', 'minhaFig']) {
     const { error } = await supabase.from('users').update({ brilhante_creditos: 3 }).eq('id', ids[papel]);
     if (error) throw new Error(`créditos ${papel}: ${error.message}`);
   }
-  ok(`${Object.keys(CONTAS).length} contas prontas (gratis, pacote, pacoteFig, minha, minhaFig).`);
+  ok(`${Object.keys(CONTAS).length} contas prontas (gratis, pacote, pacoteFig, minha, minhaFig, novato, membroFoto).`);
 
   const criarTime = async (slug, nome, dono, extra = {}) => {
     const { data: time, error } = await supabase.from('teams')
@@ -173,7 +184,12 @@ async function subirFigurinha(userId, kit, corCamisa) {
   // A geração do pacote que a figurinha vestida já gastou (1 linha por jogador, com `geracoes`).
   const { error: eBt } = await supabase.from('brilhantes_time').upsert({ team_id: times.pacoteFig.id, user_id: ids.pacoteFig, kit_id: 'dark-purple', geracoes: 1 }, { onConflict: 'team_id,user_id' });
   if (eBt) throw new Error(`brilhantes_time: ${eBt.message}`);
-  ok('times criados (o de pacote fig já gastou 1 geração).');
+  // Os dois membros (role 'member', não admin) entram no time "gratis".
+  for (const papel of ['novato', 'membroFoto']) {
+    const { error } = await supabase.from('team_members').insert({ team_id: times.gratis.id, user_id: ids[papel], role: 'member', categoria: 'linha', pode_postar: true });
+    if (error) throw new Error(`team_members ${papel}: ${error.message}`);
+  }
+  ok('times criados (o de pacote fig já gastou 1 geração); novato e membroFoto entraram no time grátis.');
 
   const sessoes = {
     ids,
@@ -183,6 +199,8 @@ async function subirFigurinha(userId, kit, corCamisa) {
     pacoteFig: await sessaoDe(CONTAS.pacoteFig.email),
     minha: await sessaoDe(CONTAS.minha.email),
     minhaFig: await sessaoDe(CONTAS.minhaFig.email),
+    novato: await sessaoDe(CONTAS.novato.email),
+    membroFoto: await sessaoDe(CONTAS.membroFoto.email),
   };
   fs.mkdirSync(path.dirname(DESTINO), { recursive: true });
   fs.writeFileSync(DESTINO, JSON.stringify(sessoes, null, 2));
