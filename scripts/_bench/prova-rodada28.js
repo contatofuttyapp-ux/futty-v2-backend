@@ -6,7 +6,7 @@
 //       uniformes com o 1º liberado e cadeados que levam aos Planos (e o card do pacote do time,
 //       com o uniforme do time pintável);
 //   B · "Sair" só deste aparelho; 401 do motor → login com aviso, nunca "crie seu time";
-//   C · cadastro com menos de 13 anos não cria conta (formulário e onboarding de Google/Apple);
+//   C · cadastro com menos de 18 anos não cria conta (formulário e onboarding de Google/Apple);
 //   D · Diagnóstico só para o super-admin, pelo Gabinete;
 //   E · telemetria anônima de velocidade (o que sai do aparelho);
 //   H · Gabinete: jogadores, gerações e custo por time.

@@ -1,6 +1,7 @@
 // Futty v2.0 — Serving REAL de publicidade + medição. As campanhas vivem no gabineteStore
 // (operacao.json), geridas no Gabinete. LEIS SELADAS respeitadas:
-//  · filtro etário FAIL-CLOSED: sem classificação = '18+'; menor/anónimo só recebe 'livre';
+//  · filtro etário FAIL-CLOSED: sem classificação = '18+'; quem não tem 18 anos confirmados pela
+//    data (e o anónimo) só recebe 'livre' — o app é 18+ (Rodada 29G) e esta é a 2ª linha;
 //  · interruptor geral (Gabinete 2.0, aba Anúncios) — desligado corta tudo,
 //    independente dos toggles por página;
 //  · toggle por página (default OFF) — página desligada = nenhum anúncio;

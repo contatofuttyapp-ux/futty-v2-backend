@@ -10,6 +10,7 @@ const { HttpError } = require('../utils/http');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { ehAdulto } = require('../utils/rostoPublico');
+const { temIdadeMinima } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
@@ -72,13 +73,10 @@ async function marcarFigurinhaStatus(userId, status) {
   }
 }
 
-// Maioridade (18+) calculada em runtime: adulto se nasceu até à data de hoje
-// menos 18 anos.
+// Maioridade (IDADE_MINIMA, 18) calculada em runtime pela régua do cadastro (utils/idade.js):
+// adulto se a data é válida e a pessoa já fez 18 anos. Sem data → false (fail-closed).
 function calcIsAdult(birthdate) {
-  if (!birthdate) return false;
-  const hoje = new Date();
-  const limite = new Date(Date.UTC(hoje.getUTCFullYear() - 18, hoje.getUTCMonth(), hoje.getUTCDate()));
-  return new Date(birthdate) <= limite;
+  return temIdadeMinima(birthdate);
 }
 
 // Figurinha automática do cadastro (12-set): 'gerando' preso há mais de 3min

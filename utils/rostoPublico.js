@@ -1,8 +1,9 @@
 // Futty v2.0 — Privacidade do rosto nas páginas públicas /p/ (Opção B aprovada).
 // REGRA DURA (fail-closed): um rosto só se revela numa partilha pública SE o dono
-// for ADULTO (>=18, birthdate preenchida) E tiver o consentimento ligado
-// (mostrar_rosto_publico, default TRUE). Menor · sem birthdate · sem consentimento
-// · convidado sem conta → SILHUETA, sempre. A idade manda mesmo com a flag ligada.
+// tiver IDADE_MINIMA anos (18, utils/idade.js; birthdate preenchida) E tiver o consentimento
+// ligado (mostrar_rosto_publico, default TRUE). Sem 18 confirmados · sem birthdate · sem
+// consentimento · convidado sem conta → SILHUETA, sempre. A idade manda mesmo com a flag ligada.
+// Desde a Rodada 29G o app é 18+: esta é a 2ª linha, para nunca depender só do cadastro.
 //
 // Mecânica: o times_resultado é um snapshot congelado com avatar_url = URL público
 // do bucket privado. Para quem PODE revelar, reescrevemos para um URL do PROXY
@@ -10,13 +11,11 @@
 // despublicarPayload, logo sobrevive à varredura do middleware. Para quem não pode,
 // pomos '' → o frontend cai na silhueta-casa. O middleware fica INTOCADO.
 const { parseUrlPublico, urlDoProxy } = require('./storage');
+const { temIdadeMinima } = require('./idade');
 
-/** >=18 anos hoje. Sem birthdate → false (fail-closed). Mesma régua de auth.js. */
+/** IDADE_MINIMA anos ou mais hoje. Sem birthdate (ou ilegível) → false (fail-closed). Mesma régua do cadastro. */
 function ehAdulto(birthdate) {
-  if (!birthdate) return false;
-  const limite = new Date();
-  limite.setFullYear(limite.getFullYear() - 18);
-  return new Date(birthdate) <= limite;
+  return temIdadeMinima(birthdate);
 }
 
 /** Pode revelar o rosto? Adulto E consentimento (default TRUE se ausente). */
@@ -39,7 +38,7 @@ function aplicarRostoPublico(tr, usersById, base) {
       const p = parseUrlPublico(j.avatar_url);
       j.avatar_url = p ? urlDoProxy(base, p) : '';
     } else {
-      j.avatar_url = ''; // menor / sem dob / sem consentimento / convidado → silhueta
+      j.avatar_url = ''; // sem 18 confirmados / sem dob / sem consentimento / convidado → silhueta
     }
   };
   (tr.times || []).forEach((t) => (t.jogadores || []).forEach(resolver));
