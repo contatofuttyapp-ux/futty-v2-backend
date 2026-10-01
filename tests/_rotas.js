@@ -81,7 +81,8 @@ function carregar(tabelas, modulos, opcoes = {}) {
   const restaurar = [
     injetar('utils/db', dbFalso(cliente)),
     injetar('middleware/auth', { requireAuth: exigirLogin, optionalAuth: passaAdiante, invalidarSessaoDoPedido: () => {} }),
-    injetar('routes/push', { enviarNotificacao: (ids, payload) => { notificacoes.push({ ids, payload }); } }),
+    // `opcoes.push(ids, payload)` troca o gravador padrão (um teste que quer um push que falha, por exemplo).
+    injetar('routes/push', { enviarNotificacao: opcoes.push || ((ids, payload) => { notificacoes.push({ ids, payload }); }) }),
     injetar('utils/nsfwFilter', { filtroNSFWFailClosed: passaAdiante, filtroNSFW: passaAdiante }),
   ];
   const limpar = () => { for (const m of RECARREGAR) delete require.cache[caminho(m)]; };

@@ -17,6 +17,7 @@ const selosCache = require('../utils/selosCache');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
+const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido (Rodada 29D)
 
 const router = express.Router();
 
@@ -1150,7 +1151,7 @@ router.patch(
     const status = req.body?.status;
     if (!['approved', 'rejected'].includes(status)) throw new HttpError(400, 'status inválido.');
 
-    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    const team = await getTeamBySlug(req.params.slug, 'id, slug, nome');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
@@ -1179,6 +1180,28 @@ router.patch(
       .select('id, status, updated_at')
       .single();
     if (error) throw new HttpError(500, error.message);
+
+    // Rodada 29D: quem foi aceito recebe o push e abre o time já com as boas-vindas (`?entrou=1` → Equipa.jsx). Só na 1ª
+    // aprovação (um 2º toque do admin não avisa de novo), com o aceite já gravado e ANTES de responder (no Cloud Run a CPU
+    // fica estrangulada depois da resposta). O push nunca derruba o aceite — falha vira log — e não segura o admin: espera
+    // no máximo 4 s.
+    if (status === 'approved' && pedido.status !== 'approved') {
+      let teto;
+      try {
+        await Promise.race([
+          Promise.resolve(enviarNotificacao([pedido.user_id], {
+            title: `Você entrou no ${team.nome}!`,
+            body: 'Confirme presença e veja o próximo jogo.',
+            url: `/equipa/${team.slug}?entrou=1`,
+          })),
+          new Promise((resolve) => { teto = setTimeout(resolve, 4000); }),
+        ]);
+      } catch (e) {
+        console.warn('[teams] push do aceite de pedido falhou (o aceite foi gravado):', e?.message || e);
+      } finally {
+        clearTimeout(teto);
+      }
+    }
 
     res.json({ pedido: updated });
   })
