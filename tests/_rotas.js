@@ -13,7 +13,7 @@ const { HttpError } = require('../utils/http');
 const RECARREGAR = [
   'utils/soOrganiza', 'utils/agregados', 'utils/direitoBrilhante', 'services/inicio', 'utils/cidade',
   'routes/rsvp', 'routes/games', 'routes/ranking', 'routes/teams', 'routes/brilhantes',
-  'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth',
+  'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth', 'routes/inicio', 'routes/feed', 'utils/blocksStore',
 ];
 const caminho = (m) => require.resolve(`../${m}`);
 
@@ -50,7 +50,8 @@ function dbFalso(cliente) {
     loadGame: async (id) => {
       const game = await umaLinha('games', { id });
       if (!game) return null;
-      return { ...game, teams: await umaLinha('teams', { id: game.team_id }) };
+      // Com o time embutido na linha do jogo (como o PostgREST devolve o embed) é UMA ida; sem ele, a segunda consulta.
+      return { ...game, teams: game.teams || await umaLinha('teams', { id: game.team_id }) };
     },
     goleirosDoTime: async (teamId, ids) => {
       const { data } = await cliente.from('team_members').select('user_id').eq('team_id', teamId).eq('categoria', 'GR');

@@ -43,46 +43,48 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    const direito = await temDireito(userId);
-
-    let times = [];
-    try {
-      const { data, error } = await supabase
-        .from('team_members')
-        .select('role, teams!inner(id, nome, slug, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio)')
-        .eq('user_id', userId);
-      if (error) throw new Error(error.message);
-      times = (data || []).map((m) => ({
-        id: m.teams.id,
-        nome: m.teams.nome,
-        slug: m.teams.slug,
-        sou_dono: m.role === 'admin',
-        brilhante_ativo: !!m.teams.brilhante_ativo,
-        brilhante_kit: m.teams.brilhante_kit || null,
-        brilhante_limite: Number(m.teams.brilhante_limite) || 25,
-        manto_proprio: !!m.teams.manto_proprio,
-      }));
-    } catch (e) {
-      console.warn('[brilhantes] times indisponíveis (migração 054 aplicada?):', e.message);
-      if (!ehMigracaoEmFalta(e.message)) throw e;
-    }
-
+    // Rodada 29B (bloco 2, B — conta pesada): as quatro leituras não dependem uma da outra e corriam EM FILA (~1,2 s de motor,
+    // medido); agora correm juntas e a resposta leva o tempo da mais lenta (o direito, ~2 idas).
+    const lerTimes = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('team_members')
+          .select('role, teams!inner(id, nome, slug, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio)')
+          .eq('user_id', userId);
+        if (error) throw new Error(error.message);
+        return (data || []).map((m) => ({
+          id: m.teams.id,
+          nome: m.teams.nome,
+          slug: m.teams.slug,
+          sou_dono: m.role === 'admin',
+          brilhante_ativo: !!m.teams.brilhante_ativo,
+          brilhante_kit: m.teams.brilhante_kit || null,
+          brilhante_limite: Number(m.teams.brilhante_limite) || 25,
+          manto_proprio: !!m.teams.manto_proprio,
+        }));
+      } catch (e) {
+        console.warn('[brilhantes] times indisponíveis (migração 054 aplicada?):', e.message);
+        if (!ehMigracaoEmFalta(e.message)) throw e;
+        return [];
+      }
+    };
+    // Pagamentos P1: há ao menos uma compra creditada? Sem a 064, false (nunca quebra a tela).
+    const lerComprasAtivas = async () => {
+      try {
+        const { count, error } = await supabase
+          .from('compras').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('estado', 'creditada');
+        if (error) throw new Error(error.message);
+        return (count || 0) > 0;
+      } catch (e) {
+        console.warn('[brilhantes] compras indisponíveis (migração 064 aplicada?):', e.message);
+        return false;
+      }
+    };
     // Pendentes E recusados: a tela tem de saber dizer as duas coisas
     // ("a gente ativa e avisa" / o motivo da recusa). Os 'ativado' não vêm —
     // quem foi ativado já tem o direito, e o recado some sozinho, que é o
     // comportamento certo.
-    const pedidos = await pedidosVivos(userId);
-
-    // Pagamentos P1: há ao menos uma compra creditada? Sem a 064, false (nunca quebra a tela).
-    let comprasAtivas = false;
-    try {
-      const { count, error } = await supabase
-        .from('compras').select('id', { count: 'exact', head: true }).eq('user_id', userId).eq('estado', 'creditada');
-      if (error) throw new Error(error.message);
-      comprasAtivas = (count || 0) > 0;
-    } catch (e) {
-      console.warn('[brilhantes] compras indisponíveis (migração 064 aplicada?):', e.message);
-    }
+    const [direito, times, pedidos, comprasAtivas] = await Promise.all([temDireito(userId), lerTimes(), pedidosVivos(userId), lerComprasAtivas()]);
 
     res.json({
       direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId, restantes: direito.restantes },

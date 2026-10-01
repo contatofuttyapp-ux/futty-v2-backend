@@ -30,8 +30,13 @@ const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo',
 // VELOCIDADE 6A (15-set): o feed vinha SEM limite — uma equipa antiga puxava
 // todos os jogos e todos os posts desde sempre, em cada abertura da tela. 60 de
 // cada lado dá mais de um mês de Resenha para uma equipa que joga por semana.
-// A paginação "ver mais antigos" fica para a v1.1 (registado em ONDE-ESTAMOS.md).
+// A paginação "ver mais antigos" chegou na Rodada 29B (ver PAGINA_FEED, abaixo).
 const LIMITE_FEED = 60;
+// RODADA 29B (bloco 2, B — conta pesada): o app novo pede o feed em PÁGINAS (`?limite=20`, e `?antes=<created_at do último>` para a
+// seguinte). Sem `limite` a resposta é a de sempre (até 60 jogos + 60 posts de uma vez): os apps já publicados não conhecem
+// `proximo` e ficariam sem como ver o resto.
+const PAGINA_FEED = 20;
+const PAGINA_FEED_MAX = 50;
 
 // Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
 //
@@ -231,35 +236,62 @@ router.get(
 
     // VELOCIDADE 6A (15-set): eram 10 idas ao banco EM SÉRIE. Agora são 3 ondas.
     //
+    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (created_at).
+    const paginado = req.query.limite != null;
+    const limite = paginado ? Math.min(PAGINA_FEED_MAX, Math.max(1, parseInt(req.query.limite, 10) || PAGINA_FEED)) : LIMITE_FEED;
+    const antesBruto = paginado && req.query.antes ? Date.parse(String(req.query.antes)) : NaN;
+    const antes = Number.isNaN(antesBruto) ? null : new Date(antesBruto).toISOString();
+    const quantos = paginado ? limite + 1 : LIMITE_FEED;
+    let consultaJogos = supabase
+      .from('games')
+      .select(
+        'id, team_id, data, local, times_resultado, campeao_time_index, campeao_foto_url, ' +
+          'artilheiro_user_id, artilheiro_gols, destaque_user_id, destaque_titulo, ' +
+          'rodada_user_id, rodada_foto_url, created_at'
+      )
+      .in('team_id', teamIds)
+      .not('campeao_time_index', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(quantos);
+    let consultaPosts = supabase
+      .from('feed_posts')
+      .select('id, team_id, author_id, body, tipo, conteudo, created_at')
+      .in('team_id', teamIds)
+      .order('created_at', { ascending: false })
+      .limit(quantos);
+    if (antes) {
+      consultaJogos = consultaJogos.lt('created_at', antes);
+      consultaPosts = consultaPosts.lt('created_at', antes);
+    }
+
     // Onda 2: o bloqueio, os jogos e os posts não dependem uns dos outros — só
     // de teamIds. (A filtragem por bloqueio é feita em memória logo a seguir.)
     const [bloqueados, jogosRes, postsRes] = await Promise.all([
       // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
       // este utilizador não aparece na Resenha dele — nem posts nem comentários.
       conjuntoMutuo(req.user.id),
-      supabase
-        .from('games')
-        .select(
-          'id, team_id, data, local, times_resultado, campeao_time_index, campeao_foto_url, ' +
-            'artilheiro_user_id, artilheiro_gols, destaque_user_id, destaque_titulo, ' +
-            'rodada_user_id, rodada_foto_url, created_at'
-        )
-        .in('team_id', teamIds)
-        .not('campeao_time_index', 'is', null)
-        .order('created_at', { ascending: false })
-        .limit(LIMITE_FEED),
-      supabase
-        .from('feed_posts')
-        .select('id, team_id, author_id, body, tipo, conteudo, created_at')
-        .in('team_id', teamIds)
-        .order('created_at', { ascending: false })
-        .limit(LIMITE_FEED),
+      consultaJogos,
+      consultaPosts,
     ]);
     marcarFase(res, 'jogos+posts');
     if (jogosRes.error) throw new HttpError(500, jogosRes.error.message);
     if (postsRes.error) throw new HttpError(500, postsRes.error.message);
-    const games = jogosRes.data || [];
-    const posts = (postsRes.data || []).filter((p) => !bloqueados.has(p.author_id));
+    let games = jogosRes.data || [];
+    let posts = (postsRes.data || []).filter((p) => !bloqueados.has(p.author_id));
+
+    // Página (só no modo paginado): os `limite` mais recentes dos dois tipos JUNTOS. Cada lista trouxe até limite+1, então o
+    // top-`limite` da mistura está inteiro dentro delas. Daqui para baixo (comentários, reações, mídias) só trabalha a página —
+    // é onde o feed pesava. `proximo` é o cursor da página seguinte (null = acabou).
+    let proximo = null;
+    if (paginado) {
+      const todos = [...games.map((r) => ({ tipo: 'jogo', r })), ...posts.map((r) => ({ tipo: 'post', r }))]
+        .sort((a, b) => new Date(b.r.created_at).getTime() - new Date(a.r.created_at).getTime());
+      const pagina = todos.slice(0, limite);
+      const temMais = todos.length > limite || (jogosRes.data || []).length > limite || (postsRes.data || []).length > limite;
+      if (temMais && pagina.length) proximo = pagina[pagina.length - 1].r.created_at;
+      games = pagina.filter((x) => x.tipo === 'jogo').map((x) => x.r);
+      posts = pagina.filter((x) => x.tipo === 'post').map((x) => x.r);
+    }
 
     const gameIds = games.map((g) => g.id);
     const postIds = posts.map((p) => p.id);
@@ -377,7 +409,7 @@ router.get(
     const items = [...jogoItems, ...postItems].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
     );
-    res.json({ items });
+    res.json(paginado ? { items, proximo } : { items });
   })
 );
 

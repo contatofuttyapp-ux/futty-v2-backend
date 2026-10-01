@@ -104,6 +104,23 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       neq(c, v) { e.filtros.push((l) => l[c] !== v); return api; },
       in(c, vs) { e.filtros.push((l) => vs.includes(l[c])); return api; },
       is(c, v) { e.filtros.push((l) => (l[c] ?? null) === v); return api; },
+      // `.or('data.gte.2026-10-01T00:00:00Z,data.is.null')`: só a forma `coluna.operador.valor` separada por vírgula.
+      or(expr) {
+        const operadores = {
+          gte: (a, b) => a >= b, gt: (a, b) => a > b, lte: (a, b) => a <= b, lt: (a, b) => a < b,
+          eq: (a, b) => String(a) === b, neq: (a, b) => String(a) !== b,
+          is: (a, b) => (b === 'null' ? (a ?? null) === null : String(a) === b),
+        };
+        const condicoes = String(expr).split(/,(?=\w+\.(?:gte|gt|lte|lt|eq|neq|is)\.)/).map((parte) => {
+          const m = parte.match(/^(\w+)\.(gte|gt|lte|lt|eq|neq|is)\.(.*)$/);
+          if (!m) throw new Error(`or() do Supabase falso não entende "${parte}"`);
+          return (l) => (l[m[1]] == null && m[2] !== 'is' ? false : operadores[m[2]](l[m[1]], m[3]));
+        });
+        e.filtros.push((l) => condicoes.some((c) => c(l)));
+        return api;
+      },
+      // `.not('coluna', 'is', null)` e `.not('coluna', 'eq', valor)`: as duas formas que o motor usa.
+      not(c, op, v) { e.filtros.push((l) => (op === 'is' ? (l[c] ?? null) !== v : l[c] !== v)); return api; },
       gt(c, v) { e.filtros.push((l) => l[c] > v); return api; },
       gte(c, v) { e.filtros.push((l) => l[c] >= v); return api; },
       lt(c, v) { e.filtros.push((l) => l[c] < v); return api; },

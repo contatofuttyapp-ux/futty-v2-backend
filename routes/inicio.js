@@ -5,9 +5,9 @@
 // função de services/inicio.js que a rota antiga (nunca diverge do JSON que
 // outras telas já dependem — as rotas antigas continuam de pé).
 //
-// 2 levas: a 1ª não depende de nada (corre tudo junto); a 2ª (votacao_status,
-// campeonato, rsvp) depende de saber o time principal e o próximo jogo — só dá
-// para calcular depois de teams/convites responderem.
+// Fila de idas ao banco (Rodada 29B, bloco 2, B): vínculos → jogos → RSVP = 3. Tudo o que não depende de ninguém arranca
+// no instante zero; o que depende do time principal (votação, campeonato) ou do próximo jogo (RSVP) arranca assim que a
+// sua dependência chega — não quando uma onda inteira acaba.
 //
 // Promise.allSettled (via `seguro`, não Promise.all): se uma parte falhar (ex.:
 // um time suspenso a meio da leitura), essa chave vem null e as restantes
@@ -18,6 +18,7 @@ const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler } = require('../utils/http');
 const inicioService = require('../services/inicio');
 const { temDireito } = require('../utils/direitoBrilhante');
+const { timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { pedidosVivos } = require('./brilhantes');
 
 const router = express.Router();
@@ -39,37 +40,54 @@ router.get(
     // O requireAuth já correu: tudo até aqui foi autenticação.
     marcarFase(res, 'auth');
 
-    // VELOCIDADE 6A (15-set): a onda 2 esperava a onda 1 INTEIRA — incluindo as
-    // partes lentas (votações pendentes, desfechos de denúncia). Mas só precisa
-    // de duas coisas: o time principal (teams) e o próximo jogo (convites).
-    //
-    // Agora tudo arranca ao mesmo tempo e a onda 2 encadeia APENAS em
-    // teams+convites. Enquanto as votações pendentes ainda correm, o campeonato
-    // e o RSVP já estão a ser pedidos. O tempo da tela passa a ser o da parte
-    // mais lenta, não a soma de duas ondas.
-    const teamsP = medir(res, 'teams', seguro(inicioService.obterTeams(userId)));
-    const convitesP = medir(res, 'convites', seguro(inicioService.obterConvites(userId)));
+    // RODADA 29B (bloco 2, B — "conta pesada"). Medido com a conta pesada (super-admin, 2 times) e a leve (1 time): o
+    // /api/inicio levava ~990 ms de motor e 31 consultas nas DUAS — o que pesava era a FILA de idas ao banco (4 em série),
+    // não o volume. A fila era esta:
+    //   1ª ida   os times (team_members) e os convites (team_members de novo)…
+    //   2ª ida   …+ os pedidos pendentes (team_join_requests) e os jogos (games); só então o time principal era conhecido…
+    //   3ª ida   …votação e campeonato do principal, e o jogo do próximo convite (loadGame)…
+    //   4ª ida   …e o resto do RSVP (membros, respostas, fila) só depois do loadGame.
+    // Agora: UMA consulta de vínculos no instante zero, repartida entre todas as partes (11 consultas de team_members viram 1);
+    // os times saem na hora (o contador de pedidos pendentes corre ao lado, fora do caminho crítico); a votação e o campeonato
+    // arrancam assim que o principal é conhecido (sem esperar os jogos); e o RSVP do próximo jogo sai numa ida só (o time dele
+    // já veio na lista de jogos). Fila: vínculos → jogos → RSVP = 3 idas. A lista de jogos também parou de crescer com o
+    // histórico (ver obterConvites: os que vão acontecer + os 3 últimos de cada time, que é o que a tela mostra).
+    const vinculosP = medir(res, 'vinculos', seguro(inicioService.obterVinculos(userId)));
+    const soOrganizaP = seguro(timesEmQueSoOrganiza(userId));
+    const baseP = Promise.all([vinculosP, soOrganizaP]);
 
-    const onda2P = Promise.all([teamsP, convitesP]).then(([teams, convites]) => {
-      // Time principal = a 1ª equipa (teams vem ordenado por created_at ASC — o
-      // mesmo critério que o Início já usava). Próximo jogo = o 1º não-encerrado
-      // (convites vem ordenado por data ASC — idem).
-      const principal = teams?.teams?.[0] || null;
-      const nextId = (convites?.games || []).find((g) => g.status !== 'finished')?.id || null;
-      return medir(res, 'onda2', Promise.all([
-        principal ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal)) : null,
-        principal ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal)) : null,
-        nextId ? seguro(inicioService.obterRsvp(nextId, userId)) : null,
-      ]));
-    });
+    // Os times: montados na hora a partir dos vínculos. Se a leitura deles falhou, o caminho antigo (cada parte lê o seu).
+    const teamsP = medir(res, 'teams', baseP.then(([vinculos, soOrganiza]) => (
+      vinculos ? { teams: inicioService.montarTeams(vinculos, soOrganiza || new Set()) } : seguro(inicioService.obterTeams(userId))
+    )));
+    // O contador de pedidos pendentes (badge do chip de quem administra) sai ao lado: ninguém espera por ele, só a resposta.
+    const pendentesP = teamsP.then((t) => (t?.teams && t.teams.some((x) => x.role === 'admin') ? seguro(inicioService.contarPedidosPendentes(t.teams)) : null));
 
-    const [me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2] = await Promise.all([
+    const convitesP = medir(res, 'convites', baseP.then(([vinculos, soOrganiza]) => (
+      seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true }))
+    )));
+
+    // Time principal = a 1ª equipa (os vínculos vêm por created_at ASC — o mesmo critério que o Início já usava). Próximo
+    // jogo = o 1º não-encerrado (a lista vem por data ASC — idem). Votação e campeonato só precisam do principal; o RSVP,
+    // do próximo jogo. Tudo arranca no instante em que a sua dependência chega, não quando a onda anterior inteira acaba.
+    const principalP = teamsP.then((teams) => teams?.teams?.[0] || null);
+    const onda2P = medir(res, 'onda2', Promise.all([
+      principalP.then((principal) => (principal ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal)) : null)),
+      principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal)) : null)),
+      convitesP.then((convites) => {
+        const proximo = (convites?.games || []).find((g) => g.status !== 'finished');
+        return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id })) : null;
+      }),
+    ]));
+
+    const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2] = await Promise.all([
       medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
+      pendentesP,
       convitesP,
       medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
-      medir(res, 'votacoes', seguro(inicioService.obterVotacoesPendentes(userId))),
-      medir(res, 'denuncias', seguro(inicioService.obterDesfechosDenuncias(userId))),
+      medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos })))),
+      medir(res, 'denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
       // VELOCIDADE 9: vêm os slots de TODAS as páginas, não só o do Início. A
       // conta de servidor é a mesma (uma leitura do store, uma do utilizador) e
       // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do

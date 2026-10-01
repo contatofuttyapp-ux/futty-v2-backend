@@ -129,6 +129,10 @@ router.get(
       const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
       return { selos: await computeSelos(uid, teamIds), teamIds };
     });
+    // Rodada 29B (B): os selos mudam poucas vezes por semana (e o motor já os guarda 2 min): o navegador pode reaproveitar a resposta por
+    // 30 s. `private` + `Vary: Authorization` — é de UMA pessoa, e outra conta no mesmo aparelho nunca recebe a de quem saiu.
+    res.set('Cache-Control', 'private, max-age=30');
+    res.vary('Authorization');
     res.json({ selos });
   })
 );

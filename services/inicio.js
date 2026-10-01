@@ -180,34 +180,56 @@ async function obterMe(user) {
   };
 }
 
-// ─── GET /api/teams ───────────────────────────────────────────────────────────
-async function obterTeams(userId) {
-  // Rodada 29B (E): em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
-  const soOrganizaPromessa = timesEmQueSoOrganiza(userId);
+// ─── Os vínculos da pessoa com os times — UMA consulta para todas as partes do Início ─────────────────────────────────
+// RODADA 29B (bloco 2, B — "conta pesada"). O /api/inicio perguntava ao banco quem é membro de quê ONZE vezes (times, convites,
+// votações, denúncias… cada parte com o seu select de team_members) e, pior, em fila: a parte seguinte só começava depois de
+// os times voltarem. Medido (local, conta com 2 times): 31 consultas em 4 idas seguidas ao banco, ~990 ms de motor — e a conta
+// de 1 time custava o mesmo, porque o que pesa é a fila de idas, não o volume. Agora a consulta sai uma vez, no instante zero, e
+// cada parte recebe o resultado pronto. As funções soltas (rotas antigas) continuam a fazer a sua própria consulta.
+//
+// O select é a união do que cada parte lia (colunas que já existem em produção: eram lidas por elas).
+const VINCULOS_SELECT = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
+
+async function obterVinculos(userId) {
   const { data, error } = await supabase
     .from('team_members')
-    // VELOCIDADE 9: as quatro colunas do pacote de figurinhas entram no MESMO
-    // select (não há ida nova). É o que faltava para a Figurinha se abrir a
-    // partir do que o /api/inicio já trouxe, em vez de pedir
-    // /api/brilhantes/estado só para saber se o time tem pacote — 606 ms de
-    // Lisboa, no relatório do dono, por um botão.
-    .select('role, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio )')
+    .select(VINCULOS_SELECT)
     .eq('user_id', userId)
     .order('created_at', { ascending: true });
   if (error) throw new HttpError(500, error.message);
+  return data || [];
+}
 
-  const soOrganiza = await soOrganizaPromessa;
-  const teams = (data || []).filter((row) => row.teams).map((row) => ({ ...row.teams, role: row.role, joga: !soOrganiza.has(row.teams.id) }));
+// ─── GET /api/teams ───────────────────────────────────────────────────────────
+/** Os times da pessoa, com o papel, o `joga` e o que a Figurinha precisa do pacote — a partir dos vínculos já lidos. */
+function montarTeams(vinculos, soOrganiza) {
+  return (vinculos || [])
+    .filter((row) => row.teams)
+    .map((row) => {
+      // `revotar_pedido_em` veio no select compartilhado, mas nunca fez parte desta resposta: não entra.
+      const { revotar_pedido_em: _revotar, ...time } = row.teams; // eslint-disable-line no-unused-vars
+      return { ...time, role: row.role, joga: !soOrganiza.has(row.teams.id) };
+    });
+}
 
-  // Pedidos de entrada pendentes por equipa (só onde sou admin) → badge no chip.
+/** Pedidos de entrada pendentes por equipa (só onde sou admin) → badge no chip. Muda os objetos de `teams`. */
+async function contarPedidosPendentes(teams) {
   const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
-  if (adminIds.length) {
-    const { data: peds } = await supabase.from('team_join_requests').select('team_id').in('team_id', adminIds).eq('status', 'pending');
-    const contagem = {};
-    for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
-    for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
-  }
+  if (!adminIds.length) return teams;
+  const { data: peds } = await supabase.from('team_join_requests').select('team_id').in('team_id', adminIds).eq('status', 'pending');
+  const contagem = {};
+  for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
+  for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
+  return teams;
+}
 
+async function obterTeams(userId) {
+  // Rodada 29B (E): em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
+  // VELOCIDADE 9: as colunas do pacote de figurinhas entram no MESMO select (não há ida nova): é o que faltava para a Figurinha
+  // se abrir a partir do que o /api/inicio já trouxe, em vez de pedir /api/brilhantes/estado só para saber se o time tem pacote.
+  const [vinculos, soOrganiza] = await Promise.all([obterVinculos(userId), timesEmQueSoOrganiza(userId)]);
+  const teams = montarTeams(vinculos, soOrganiza);
+  await contarPedidosPendentes(teams);
   return { teams };
 }
 
@@ -215,15 +237,57 @@ async function obterTeams(userId) {
 // VELOCIDADE 6A (15-set): eram 3 idas EM SÉRIE (team_members → games →
 // game_players). As presenças passam a vir embutidas nos jogos (select do
 // PostgREST), o que junta as duas últimas: ficam 2.
-async function obterConvites(userId) {
-  // Rodada 29B (E): `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
-  const [{ data: memberships }, soOrganiza] = await Promise.all([
-    supabase
-      .from('team_members')
-      .select('team_id, ausente_proximo, teams ( id, nome, slug )')
-      .eq('user_id', userId),
-    timesEmQueSoOrganiza(userId),
+// RODADA 29B (bloco 2, B) — a lista de jogos do Início deixa de crescer com o histórico. A tela usa só duas coisas dela:
+// "Próximos Jogos" (tudo o que ainda não acabou) e "Últimos Jogos" (os 3 mais recentes, por time). Com `limitar` o motor devolve
+// exatamente isso — os jogos que ainda vão acontecer + os últimos ULTIMOS_POR_TIME encerrados de cada time — em vez de TODO
+// jogo que o time já teve, com a presença de cada um (uma conta com anos de peladas mandava centenas de jogos e milhares de
+// linhas de presença para desenhar três cartões). A rota antiga (/api/games/my-invites, que o app não usa) segue completa.
+const ULTIMOS_POR_TIME = 3;
+// Margem para os encerrados que a tela descarta (cancelados) não comerem as vagas dos 3 que ela mostra.
+const MARGEM_ULTIMOS = 8;
+const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, game_players ( user_id, confirmado )';
+
+async function jogosDoInicio(teamIds) {
+  const agoraIso = new Date().toISOString();
+  const [proximos, ...recentes] = await Promise.all([
+    supabase.from('games').select(JOGO_COLS).in('team_id', teamIds).or(`data.gte.${agoraIso},data.is.null`).order('data', { ascending: true }),
+    ...teamIds.map((id) => supabase.from('games').select(JOGO_COLS).eq('team_id', id).lt('data', agoraIso).order('data', { ascending: false }).limit(MARGEM_ULTIMOS)),
   ]);
+  for (const r of [proximos, ...recentes]) if (r.error) return { error: r.error };
+  const porId = new Map();
+  for (const g of [...(proximos.data || []), ...recentes.flatMap((r) => r.data || [])]) porId.set(g.id, g);
+  return { data: [...porId.values()] };
+}
+
+/** Do que a tela guarda dos encerrados: os ULTIMOS_POR_TIME mais recentes de cada time, sem os cancelados. */
+function aparar(listaFormatada) {
+  // Sem data = o fim da fila (o Postgres põe NULL por último na ordem ascendente, e a lista sempre veio assim).
+  const quando = (g) => (g.date ? new Date(g.date).getTime() : Infinity);
+  const cmp = (x, y) => (x < y ? -1 : x > y ? 1 : 0); // Infinity - Infinity daria NaN
+  const porTime = new Map();
+  const mantidos = [];
+  for (const g of [...listaFormatada].sort((a, b) => cmp(quando(b), quando(a)))) {
+    if (g.status !== 'finished') { mantidos.push(g); continue; }
+    if (g.cancelado) continue;
+    const n = porTime.get(g.team_id) || 0;
+    if (n < ULTIMOS_POR_TIME) { porTime.set(g.team_id, n + 1); mantidos.push(g); }
+  }
+  return mantidos.sort((a, b) => cmp(quando(a), quando(b)));
+}
+
+async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false } = {}) {
+  // Rodada 29B (E): `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
+  // Rodada 29B (B): o /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
+  const [memberships, soOrganiza] = vinculos
+    ? [vinculos, soOrganizaDado || new Set()]
+    : await Promise.all([
+      supabase
+        .from('team_members')
+        .select('team_id, ausente_proximo, teams ( id, nome, slug )')
+        .eq('user_id', userId)
+        .then((r) => r.data),
+      timesEmQueSoOrganiza(userId),
+    ]);
   const teamById = {};
   const ausenteByTeam = {};
   for (const m of memberships || []) {
@@ -233,11 +297,13 @@ async function obterConvites(userId) {
   const teamIds = Object.keys(teamById);
   if (!teamIds.length) return { games: [] };
 
-  const { data: games, error } = await supabase
-    .from('games')
-    .select('id, team_id, data, local, status, sorteio_realizado, cancelado, game_players ( user_id, confirmado )')
-    .in('team_id', teamIds)
-    .order('data', { ascending: true });
+  const { data: games, error } = limitar
+    ? await jogosDoInicio(teamIds)
+    : await supabase
+      .from('games')
+      .select(JOGO_COLS)
+      .in('team_id', teamIds)
+      .order('data', { ascending: true });
   if (error) throw new HttpError(500, error.message);
 
   const counts = {};
@@ -273,7 +339,7 @@ async function obterConvites(userId) {
     };
   });
 
-  return { games: list };
+  return { games: limitar ? aparar(list) : list };
 }
 
 // ─── GET /api/me/pedidos ──────────────────────────────────────────────────────
@@ -301,11 +367,12 @@ async function obterPedidos(userId) {
 //   · os dados das equipas vêm embutidos no team_members (mata a query `teams`);
 //   · as presenças vêm embutidas nos jogos, e as minhas e as dos colegas saem
 //     do mesmo conjunto (matam as duas idas a game_players).
-async function obterVotacoesPendentes(userId) {
-  const { data: minhas } = await supabase
+async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
+  // Rodada 29B (B): o /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
+  const minhas = vinculos || (await supabase
     .from('team_members')
     .select('team_id, teams ( id, slug, nome, revotar_pedido_em )')
-    .eq('user_id', userId);
+    .eq('user_id', userId)).data;
   const teams = [...new Map((minhas || []).filter((m) => m.teams).map((m) => [m.teams.id, m.teams])).values()];
   const teamIds = teams.map((t) => t.id);
   if (!teamIds.length) return { pendentes: [] };
@@ -371,8 +438,8 @@ function casosDaEquipaComCache(teamId) {
   return casosPorEquipa.obter(teamId || '_sem', () => denunciaStore.listarEquipa(teamId));
 }
 
-async function obterDesfechosDenuncias(userId) {
-  const { data: membros } = await supabase.from('team_members').select('team_id').eq('user_id', userId);
+async function obterDesfechosDenuncias(userId, { vinculos = null } = {}) {
+  const membros = vinculos || (await supabase.from('team_members').select('team_id').eq('user_id', userId)).data;
   const teamIds = (membros || []).map((m) => m.team_id);
   // Velocidade 2 (12-set): era um `for` sequencial (1 download de Storage por
   // equipa, em série) — agora todas as equipas em paralelo (e quase sempre em cache).
@@ -434,21 +501,34 @@ async function obterCampeonato(slug, userId, conhecido = null) {
 }
 
 // ─── GET /api/jogos/:gameId/rsvp ──────────────────────────────────────────────
-async function obterRsvp(gameId, userId) {
-  const game = await loadGame(gameId);
+// `teamId` (Rodada 29B, B): o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
+// que só precisa do time e do jogo saem NA MESMA ida ao banco — eram duas em fila (loadGame, e só depois o resto). Se o jogo
+// disser outro time, volta ao caminho de sempre.
+async function obterRsvp(gameId, userId, { teamId = null } = {}) {
+  const consultasDoTime = (tid) => [
+    getRole(tid, userId),
+    supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', tid),
+    supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', gameId),
+    supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', gameId).order('posicao', { ascending: true }),
+    idsQueSoOrganizam(tid), // Rodada 29B (E)
+  ];
+  let game;
+  let resto;
+  if (teamId) {
+    // Nenhum depende dos outros: o jogo e as cinco consultas do time correm juntos.
+    [game, ...resto] = await Promise.all([loadGame(gameId), ...consultasDoTime(teamId)]);
+    if (game && game.teams?.id !== teamId) resto = null; // o jogo é de outro time: refaz abaixo
+  } else {
+    game = await loadGame(gameId);
+  }
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
 
   // role, membros, respostas e filaRows só dependem de game/team já
   // carregados — nenhum depende dos outros 3 (13-set, "Velocidade 3": eram 4
   // awaits em série). O acesso só é confirmado depois — se `role` vier vazio
   // o resto é descartado a seguir.
-  const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = await Promise.all([
-    getRole(game.teams.id, userId),
-    supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', game.teams.id),
-    supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', game.id),
-    supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', game.id).order('posicao', { ascending: true }),
-    idsQueSoOrganizam(game.teams.id), // Rodada 29B (E)
-  ]);
+  if (!resto) resto = await Promise.all(consultasDoTime(game.teams.id));
+  const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = resto;
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
   // Rodada 29B (E): quem só organiza o time não está na lista de presença (nem como pendente).
@@ -579,6 +659,9 @@ const VALIDADE_ADS_MS = 4 * 60 * 1000;
 
 module.exports = {
   obterMe,
+  obterVinculos,
+  montarTeams,
+  contarPedidosPendentes,
   obterTeams,
   obterConvites,
   obterPedidos,
