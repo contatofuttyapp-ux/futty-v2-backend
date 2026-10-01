@@ -45,10 +45,10 @@ const RATE_LIMITS_ATIVOS = [
   { rota: 'POST /api/telemetria (anônima, sem sessão)', limite: `${LIMITES.telemetria}/15min por IP (o IP não é gravado)` },
   { rota: 'POST /api/compras/webhook/revenuecat (segredo no header, sem sessão)', limite: `${LIMITES.webhookCompras}/min por IP` },
   { rota: 'POST /api/me/avatar[/ai]', limite: `${LIMITES.avatar}/15min por sessão (sem sessão: por IP)` },
-  { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por utilizador' },
-  { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por utilizador (partilhado)' },
-  { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por utilizador (partilhado)' },
-  { rota: 'POST /api/diagnostico', limite: '10/hora por utilizador' },
+  { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por pessoa' },
+  { rota: 'POST /api/push/.../broadcast + .../mensagem', limite: '20/hora por pessoa (compartilhado)' },
+  { rota: 'POST /api/denuncias + /api/feed/denuncias', limite: '20/hora por pessoa (compartilhado)' },
+  { rota: 'POST /api/diagnostico', limite: '10/hora por pessoa' },
   { rota: 'POST /api/avise-me (pública, sem sessão)', limite: '10/hora por IP (o IP não é gravado)' },
 ];
 
@@ -143,7 +143,7 @@ router.get(
       .forEach((c) => marcos.push({ ic: '🏆', t: `${c.campeao} sagrou-se campeã`, d: c.nome || 'Campeonato' }));
     teams.slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
       .slice(0, 3)
-      .forEach((t) => marcos.push({ ic: '🛡', t: `Nova equipa: ${t.nome}`, d: (t.created_at || '').slice(0, 10) }));
+      .forEach((t) => marcos.push({ ic: '🛡', t: `Novo time: ${t.nome}`, d: (t.created_at || '').slice(0, 10) }));
     if (users.length >= 10) {
       const marco = Math.floor(users.length / 10) * 10;
       marcos.push({ ic: '🎉', t: `${marco}+ utilizadores`, d: `total atual: ${users.length}` });
@@ -695,8 +695,8 @@ router.post(
   asyncHandler(async (req, res) => {
     const pedidoId = String(req.body?.pedidoId || '');
     const motivo = String(req.body?.motivo || '').trim().slice(0, 280);
-    if (!pedidoId) throw new HttpError(400, 'Pedido em falta.');
-    if (!motivo) throw new HttpError(400, 'Escreva o motivo — quem pediu vai ler isto.');
+    if (!pedidoId) throw new HttpError(400, 'Pedido não informado.');
+    if (!motivo) throw new HttpError(400, 'Escreva o motivo. Quem pediu vai ler isto.');
 
     const base = { estado: 'recusado', resolvido_em: new Date().toISOString() };
     try {

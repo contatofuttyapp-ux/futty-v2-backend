@@ -814,7 +814,7 @@ async function baixarFotoConferida(caminho, hashEsperado) {
   });
   throw new HttpError(
     409,
-    'Sua foto ainda está sendo preparada — tente de novo em instantes',
+    'Sua foto ainda está sendo preparada. Tente de novo em instantes.',
     'FOTO_DESATUALIZADA',
   );
 }
@@ -1211,7 +1211,7 @@ router.post(
   '/api/me/avatar/ai',
   requireAuth,
   asyncHandler(async (req, res) => {
-    if (!process.env.FAL_KEY) throw new HttpError(500, 'Geração de IA indisponível (FAL_KEY não configurada).');
+    if (!process.env.FAL_KEY) throw new HttpError(500, 'A geração de figurinha está indisponível agora. Tente de novo mais tarde.');
 
     const userId = req.user.id;
     const perfil = await getUserById(userId, 'foto_url, foto_hash, is_super_admin, created_at');
@@ -1241,8 +1241,8 @@ router.post(
     // pessoa TAMBÉM tiver crédito (aí é o crédito que paga). ---
     const kitPedido = String(req.body?.kit || direito.kitId || 'dark-gold');
     const kit = KITS_IA[kitPedido];
-    if (!kit) throw new HttpError(400, 'Kit inexistente.');
-    if (!kit.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
+    if (!kit) throw new HttpError(400, 'Uniforme inexistente.');
+    if (!kit.ativo) throw new HttpError(400, 'Uniforme ainda não disponível.');
 
     const { direitoUsado, kitId } = resolverDireitoEKit(direito, kitPedido);
     console.log('[avatar-ai] direito', { userId, fonte: direitoUsado.fonte, teamId: direitoUsado.teamId, kitId, creditos: direito.creditos });
@@ -1409,7 +1409,7 @@ async function pintarDaTarefa(job, { ip, origem }, controle) {
     const direito = await temDireito(userId);
     const { direitoUsado, kitId } = resolverDireitoEKit(direito, String(job.kitId || direito.kitId || 'dark-gold'));
     const kit = KITS_IA[kitId];
-    if (!kit?.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
+    if (!kit?.ativo) throw new HttpError(400, 'Uniforme ainda não disponível.');
     if (!direitoUsado.fonte) {
       throw new HttpError(403, 'Sua figurinha vem do pacote do time ou da Minha Figurinha. Peça a ativação na aba Figurinhas.', 'SEM_DIREITO');
     }
@@ -1475,7 +1475,7 @@ router.put(
     const userId = req.user.id;
     const kitId = String(req.body?.kit || '');
     const kit = KITS_IA[kitId];
-    if (!kit) throw new HttpError(400, 'Kit inexistente.');
+    if (!kit) throw new HttpError(400, 'Uniforme inexistente.');
 
     // ACHADO DA VARREDURA (22-set): esta rota só veste o que JÁ existe num slot
     // — nunca gera nada, nunca custa direito. O gate de `plan` que havia aqui

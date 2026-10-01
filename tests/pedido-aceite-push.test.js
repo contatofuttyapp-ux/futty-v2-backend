@@ -42,7 +42,7 @@ test('aprovar avisa quem pediu: título com o nome do time, corpo da casa e o li
   assert.equal(membroDe(tabelas, QUEM_PEDIU)?.role, 'member', 'virou membro');
   assert.deepEqual(notificacoes, [{
     ids: [QUEM_PEDIU],
-    payload: { title: 'Você entrou no Várzea FC!', body: 'Confirme presença e veja o próximo jogo.', url: '/equipa/varzea-fc?entrou=1' },
+    payload: { title: 'Você entrou no time Várzea FC!', body: 'Confirme presença e veja o próximo jogo.', url: '/equipa/varzea-fc?entrou=1' },
   }]);
 });
 

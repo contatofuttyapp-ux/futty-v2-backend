@@ -98,9 +98,9 @@ async function getUserCacheado(token) {
 async function requireAuth(req, res, next) {
   try {
     const token = bearerToken(req);
-    if (!token) throw new HttpError(401, 'Token em falta.');
+    if (!token) throw new HttpError(401, 'Sua sessão terminou. Entre de novo.');
     const user = await getUserCacheado(token);
-    if (!user) throw new HttpError(401, 'Sessão inválida.');
+    if (!user) throw new HttpError(401, 'Sua sessão terminou. Entre de novo.');
     req.user = user;
     // Gate de suspensão: conta suspensa NÃO entra (mensagem digna). Cache em memória
     // (TTL curto) → custo ~nulo; fail-open se o store falhar (não tranca ninguém).
@@ -138,9 +138,9 @@ async function optionalAuth(req, res, next) {
 async function requireSuperAdmin(req, res, next) {
   try {
     const token = bearerToken(req);
-    if (!token) throw new HttpError(401, 'Token em falta.');
+    if (!token) throw new HttpError(401, 'Sua sessão terminou. Entre de novo.');
     const user = await getUserCacheado(token);
-    if (!user) throw new HttpError(401, 'Sessão inválida.');
+    if (!user) throw new HttpError(401, 'Sua sessão terminou. Entre de novo.');
     req.user = user;
     const { data: perfil } = await supabase
       .from('users')

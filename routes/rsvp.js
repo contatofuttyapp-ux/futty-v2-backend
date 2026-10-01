@@ -64,7 +64,7 @@ async function jogoComoAdmin(req) {
   const game = await loadGame(req.params.gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
   const role = await getRole(game.teams.id, req.user.id);
-  if (role !== 'admin') throw new HttpError(403, 'Só admins podem gerir o RSVP.');
+  if (role !== 'admin') throw new HttpError(403, 'Só admins podem gerir a presença.');
   return game;
 }
 
@@ -171,9 +171,9 @@ router.post(
     if (await soOrganiza(game.teams.id, req.user.id)) throw new HttpError(403, MSG_SO_ORGANIZA);
     const { status } = req.body || {};
     if (!['confirmado', 'recusado'].includes(status)) throw new HttpError(400, 'Estado inválido.');
-    if (!game.rsvp_aberto || game.rsvp_fechado) throw new HttpError(400, 'O RSVP não está aberto.');
+    if (!game.rsvp_aberto || game.rsvp_fechado) throw new HttpError(400, 'A confirmação de presença não está aberta.');
     if (!game.rsvp_prazo || new Date(game.rsvp_prazo).getTime() <= Date.now()) {
-      throw new HttpError(400, 'O prazo do RSVP já passou.');
+      throw new HttpError(400, 'O prazo para confirmar presença já passou.');
     }
 
     // Estado anterior (para saber se uma vaga foi libertada ao recusar).

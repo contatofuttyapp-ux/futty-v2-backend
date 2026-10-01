@@ -266,7 +266,7 @@ app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, 
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {
-  res.status(404).json({ error: 'Recurso não encontrado.' });
+  res.status(404).json({ error: 'Não encontramos o que você pediu.' });
 });
 
 // Sentry: captura os erros propagados (por defeito só status >= 500) ANTES do
@@ -278,7 +278,7 @@ Sentry.setupExpressErrorHandler(app);
 app.use((err, req, res, next) => {
   const status = err instanceof HttpError ? err.status : 500;
   if (status >= 500) console.error('[Futty] Erro:', err.message);
-  const corpo = { error: err.message || 'Erro interno.' };
+  const corpo = { error: err.message || 'Algo deu errado. Tente de novo em instantes.' };
   if (err instanceof HttpError && err.code) corpo.code = err.code;
   res.status(status).json(corpo);
 });

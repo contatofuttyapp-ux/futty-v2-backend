@@ -47,7 +47,7 @@ async function registarQuota(userId, categoria, agoraISO) {
   const d = hoje(agoraISO);
   if (m.dia !== d) { m.dia = d; m.contagem_dia = 0; }
   if (categoria !== 'menor' && m.contagem_dia >= LIMITE_DIA) {
-    return { ok: false, motivo: 'Já recebemos as tuas denúncias de hoje.' };
+    return { ok: false, motivo: 'Já recebemos as suas denúncias de hoje.' };
   }
   m.contagem_dia += 1;
   await guardarReporter(userId, m);

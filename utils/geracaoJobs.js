@@ -55,7 +55,7 @@ const SEM_BATIMENTO_TAREFAS_MS = 5 * 60 * 1000;
 const RECLAMAR_APOS_MS = 40 * 1000;
 const janelaSemBatimento = () => (tarefasPintura.ativas() ? SEM_BATIMENTO_TAREFAS_MS : SEM_BATIMENTO_MS);
 
-const MSG_INTERROMPIDA = 'A pintura foi interrompida (o servidor reiniciou). Nada foi cobrado — é só tocar em gerar de novo.';
+const MSG_INTERROMPIDA = 'A pintura foi interrompida (o servidor reiniciou). Nada foi cobrado. É só tocar em gerar de novo.';
 const MSG_GENERICA = 'Não deu desta vez. Tente de novo.';
 const CODIGO_INTERROMPIDA = 'GERACAO_INTERROMPIDA';
 

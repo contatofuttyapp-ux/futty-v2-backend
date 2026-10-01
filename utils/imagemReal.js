@@ -20,7 +20,7 @@ async function verificarImagemReal(req, res, next) {
     return next();
   } catch (e) {
     console.warn('[imagem-real] rejeitada: não decodifica', { user: req.user?.id, erro: e.message });
-    return next(new HttpError(400, 'Arquivo inválido — não é uma imagem.'));
+    return next(new HttpError(400, 'Arquivo inválido. Não é uma imagem.'));
   }
 }
 

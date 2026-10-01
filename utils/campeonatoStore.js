@@ -300,7 +300,7 @@ function aplicarResultado(camp, confrontoId, pa, pb) {
   const c = camp.confrontos.find((x) => x.id === confrontoId);
   if (!c) throw new Error('Confronto não encontrado.');
   if (!c.time_a_id || !c.time_b_id) throw new Error('Confronto ainda não tem os dois times.');
-  if (camp.formato === 'mata' && pa === pb) throw new Error('No mata-mata não há empate — desempata no resultado.');
+  if (camp.formato === 'mata' && pa === pb) throw new Error('No mata-mata não há empate. Desempate no resultado.');
   c.placar_a = pa; c.placar_b = pb; c.jogado = true;
   c.vencedor_id = pa > pb ? c.time_a_id : pb > pa ? c.time_b_id : null;
 

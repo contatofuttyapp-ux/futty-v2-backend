@@ -778,7 +778,7 @@ router.delete(
     if (em) throw new HttpError(500, em.message);
 
     if ((membros || []).length === 1) {
-      throw new HttpError(400, 'Você é a única pessoa no time: arquivar o time chega em breve; por enquanto, fale conosco.');
+      throw new HttpError(400, 'Você é a única pessoa no time. Para arquivar o time, fale com a gente.');
     }
     if (role === 'admin') {
       const outrosAdmins = (membros || []).filter((m) => m.role === 'admin' && m.user_id !== req.user.id);
@@ -1190,7 +1190,7 @@ router.patch(
       try {
         await Promise.race([
           Promise.resolve(enviarNotificacao([pedido.user_id], {
-            title: `Você entrou no ${team.nome}!`,
+            title: `Você entrou no time ${team.nome}!`,
             body: 'Confirme presença e veja o próximo jogo.',
             url: `/equipa/${team.slug}?entrou=1`,
           })),

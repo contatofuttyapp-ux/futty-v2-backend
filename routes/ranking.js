@@ -425,7 +425,7 @@ router.post(
     const nota = Number(req.body?.nota);
     if (!paraUserId) throw new HttpError(400, 'Voto inválido.');
     if (paraUserId === req.user.id) throw new HttpError(400, 'Não pode votar em você mesmo.');
-    if (!notaValida(nota)) throw new HttpError(400, 'A nota deve ser entre 0.5 e 5 (incrementos de 0.5).');
+    if (!notaValida(nota)) throw new HttpError(400, 'A nota deve ser entre 0,5 e 5 (de 0,5 em 0,5).');
 
     // O votado tem de ser membro do time (visível no ranking).
     const { data: alvo } = await supabase
