@@ -85,8 +85,16 @@ const MODELOS_JOVENS = [
   { id: 'j3-homem-europeu', desc: 'Portuguese man, around 24, fair skin, short light-brown hair, light stubble' },
 ];
 const TETO_JOVENS = 1.0;
+// ─── RODADA 29E (1-out): --jovens2 — mais 3 na MESMA receita, para o mini sorteio do onboarding fechar 3 com cara de Brasil
+// (j1, j2, j4) e 3 de Portugal (j3, j5, j6). Mesma regra de idade (18–25, nunca menor, nunca pessoa real), mesmo kit.
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens2
+const MODELOS_JOVENS_2 = [
+  { id: 'j4-homem-negro-br',    desc: 'Brazilian Black man, around 23, dark brown skin, very short hair, clean-shaven' },
+  { id: 'j5-mulher-portuguesa', desc: 'Portuguese woman, around 22, light olive skin, long straight dark-brown hair' },
+  { id: 'j6-homem-portugues',   desc: 'Portuguese man, around 20, olive Mediterranean skin, short dark curly hair, clean-shaven' },
+];
 
-async function rodarJovens() {
+async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   const { chamarFal, emDolares } = require('../../utils/falFila');
   const { gerarFigurinha } = require('../../utils/geracaoFigurinha');
   const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
@@ -104,11 +112,11 @@ async function rodarJovens() {
     temporarios.push(caminho);
     return `${supabase.storage.from('kits').getPublicUrl(caminho).data.publicUrl}?v=${Date.now()}`;
   };
-  console.log(`\n3 MODELOS JOVENS (18–25) · receita real da produção · estimativa ~US$0,40 · teto US$${TETO_JOVENS.toFixed(2)}\n`);
+  console.log(`\n${lista.length} MODELOS JOVENS (18–25) · receita real da produção · estimativa ~US$0,40 · teto US${teto.toFixed(2)}\n`);
   let gasto = 0;
   const feitos = [];
-  for (const M of MODELOS_JOVENS) {
-    if (gasto >= TETO_JOVENS - 0.15) { console.error(`PAREI antes de ${M.id}: gasto US$${gasto.toFixed(3)} perto do teto`); break; }
+  for (const M of lista) {
+    if (gasto >= teto - 0.15) { console.error(`PAREI antes de ${M.id}: gasto US$${gasto.toFixed(3)} perto do teto`); break; }
     try {
       const pedido = await chamarFal('fal-ai/gpt-image-1.5', {
         prompt: `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
@@ -138,7 +146,7 @@ async function rodarJovens() {
   }
   if (temporarios.length) await supabase.storage.from('kits').remove(temporarios).catch(() => {});
   const ruins = feitos.filter((l) => l.ach !== null && l.ach > 0.5);
-  console.log(`\n${feitos.length}/3 cartões · defeitos de coroa: ${ruins.length} · custo real US$${gasto.toFixed(3)}`);
+  console.log(`\n${feitos.length}/${lista.length} cartões · defeitos de coroa: ${ruins.length} · custo real US$${gasto.toFixed(3)}`);
   console.log(`saída: ${saida}\ncópias: ${REDES}\n`);
 }
 
@@ -193,6 +201,7 @@ async function gerarCard(fotoUrl, kit, prompt, quality) {
 (async () => {
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
   if (process.argv.includes('--jovens')) { await rodarJovens(); return; }
+  if (process.argv.includes('--jovens2')) { await rodarJovens(MODELOS_JOVENS_2); return; }
 
   const refazer = (flag('refazer', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
   const estilo = flag('estilo', 'padrao');
