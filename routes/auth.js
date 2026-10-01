@@ -36,6 +36,10 @@ const geracaoJobs = require('../utils/geracaoJobs');
 // Bloco 2-A2: com o Cloud Tasks ligado, quem pinta é o pedido da tarefa (POST /api/interno/pintar/:jobId), não a CPU ociosa.
 const tarefasPintura = require('../utils/tarefasPintura');
 const { enviarNotificacao } = require('./push'); // o "Sua figurinha ficou pronta" (avisarQuePintou)
+// Rodada 29B (bloco 3, E): o enquadramento da miniatura (PUT/DELETE /api/me/avatar/enquadro).
+const { validarRecorte } = require('../utils/recorteAvatar');
+const recortesAvatar = require('../utils/recortesAvatar');
+const { parseUrlPublico } = require('../utils/storage');
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
 // que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
@@ -1670,6 +1674,70 @@ router.put(
     res.json({ avatar_url: linha.avatar_url, kit: linha.kit_id, figurinha_ativa: avatarEhFigurinhaNossa(linha.avatar_url) });
   })
 );
+
+/**
+ * PUT /api/me/avatar/enquadro { x, y, escala } — Rodada 29B (bloco 3, E): grava o recorte da
+ * MINIATURA do avatar (a janela quadrada que aparece no Início, no ranking, no sorteio…). Vale para
+ * o arquivo que é o avatar AGORA (foto crua ou figurinha): trocar de foto/uniforme leva a outro
+ * arquivo e o recorte velho para de valer sozinho. O motor passa a servir TODAS as miniaturas desse
+ * arquivo — as dela e as que as outras pessoas veem — no enquadramento escolhido (utils/recortesAvatar.js).
+ * 200 { recorte, avatar_url } (o avatar_url já sai com o recorte, pelo proxy) ·
+ * 400 recorte inválido · 409 o avatar não é um arquivo nosso (foto do Google, silhueta) · 503 sem a migração 070.
+ */
+router.put(
+  '/api/me/avatar/enquadro',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const recorte = validarRecorte(req.body);
+    if (!recorte) throw new HttpError(400, 'Enquadramento inválido.');
+    const { atual, alvo } = await lerAvatarParaEnquadro(req.user.id);
+    if (!alvo) throw new HttpError(409, 'Só dá para enquadrar uma foto sua ou a sua figurinha.', 'SEM_ARQUIVO_PROPRIO');
+
+    await ensureUserRow(req.user);
+    const { error } = await supabase
+      .from('users')
+      .update({ avatar_recorte: { ...recorte, arquivo: alvo.path } })
+      .eq('id', req.user.id);
+    if (error) throw erroDoEnquadro(error);
+
+    if (atual?.arquivo && atual.arquivo !== alvo.path) recortesAvatar.remover(atual.arquivo);
+    recortesAvatar.registrar(alvo.path, recorte);
+    invalidarSessaoDoPedido(req);
+    res.json({ recorte, avatar_url: atual.avatar_url });
+  })
+);
+
+/** DELETE /api/me/avatar/enquadro — volta à regra de sempre (figurinha no topo, foto em 50% 35%). */
+router.delete(
+  '/api/me/avatar/enquadro',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { atual } = await lerAvatarParaEnquadro(req.user.id);
+    const { error } = await supabase.from('users').update({ avatar_recorte: null }).eq('id', req.user.id);
+    if (error) throw erroDoEnquadro(error);
+    if (atual?.arquivo) recortesAvatar.remover(atual.arquivo);
+    invalidarSessaoDoPedido(req);
+    res.json({ recorte: null, avatar_url: atual?.avatar_url ?? null });
+  })
+);
+
+/** A linha do enquadro: o avatar atual, o arquivo dele no bucket e o recorte que já havia (se a migração 070 existe). */
+async function lerAvatarParaEnquadro(userId) {
+  const { data, error } = await supabase.from('users').select('avatar_url, avatar_recorte').eq('id', userId).maybeSingle();
+  if (error) throw erroDoEnquadro(error);
+  const parsed = parseUrlPublico(data?.avatar_url);
+  const alvo = parsed && parsed.bucket === 'avatars' ? parsed : null;
+  const arquivo = typeof data?.avatar_recorte?.arquivo === 'string' ? data.avatar_recorte.arquivo : null;
+  return { atual: { avatar_url: data?.avatar_url ?? null, arquivo }, alvo };
+}
+
+function erroDoEnquadro(error) {
+  if (ehMigracaoEmFalta(error.message)) {
+    console.warn('[avatar/enquadro] users.avatar_recorte indisponível (migração 070 aplicada?):', error.message);
+    return new HttpError(503, 'O enquadramento da miniatura ainda não está disponível. Tente mais tarde.');
+  }
+  return new HttpError(500, error.message);
+}
 
 // O catálogo de kits é daqui (é esta rota que valida `ativo` antes de gerar).
 // O Gabinete precisa da mesma lista para o dono escolher o uniforme do pacote

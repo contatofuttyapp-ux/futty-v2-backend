@@ -4,6 +4,7 @@
 // (nunca quebra o fluxo do utilizador que só quer apagar o post).
 const { supabase } = require('./db');
 const { assinarToken, decodificarToken } = require('./mediaToken');
+const { parametroDe: recorteDoArquivo } = require('./recortesAvatar');
 
 /**
  * Extrai o caminho dentro do bucket a partir de uma URL de mídia — a URL
@@ -147,6 +148,18 @@ async function assinarPayload(payload, expiresIn = 3600) {
 }
 
 /**
+ * O URL do proxy de um arquivo ({ bucket, path, v }, de parseUrlPublico). Rodada 29B (bloco 3, E):
+ * se a pessoa escolheu um recorte para a miniatura deste arquivo (utils/recortesAvatar.js), ele
+ * vai junto na query (`?rc=x,y,escala`); o proxy só o aplica nos pedidos quadrados (`sq=1`) e o
+ * resto (card, cromo, fotos grandes) o ignora. Fica na URL — e não no token — para o app, que
+ * acrescenta `&w=…`, nunca ter de decodificar nada, e porque o URL novo é o que quebra o cache.
+ */
+function urlDoProxy(base, p) {
+  const rc = p.bucket === 'avatars' ? recorteDoArquivo(p.path) : null;
+  return `${base}/api/media/${assinarToken(p.bucket, p.path, { v: p.v })}${rc ? `?rc=${rc}` : ''}`;
+}
+
+/**
  * Reescreve, IN-PLACE, os URLs de buckets privados para URLs ESTÁVEIS do proxy
  * (`${base}/api/media/<token>`). Tijolo 2: o DOM deixa de segurar URLs assinados
  * de vida curta → sem expiração à vista; o bucket continua privado. `base` é a
@@ -158,7 +171,7 @@ function proxificarPayload(payload, base) {
     percorrer(payload, (s) => {
       const p = parseUrlPublico(s);
       if (!p) return undefined;
-      return `${base}/api/media/${assinarToken(p.bucket, p.path, { v: p.v })}`;
+      return urlDoProxy(base, p);
     });
     return payload;
   } catch (e) {
@@ -202,6 +215,7 @@ module.exports = {
   bucketEcaminho,
   assinarPayload,
   proxificarPayload,
+  urlDoProxy,
   despublicarPayload,
   privatizarBuckets,
   BUCKETS_PRIVADOS,

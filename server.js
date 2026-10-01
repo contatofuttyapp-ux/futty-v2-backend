@@ -345,6 +345,8 @@ if (require.main === module) {
       Promise.all([plataformaStore.ler(), gabineteStore.ler()])
         .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
         .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
+      // Rodada 29B (bloco 3, E): quem tem recorte de miniatura (users.avatar_recorte) — carrega agora e relê a cada 2 min.
+      require('./utils/recortesAvatar').iniciar(supabase);
       // Rodada 29B (bloco 2-A2): a pintura por Cloud Tasks só liga com as três variáveis — diz no log em que modo subiu.
       const tarefasIncompletas = tarefasPintura.configuracaoIncompleta();
       if (tarefasIncompletas) console.error(`[Futty] Cloud Tasks da pintura incompleto (${tarefasIncompletas}) — a pintura roda na fila em memória.`);

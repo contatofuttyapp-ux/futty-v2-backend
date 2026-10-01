@@ -1,0 +1,33 @@
+-- =====================================================================
+-- Futty v2.0 — Migração 070: o recorte da miniatura do avatar
+-- (Rodada 29B, bloco 3, parte E, 1-out). Idempotente. ⚠️ Correr
+-- manualmente no SQL Editor do Supabase (DDL é do utilizador) — junto com
+-- as demais pendentes (064–070), no dia do "publica".
+--
+-- POR QUÊ: a miniatura redonda do avatar (Início, ranking, sorteio, Resenha…)
+-- sempre foi cortada por uma regra fixa (figurinha = topo; foto crua = 50% 35%).
+-- Quem enquadrava o card não via como a miniatura ficava, e a regra fixa
+-- comia o rosto de quem tem a cabeça noutro ponto da foto. Agora a pessoa
+-- arrasta/aproxima a miniatura no editor do card e vê o resultado ao vivo;
+-- o recorte escolhido é GRAVADO aqui e o motor o aplica em TODAS as miniaturas
+-- (as dela e as que as outras pessoas veem).
+--
+-- O QUE GUARDA: `avatar_recorte` = { x, y, escala, arquivo }.
+--   x, y     — o CENTRO da janela quadrada da miniatura, em fração da imagem (0–1)
+--   escala   — o zoom (1 = a janela é do tamanho da largura da imagem; até 3)
+--   arquivo  — o caminho (no bucket `avatars`) do arquivo a que o recorte pertence.
+--              Troca de foto/uniforme = arquivo novo = o recorte velho deixa de
+--              valer sozinho (nada a limpar); voltar ao arquivo antigo o traz de volta.
+-- NULL = sem recorte (a regra de sempre: figurinha no topo, foto em 50% 35%).
+--
+-- Quem lê e escreve é só o motor (chave secreta). O motor carrega a lista na
+-- subida e a relê a cada 2 min (utils/recortesAvatar.js); a rota PUT
+-- /api/me/avatar/enquadro atualiza a memória na hora na instância que a recebeu.
+--
+-- SEM esta migração o motor sobe normalmente (avisa uma vez no log) e as
+-- miniaturas seguem na regra de sempre; a rota de gravar responde 503 com
+-- mensagem clara.
+-- =====================================================================
+
+alter table public.users
+  add column if not exists avatar_recorte jsonb;

@@ -1,4 +1,4 @@
-// Proxy de imagem — GET /api/media/:token[?w=128|256|512|1024][&sq=1]
+// Proxy de imagem — GET /api/media/:token[?w=128|256|512|1024][&sq=1[&rc=x,y,escala]]
 //
 // VELOCIDADE 6A (15-set) — era um 302 para um signed URL do Supabase. Custava
 // caro no celular: o redirect abria uma SEGUNDA ligação TLS (Cloud Run → CDN do
@@ -26,6 +26,7 @@ const { criarLimiteDeMidia } = require('../middleware/limiters');
 const { supabase } = require('../utils/db');
 const { verificarToken } = require('../utils/mediaToken');
 const { normalizarLargura, chaveDoDerivado, gerarDerivado, obterDerivado } = require('../utils/derivadosMidia');
+const { deParametro } = require('../utils/recorteAvatar');
 
 const router = express.Router();
 
@@ -52,7 +53,10 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
   // cada tela. É OPT-IN de propósito — o mesmo proxy serve os escudos de time,
   // e um escudo largo cortado ao meio seria um defeito.
   const quadrado = req.query.sq === '1';
-  const chave = chaveDoDerivado({ bucket: alvo.bucket, path: alvo.path, v: alvo.v, largura, quadrado });
+  // `rc=x,y,escala` — a janela que a pessoa escolheu para a miniatura (Rodada 29B, E). Só conta
+  // junto de `sq=1`: o card, o cromo e as fotos grandes pedem sem ele e a ignoram. Lixo → sem recorte.
+  const recorte = quadrado ? deParametro(req.query.rc) : null;
+  const chave = chaveDoDerivado({ bucket: alvo.bucket, path: alvo.path, v: alvo.v, largura, quadrado, recorte });
   const etag = `"${chave}"`;
 
   const cabecalhos = () => {
@@ -73,7 +77,7 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
       const { data, error } = await supabase.storage.from(alvo.bucket).download(alvo.path);
       if (error || !data) throw new ArquivoAusente();
       const original = Buffer.from(await data.arrayBuffer());
-      return gerarDerivado(original, data.type || 'application/octet-stream', { largura, quadrado });
+      return gerarDerivado(original, data.type || 'application/octet-stream', { largura, quadrado, recorte });
     });
     cabecalhos();
     res.set('Content-Type', item.tipo);

@@ -9,8 +9,7 @@
 // (`/api/media/<token>`, público, token HMAC) — que NÃO bate no regex de
 // despublicarPayload, logo sobrevive à varredura do middleware. Para quem não pode,
 // pomos '' → o frontend cai na silhueta-casa. O middleware fica INTOCADO.
-const { parseUrlPublico } = require('./storage');
-const { assinarToken } = require('./mediaToken');
+const { parseUrlPublico, urlDoProxy } = require('./storage');
 
 /** >=18 anos hoje. Sem birthdate → false (fail-closed). Mesma régua de auth.js. */
 function ehAdulto(birthdate) {
@@ -38,7 +37,7 @@ function aplicarRostoPublico(tr, usersById, base) {
     const u = j.user_id && usersById ? usersById.get(j.user_id) : null;
     if (u && podeRevelar(u)) {
       const p = parseUrlPublico(j.avatar_url);
-      j.avatar_url = p ? `${base}/api/media/${assinarToken(p.bucket, p.path, { v: p.v })}` : '';
+      j.avatar_url = p ? urlDoProxy(base, p) : '';
     } else {
       j.avatar_url = ''; // menor / sem dob / sem consentimento / convidado → silhueta
     }

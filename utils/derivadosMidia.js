@@ -17,6 +17,7 @@
 const crypto = require('node:crypto');
 const sharp = require('sharp');
 const { parseUrlPublico } = require('./storage');
+const { janelaDoRecorte, paraParametro } = require('./recorteAvatar');
 
 const DEGRAUS = [128, 256, 512, 1024];
 const LARGURA_MAX_SEM_W = 1600;
@@ -65,11 +66,16 @@ function normalizarLargura(bruto) {
   return DEGRAUS.reduce((melhor, d) => (Math.abs(d - n) < Math.abs(melhor - n) ? d : melhor), DEGRAUS[0]);
 }
 
-/** A chave do derivado: o `v` entra nela, conteúdo novo nunca é servido a partir de um derivado velho. */
-function chaveDoDerivado({ bucket, path, v, largura, quadrado }) {
+/**
+ * A chave do derivado: o `v` entra nela, conteúdo novo nunca é servido a partir de um derivado velho.
+ * O recorte (Rodada 29B, E) só entra quando conta — quadrado COM recorte —, para a chave de tudo o
+ * que não tem recorte continuar exatamente a de sempre (e o aquecimento do upload continuar a bater).
+ */
+function chaveDoDerivado({ bucket, path, v, largura, quadrado, recorte = null }) {
+  const param = quadrado && recorte ? paraParametro(recorte) : null;
   return crypto
     .createHash('sha1')
-    .update(`${bucket}:${path}:${v || ''}:${largura || 'orig'}:${quadrado ? 'sq' : 'livre'}`)
+    .update(`${bucket}:${path}:${v || ''}:${largura || 'orig'}:${quadrado ? 'sq' : 'livre'}${param ? `:rc${param}` : ''}`)
     .digest('hex');
 }
 
@@ -78,17 +84,35 @@ function chaveDoDerivado({ bucket, path, v, largura, quadrado }) {
  * imagem conhecida passam intactos: converter um GIF para WebP estático mataria a animação.
  * `quadrado` corta o quadrado do TOPO (RODADA 19: o recorte 2:3 já garante o rosto no terço de
  * cima; a 'attention' falhava em fotos de corpo inteiro, escolhendo o pulso em vez do rosto).
+ * `recorte` (Rodada 29B, E): a janela quadrada que a pessoa escolheu para a miniatura (utils/recorteAvatar.js)
+ * substitui o "quadrado do topo" — só vale junto de `quadrado`.
  */
-async function gerarDerivado(original, tipoOriginal, { largura, quadrado }) {
+async function gerarDerivado(original, tipoOriginal, { largura, quadrado, recorte = null }) {
   if (!TIPOS_REDIMENSIONAVEIS.has(tipoOriginal)) return { buf: original, tipo: tipoOriginal };
   const alvoLargura = largura || LARGURA_MAX_SEM_W;
+  const qualidade = alvoLargura <= 256 ? 82 : 88;
+  if (quadrado && recorte) {
+    // A janela é medida na imagem JÁ orientada: EXIF de 5 a 8 troca largura e altura.
+    const meta = await sharp(original).metadata();
+    const girada = (meta.orientation || 1) >= 5;
+    const janela = janelaDoRecorte(girada ? meta.height : meta.width, girada ? meta.width : meta.height, recorte);
+    if (janela) {
+      const buf = await sharp(original)
+        .rotate()
+        .extract({ left: janela.left, top: janela.top, width: janela.lado, height: janela.lado })
+        .resize({ width: alvoLargura, height: alvoLargura, fit: 'cover', withoutEnlargement: true })
+        .webp({ quality: qualidade, alphaQuality: 90, effort: 4 })
+        .toBuffer();
+      return { buf, tipo: 'image/webp' };
+    }
+  }
   const medida = quadrado
     ? { width: alvoLargura, height: alvoLargura, fit: 'cover', position: 'top', withoutEnlargement: true }
     : { width: alvoLargura, withoutEnlargement: true };
   const buf = await sharp(original)
     .rotate() // respeita o EXIF antes de redimensionar
     .resize(medida)
-    .webp({ quality: alvoLargura <= 256 ? 82 : 88, alphaQuality: 90, effort: 4 })
+    .webp({ quality: qualidade, alphaQuality: 90, effort: 4 })
     .toBuffer();
   return { buf, tipo: 'image/webp' };
 }
