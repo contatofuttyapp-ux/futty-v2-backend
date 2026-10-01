@@ -83,6 +83,7 @@ const comprasRoutes = require('./routes/compras');
 const aviseMeRoutes = require('./routes/aviseMe');
 const figurinhaJobRoutes = require('./routes/figurinhaJob');
 const geracaoJobs = require('./utils/geracaoJobs');
+const tarefasPintura = require('./utils/tarefasPintura');
 const { marcarFigurinhaStatus } = require('./services/inicio');
 
 const app = express();
@@ -344,6 +345,10 @@ if (require.main === module) {
       Promise.all([plataformaStore.ler(), gabineteStore.ler()])
         .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
         .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
+      // Rodada 29B (bloco 2-A2): a pintura por Cloud Tasks só liga com as três variáveis — diz no log em que modo subiu.
+      const tarefasIncompletas = tarefasPintura.configuracaoIncompleta();
+      if (tarefasIncompletas) console.error(`[Futty] Cloud Tasks da pintura incompleto (${tarefasIncompletas}) — a pintura roda na fila em memória.`);
+      else console.log(`[Futty] Pintura da figurinha: ${tarefasPintura.ativas() ? 'por Cloud Tasks (pedido interno)' : 'na fila em memória (Cloud Tasks desligado)'}`);
       // Rodada 29B (bloco 2, A): pintura "em andamento" sem batimento há mais de 60 s é de um processo que morreu
       // (reinício, deploy): vira 'falhou' com a mensagem "interrompida, nada foi cobrado". A de outra instância
       // viva tem batimento fresco e não é tocada.

@@ -105,10 +105,10 @@ function subir(routers, t) {
   const servidor = app.listen(0);
   t.after(() => servidor.close());
   const base = `http://127.0.0.1:${servidor.address().port}`;
-  return async (metodo, rota, corpo, usuario = null) => {
+  return async (metodo, rota, corpo, usuario = null, cabecalhos = {}) => {
     const r = await fetch(`${base}${rota}`, {
       method: metodo,
-      headers: { 'content-type': 'application/json', ...(usuario ? { 'x-teste-usuario': usuario } : {}) },
+      headers: { 'content-type': 'application/json', ...(usuario ? { 'x-teste-usuario': usuario } : {}), ...cabecalhos },
       body: corpo ? JSON.stringify(corpo) : undefined,
     });
     return { status: r.status, json: await r.json().catch(() => null) };

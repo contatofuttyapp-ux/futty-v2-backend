@@ -20,11 +20,17 @@
 // (reinício, deploy, fal fora do ar) termina 'falhou' e não custa nada a ninguém.
 //
 // O QUE ESTE MÓDULO NÃO FAZ: não escolhe kit, não checa direito, não fala com a fal.
+//
+// BLOCO 2-A2 (1-out): com o Cloud Tasks ligado (utils/tarefasPintura.js) o POST só REGISTRA o job e
+// enfileira uma tarefa; quem pinta é POST /api/interno/pintar/:jobId, DENTRO de um pedido (o Cloud
+// Run só dá CPU enquanto há pedido). `reivindicar` é a porta de entrada desse pedido — atômica e
+// idempotente — e `adotar` põe o job na memória DESTE processo para ele pintar como sempre pintou.
 // ═══════════════════════════════════════════════════════════════════════════════
 const crypto = require('node:crypto');
 const { supabase } = require('./db');
 const { HttpError } = require('./http');
 const { avatarEhFigurinhaNossa } = require('./figurinhaRegra');
+const tarefasPintura = require('./tarefasPintura');
 
 const ESTADOS_ATIVOS = ['na_fila', 'em_andamento'];
 const ETAPAS = ['preparando', 'pintando', 'acabamento', 'pronta'];
@@ -40,6 +46,14 @@ const TETO_PROGRESSO = 0.9; // a barra segura em 90% até existir a imagem
 // "em andamento" sem batimento há mais de 60 s é de um processo que morreu.
 const BATIMENTO_MS = 10 * 1000;
 const SEM_BATIMENTO_MS = 60 * 1000;
+// Com o Cloud Tasks, uma pintura parada (processo morto) NÃO está perdida: a tarefa é repetida (10, 20 e 40 s
+// depois). Só vale dar por interrompida passado o último prazo de repetição — senão a consulta do app marcaria
+// 'falhou' no meio da espera e a repetição acharia o job já encerrado.
+const SEM_BATIMENTO_TAREFAS_MS = 5 * 60 * 1000;
+// Quem atende a tarefa retoma uma pintura 'em andamento' sem batimento há mais de 40 s (4 batimentos perdidos).
+// Menos que os 60 s acima de propósito: a 3ª repetição do Cloud Tasks cai ~70 s depois da queda.
+const RECLAMAR_APOS_MS = 40 * 1000;
+const janelaSemBatimento = () => (tarefasPintura.ativas() ? SEM_BATIMENTO_TAREFAS_MS : SEM_BATIMENTO_MS);
 
 const MSG_INTERROMPIDA = 'A pintura foi interrompida (o servidor reiniciou). Nada foi cobrado — é só tocar em gerar de novo.';
 const MSG_GENERICA = 'Não deu desta vez. Tente de novo.';
@@ -213,7 +227,7 @@ async function emCursoDoUsuario(userId) {
   if (estaAtivo(local)) return { id: local.id, estimativaSegundos: local.estimativaSegundos };
   if (!tabelaOk) return null;
   try {
-    const desde = new Date(Date.now() - SEM_BATIMENTO_MS).toISOString();
+    const desde = new Date(Date.now() - janelaSemBatimento()).toISOString();
     const { data, error } = await supabase
       .from('geracoes_jobs')
       .select('id, estimativa_s')
@@ -235,13 +249,11 @@ async function emCursoDoUsuario(userId) {
  * passam os dois (quem chega depois recebe o job do primeiro).
  * @returns {{ job: object, jaEmAndamento: boolean }}
  */
-function reservar({ userId, kitId }) {
-  const existente = ativoPorUsuario.get(userId);
-  if (estaAtivo(existente)) return { job: existente, jaEmAndamento: true };
-  const job = {
+function novoJob(campos) {
+  return {
     id: crypto.randomUUID(),
-    userId,
-    kitId,
+    userId: null,
+    kitId: null,
     estado: 'na_fila',
     etapa: 'preparando',
     estimativaSegundos: PADRAO_S,
@@ -256,9 +268,18 @@ function reservar({ userId, kitId }) {
     status: null,
     erroOriginal: null,
     ultimaConsulta: 0,
+    persistido: false, // a linha em geracoes_jobs existe? (a tarefa do Cloud Tasks só vale com ela)
+    viaTarefa: false, // este processo pinta a pedido de uma tarefa do Cloud Tasks (bloco 2-A2)
     escrita: Promise.resolve(),
     promessa: null,
+    ...campos,
   };
+}
+
+function reservar({ userId, kitId }) {
+  const existente = ativoPorUsuario.get(userId);
+  if (estaAtivo(existente)) return { job: existente, jaEmAndamento: true };
+  const job = novoJob({ userId, kitId });
   jobs.set(job.id, job);
   ativoPorUsuario.set(userId, job);
   return { job, jaEmAndamento: false };
@@ -278,13 +299,80 @@ async function registrar(job) {
         kit_id: job.kitId,
         estimativa_s: job.estimativaSegundos,
         criado_em: new Date(job.criadoEm).toISOString(),
+        // Explícito (e não só o DEFAULT now() da coluna): é por ele que a pintura enfileirada, sem batimento ainda, conta como "em curso".
+        atualizado_em: new Date(job.criadoEm).toISOString(),
       });
       if (error) tratarErroDaTabela(error, 'registrar');
+      else job.persistido = true;
     } catch (e) {
       tratarErroDaTabela(e, 'registrar');
     }
   });
   await job.escrita;
+  return job;
+}
+
+// ── Bloco 2-A2: a pintura que anda por pedido (Cloud Tasks) ──────────────────
+
+/**
+ * O POST enfileirou a tarefa: dali em diante quem sabe do job é a tabela (e quem pinta é o pedido da tarefa,
+ * neste processo ou em outro). Solta a reserva em memória — senão ela nunca seria liberada aqui — e a consulta
+ * e o "já há uma pintura em curso" passam a olhar a linha.
+ */
+function entregarATarefa(job) {
+  if (ativoPorUsuario.get(job.userId) === job) ativoPorUsuario.delete(job.userId);
+  jobs.delete(job.id);
+}
+
+/**
+ * Porta de entrada do pedido da tarefa: pega o job para pintar, de forma ATÔMICA (um UPDATE condicional — dois
+ * pedidos ao mesmo tempo não pegam os dois) e IDEMPOTENTE:
+ *   { resultado: 'ok', linha }        peguei (era 'na_fila', ou 'em_andamento' de um processo que morreu)
+ *   { resultado: 'concluido', linha } já terminou ('pronta' ou 'falhou'): não repinta
+ *   { resultado: 'em_curso' }         outro processo pinta agora, com batimento fresco
+ *   { resultado: 'inexistente' }      sem linha (ou sem a tabela)
+ * Erro do banco SOBE (o pedido vira 5xx e o Cloud Tasks tenta de novo): engolir aqui perderia a pintura.
+ */
+async function reivindicar(jobId) {
+  if (!tabelaOk) return { resultado: 'inexistente' };
+  const agora = new Date().toISOString();
+  const pegar = { estado: 'em_andamento', etapa: 'preparando', iniciado_em: agora, atualizado_em: agora };
+  try {
+    let r = await supabase.from('geracoes_jobs').update(pegar).eq('id', jobId).eq('estado', 'na_fila').select('*');
+    if (r.error) throw r.error;
+    if (r.data?.length) return { resultado: 'ok', linha: r.data[0] };
+
+    const limite = new Date(Date.now() - RECLAMAR_APOS_MS).toISOString();
+    r = await supabase.from('geracoes_jobs').update(pegar).eq('id', jobId).eq('estado', 'em_andamento').lt('atualizado_em', limite).select('*');
+    if (r.error) throw r.error;
+    if (r.data?.length) return { resultado: 'ok', linha: r.data[0], retomada: true };
+
+    const lida = await supabase.from('geracoes_jobs').select('*').eq('id', jobId).maybeSingle();
+    if (lida.error) throw lida.error;
+    if (!lida.data) return { resultado: 'inexistente' };
+    if (!ESTADOS_ATIVOS.includes(lida.data.estado)) return { resultado: 'concluido', linha: lida.data };
+    return { resultado: 'em_curso', linha: lida.data };
+  } catch (e) {
+    if (tabelaNaoExiste(e)) { tratarErroDaTabela(e, 'reivindicar'); return { resultado: 'inexistente' }; }
+    console.warn('[geracao-jobs] reivindicar falhou:', e?.message || e);
+    throw e;
+  }
+}
+
+/** O job que `reivindicar` pegou, já na memória DESTE processo — daqui ele é pintado por `iniciar`, como sempre. */
+function adotar(linha) {
+  const job = novoJob({
+    id: linha.id,
+    userId: linha.user_id,
+    kitId: linha.kit_id,
+    estado: 'em_andamento',
+    estimativaSegundos: linha.estimativa_s || PADRAO_S,
+    criadoEm: new Date(linha.criado_em).getTime(),
+    persistido: true,
+    viaTarefa: true,
+  });
+  jobs.set(job.id, job);
+  ativoPorUsuario.set(job.userId, job);
   return job;
 }
 
@@ -402,7 +490,7 @@ async function ler(jobId, userId, { aoInterromper } = {}) {
     if (error) { tratarErroDaTabela(error, 'ler o job'); return null; }
     if (!data || data.user_id !== userId) return null;
     let linha = data;
-    if (ESTADOS_ATIVOS.includes(linha.estado) && Date.now() - new Date(linha.atualizado_em).getTime() > SEM_BATIMENTO_MS) {
+    if (ESTADOS_ATIVOS.includes(linha.estado) && Date.now() - new Date(linha.atualizado_em).getTime() > janelaSemBatimento()) {
       linha = await marcarInterrompida(linha, { aoMarcar: aoInterromper });
     }
     return visaoDaLinha(linha);
@@ -416,7 +504,7 @@ async function ler(jobId, userId, { aoInterromper } = {}) {
 async function varrerInterrompidas({ aoMarcar } = {}) {
   if (!tabelaOk) return 0;
   try {
-    const limite = new Date(Date.now() - SEM_BATIMENTO_MS).toISOString();
+    const limite = new Date(Date.now() - janelaSemBatimento()).toISOString();
     const { data, error } = await supabase
       .from('geracoes_jobs')
       .select('id, user_id')
@@ -441,6 +529,13 @@ async function varrerInterrompidas({ aoMarcar } = {}) {
 async function interromperTodas({ aoMarcar } = {}) {
   const ativos = [...jobs.values()].filter(estaAtivo);
   await Promise.all(ativos.map(async (job) => {
+    if (job.viaTarefa) {
+      // Pintura a pedido do Cloud Tasks: este processo vai morrer, o pedido cai e a tarefa é repetida. Devolve o job
+      // à fila (sem batimento a esperar) e NÃO marca falha — marcar 'falhou' enterraria a repetição que vem aí.
+      // Se a pintura acabar antes de o processo sair, o desfecho real (pronta) escreve por cima.
+      await gravar(job, { estado: 'na_fila', etapa: 'preparando' });
+      return;
+    }
     job.estado = 'falhou';
     job.erro = MSG_INTERROMPIDA;
     job.codigo = CODIGO_INTERROMPIDA;
@@ -470,6 +565,9 @@ module.exports = {
   emCursoDoUsuario,
   reservar,
   registrar,
+  entregarATarefa,
+  reivindicar,
+  adotar,
   iniciar,
   ler,
   varrerInterrompidas,
@@ -479,5 +577,7 @@ module.exports = {
   PADRAO_S,
   TETO_PROGRESSO,
   SEM_BATIMENTO_MS,
+  SEM_BATIMENTO_TAREFAS_MS,
+  RECLAMAR_APOS_MS,
   _zerar,
 };

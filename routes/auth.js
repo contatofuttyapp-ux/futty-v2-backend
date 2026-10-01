@@ -33,6 +33,8 @@ const {
 const { temDireito, debitar, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
 // Rodada 29B (bloco 2, A): a pintura roda em segundo plano, numa fila em memória (uma por vez por pessoa).
 const geracaoJobs = require('../utils/geracaoJobs');
+// Bloco 2-A2: com o Cloud Tasks ligado, quem pinta é o pedido da tarefa (POST /api/interno/pintar/:jobId), não a CPU ociosa.
+const tarefasPintura = require('../utils/tarefasPintura');
 const { enviarNotificacao } = require('./push'); // o "Sua figurinha ficou pronta" (avisarQuePintou)
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
@@ -1162,6 +1164,22 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   return { avatar_url: avatarUrl, kit: kitId, do_slot: false, reutilizado: false, figurinha_ativa: avatarEhFigurinhaNossa(avatarUrl) };
 }
 
+/**
+ * Quem paga e qual uniforme, dado o direito e o kit pedido: no pacote do time vale o uniforme do time, e um kit
+ * diferente só sai se a pessoa TAMBÉM tiver crédito (aí é o crédito que paga). Idempotente: aplicada ao kit já
+ * resolvido devolve o mesmo par — é o que a tarefa do Cloud Tasks faz, lendo `kit_id` da linha do job.
+ */
+function resolverDireitoEKit(direito, kitPedido) {
+  let direitoUsado = direito;
+  let kitId = kitPedido;
+  if (direito.fonte === 'time' && kitPedido !== direito.kitId) {
+    const comCredito = direito.opcoes.find((o) => o.fonte === 'credito');
+    if (comCredito) direitoUsado = { ...comCredito, creditos: direito.creditos, opcoes: direito.opcoes };
+    else kitId = direito.kitId; // sem crédito, vale o uniforme do time
+  }
+  return { direitoUsado, kitId };
+}
+
 /** O push "Sua figurinha ficou pronta" — só se a pessoa NÃO está olhando o card (não consultou o job há 6 s). */
 async function avisarQuePintou(job) {
   if (job.estado !== 'pronta') return;
@@ -1222,13 +1240,7 @@ router.post(
     if (!kit) throw new HttpError(400, 'Kit inexistente.');
     if (!kit.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
 
-    let direitoUsado = direito;
-    let kitId = kitPedido;
-    if (direito.fonte === 'time' && kitPedido !== direito.kitId) {
-      const comCredito = direito.opcoes.find((o) => o.fonte === 'credito');
-      if (comCredito) direitoUsado = { ...comCredito, creditos: direito.creditos, opcoes: direito.opcoes };
-      else kitId = direito.kitId; // sem crédito, vale o uniforme do time
-    }
+    const { direitoUsado, kitId } = resolverDireitoEKit(direito, kitPedido);
     console.log('[avatar-ai] direito', { userId, fonte: direitoUsado.fonte, teamId: direitoUsado.teamId, kitId, creditos: direito.creditos });
 
     // --- IDEMPOTÊNCIA: se já existe slot deste kit E foi gerado da MESMA foto
@@ -1335,6 +1347,26 @@ router.post(
     const { job, jaEmAndamento } = geracaoJobs.reservar({ userId, kitId });
     if (jaEmAndamento) return respostaDePinturaEmCurso(res, job.id, job.estimativaSegundos, assincrono);
     await geracaoJobs.registrar(job);
+
+    // RODADA 29B (bloco 2-A2) — com o Cloud Tasks ligado, a pintura roda DENTRO de um pedido (o da tarefa), porque o
+    // Cloud Run só dá CPU enquanto há pedido: o POST só enfileira e responde. O app antigo (sem `assincrono`) espera a
+    // figurinha na resposta — esse pedido já segura a CPU, então pinta aqui mesmo, como sempre. Sem a linha na tabela
+    // (069 por aplicar) ou se o Cloud Tasks recusar, cai na fila em memória: o app consulta e a CPU anda.
+    if (assincrono && tarefasPintura.ativas() && job.persistido) {
+      try {
+        await tarefasPintura.enfileirar({ jobId: job.id, ip: req.ip, origem });
+        geracaoJobs.entregarATarefa(job);
+        return res.status(202).json({ jobId: job.id, estimativaSegundos: job.estimativaSegundos });
+      } catch (e) {
+        console.error('[avatar-ai] Cloud Tasks não aceitou a tarefa — pinto em memória:', e?.message || e);
+        // A tarefa pode ter sido criada mesmo com o erro (prazo estourado na resposta): só pinta aqui quem pegar o job.
+        const r = await geracaoJobs.reivindicar(job.id).catch(() => ({ resultado: 'ok' }));
+        if (r.resultado !== 'ok') {
+          geracaoJobs.entregarATarefa(job);
+          return res.status(202).json({ jobId: job.id, estimativaSegundos: job.estimativaSegundos });
+        }
+      }
+    }
     geracaoJobs.iniciar(
       job,
       async (controle) => {
@@ -1355,6 +1387,75 @@ router.post(
     await job.promessa;
     if (job.estado === 'falhou') throw job.erroOriginal;
     return res.json(job.resultado);
+  })
+);
+
+/**
+ * O contexto que o POST montou (perfil, direito, kit, slot) refeito do banco para o pedido da tarefa, que roda
+ * depois e talvez em outro processo. `kit_id` da linha é o uniforme já resolvido. Qualquer recusa (sem foto, sem
+ * direito, kit fora do ar) vira o desfecho do job, como no POST — e, como lá, só debita depois da figurinha gravada.
+ */
+async function pintarDaTarefa(job, { ip, origem }, controle) {
+  const { userId } = job;
+  const reqDaTarefa = { user: { id: userId }, ip: ip || null, headers: {} };
+  try {
+    const perfil = await getUserById(userId, 'foto_url, foto_hash, is_super_admin, created_at, email');
+    if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
+    reqDaTarefa.user.email = perfil.email;
+    const direito = await temDireito(userId);
+    const { direitoUsado, kitId } = resolverDireitoEKit(direito, String(job.kitId || direito.kitId || 'dark-gold'));
+    const kit = KITS_IA[kitId];
+    if (!kit?.ativo) throw new HttpError(400, 'Kit ainda não disponível.');
+    if (!direitoUsado.fonte) {
+      throw new HttpError(403, 'Sua figurinha vem do pacote do time ou da Minha Figurinha. Peça a ativação na aba Figurinhas.', 'SEM_DIREITO');
+    }
+    const { data: slot } = await supabase
+      .from('user_avatar_slots')
+      .select('avatar_url, foto_fingerprint')
+      .eq('user_id', userId)
+      .eq('kit_id', kitId)
+      .maybeSingle();
+    return await pintarFigurinha({ req: reqDaTarefa, userId, perfil, origem: origem || null, direitoUsado, kitId, kit, slot }, controle);
+  } catch (err) {
+    await marcarFigurinhaStatus(userId, 'falhou');
+    invalidarSessaoDoPedido(reqDaTarefa);
+    throw err;
+  }
+}
+
+const UUID_JOB = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * POST /api/interno/pintar/:jobId — o pedido do Cloud Tasks que PINTA (bloco 2-A2). Interno: só passa com o segredo
+ * (`x-futty-interno`) e, com o Cloud Tasks ligado, o token OIDC da conta de serviço do Cloud Run (utils/tarefasPintura.js);
+ * sem um dos dois, 401. Roda a pintura DENTRO do pedido e responde ao fim — a CPU do Cloud Run existe porque o pedido está aberto.
+ *   200 { estado }    terminou — 'pronta' OU 'falhou'. Falha de pintura (cabeça cortada, foto, sem direito) é DESFECHO,
+ *                     não motivo de repetir: repetir pagaria a fal de novo à toa. O app lê o erro pelo job.
+ *   200 { repintou: false }  o job já tinha terminado (a tarefa chegou de novo): não repinta, não cobra de novo.
+ *   409               outro processo pinta agora, com batimento fresco: o Cloud Tasks tenta mais tarde.
+ *   5xx / conexão caída  o processo morreu no meio: o Cloud Tasks repete (3 vezes, 10 s de espera inicial) e a repetição
+ *                     retoma a pintura quando o batimento do processo morto passa de 40 s — o direito só é debitado
+ *                     depois da figurinha gravada, então nada foi cobrado.
+ */
+router.post(
+  '/api/interno/pintar/:jobId',
+  asyncHandler(async (req, res) => {
+    await tarefasPintura.autorizar(req);
+    const { jobId } = req.params;
+    if (!UUID_JOB.test(jobId)) throw new HttpError(404, 'Pintura não encontrada.');
+    const r = await geracaoJobs.reivindicar(jobId);
+    if (r.resultado === 'inexistente') throw new HttpError(404, 'Pintura não encontrada.');
+    if (r.resultado === 'concluido') return res.json({ jobId, estado: r.linha.estado, repintou: false });
+    if (r.resultado === 'em_curso') throw new HttpError(409, 'Esta pintura já está em andamento.', 'PINTURA_EM_CURSO');
+
+    const job = geracaoJobs.adotar(r.linha);
+    geracaoJobs.iniciar(
+      job,
+      (controle) => pintarDaTarefa(job, { ip: req.body?.ip, origem: req.body?.origem }, controle),
+      { aoTerminar: avisarQuePintou },
+    );
+    await job.promessa;
+    return res.json({ jobId, estado: job.estado, repintou: true });
   })
 );
 
