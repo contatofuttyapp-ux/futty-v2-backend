@@ -19,15 +19,18 @@ const TETO_BYTES = 6 * 1024;
 const FRACAO_ALTURA = 0.62;
 const FOLGA_TOPO = 0.06;
 
-// nome do arquivo (sem acento, é URL) ← recorte do modelo. 3 com cara de Brasil (j1, j2, j4), 3 de Portugal (j3, j5, j6).
+// nome do arquivo (sem acento, é URL) ← recorte do modelo. Rodada 29E2 (2-out): ficam TIAGÃO (j8), PEDRÃO (j4), RAFA (j10), BRUNINHO (j11) e LÉO (j12),
+// aprovados pelo dono; BRUNINHO e LÉO são a 2ª leva (--jovens4); DUDU é a 4ª (--jovens6: gordinho nerd de óculos, cabeça reta e de frente). 3 Brasil, 3 Portugal.
+// Com --so a,b exporta só esses nomes (os aprovados não são tocados).
 const BUSTOS = [
-  ['bruninho', 'j1-homem-claro'],
-  ['rafa', 'j2-mulher-parda'],
-  ['tiagao', 'j3-homem-europeu'],
+  ['bruninho', 'j11-bruninho-br'],
+  ['tiagao', 'j8-tiagao-br'],
+  ['leo', 'j12-leo-pt'],
+  ['rafa', 'j10-rafa-pt'],
   ['pedrao', 'j4-homem-negro-br'],
-  ['leo', 'j5-mulher-portuguesa'],
-  ['dudu', 'j6-homem-portugues'],
+  ['dudu', 'j15-dudu-pt'],
 ];
+const SO = (() => { const i = process.argv.indexOf('--so'); return i > 0 && process.argv[i + 1] ? process.argv[i + 1].split(',') : null; })();
 
 async function busto(recortePng) {
   const recorte = sharp(recortePng).trim({ threshold: 10 });
@@ -63,7 +66,7 @@ async function emWebp(png) {
   fs.mkdirSync(SAIDA, { recursive: true });
   const linhas = [];
   let total = 0;
-  for (const [nome, modelo] of BUSTOS) {
+  for (const [nome, modelo] of BUSTOS.filter(([n]) => !SO || SO.includes(n))) {
     const origem = path.join(ENTRADA, `${modelo}-recorte.png`);
     if (!fs.existsSync(origem)) { console.error(`FALTA ${origem} — gere o modelo primeiro (gerar-modelos-ficticios.js --jovens/--jovens2)`); process.exitCode = 1; continue; }
     const png = await busto(fs.readFileSync(origem));

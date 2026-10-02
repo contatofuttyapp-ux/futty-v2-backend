@@ -93,6 +93,70 @@ const MODELOS_JOVENS_2 = [
   { id: 'j5-mulher-portuguesa', desc: 'Portuguese woman, around 22, light olive skin, long straight dark-brown hair' },
   { id: 'j6-homem-portugues',   desc: 'Portuguese man, around 20, olive Mediterranean skin, short dark curly hair, clean-shaven' },
 ];
+// ─── RODADA 29E2 (2-out): --jovens3 — os 4 HOMENS novos do mini sorteio (ficam DUDU = j6 e PEDRÃO = j4, aprovados pelo dono).
+// Mesma receita e mesma regra (18–25, nunca menor, nunca pessoa real, kit Dark Gold). Todos diferentes entre si e dos dois que
+// ficam (j6: oliva, cacheado escuro, sem barba; j4: pele escura, raspado, sem barba) — varia tom de pele, cabelo, rosto e barba.
+// 2 com cara de Brasil (j7, j8) e 2 de Portugal (j9, j10). Nomes no app: BRUNINHO, TIAGÃO, LÉO, RAFA (exportar-bustos-onboarding.js).
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens3
+const MODELOS_JOVENS_3 = [
+  { id: 'j7-bruninho-br',  desc: 'Brazilian man, around 22, light skin, straight dark-blond hair swept back, light stubble, slim face' },
+  { id: 'j8-tiagao-br',    desc: 'Brazilian man, around 25, medium brown skin, short tight curly hair, full trimmed dark beard, broad friendly face' },
+  { id: 'j9-leo-pt',       desc: 'Portuguese man, around 23, fair skin with light freckles, short auburn red hair, short neat goatee' },
+  { id: 'j10-rafa-pt',     desc: 'Portuguese man, around 21, light olive skin, wavy dark-brown hair reaching the ears, heavy dark stubble, narrow face' },
+];
+// ─── RODADA 29E2, 2ª leva (2-out): --jovens4 — o dono reprovou DUDU/LÉO/BRUNINHO da 1ª leva ("cara de revista demais, todos na
+// mesma pose e no mesmo sorriso"). Ficam TIAGÃO (j8), PEDRÃO (j4) e RAFA (j10). Três homens novos com variedade DE VERDADE: idade
+// 25–35, nenhum sorriso aberto, cabeça e ombros fora do frontal. A foto fictícia ganha prompt PRÓPRIO (campo `foto`): o fotoPrompt()
+// padrão força "friendly smile" e "frontal", que é o que o dono não quer. A receita da figurinha (V6) mantém o ângulo da cabeça e a
+// expressão da foto, mas quadra os ombros (POSE em prompts/figurinha.js) — isso é produção, fica. 1 Brasil (j11) + 2 Portugal (j12, j13).
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens4
+const fotoLivre = (desc, expressao, pose, idade) => `Casual amateur smartphone photo of a fictional ${desc}.
+Completely fictional person who does not exist and does not resemble any real or famous person. ${idade}
+${expressao}
+${pose} Chest-up framing.
+Plain light-grey wall background, soft even daylight, sharp focus.
+Ordinary casual t-shirt. No sunglasses, no hat, no logos.
+Realistic photography, not illustration.`;
+const MODELOS_JOVENS_4 = [
+  { id: 'j11-bruninho-br', foto: fotoLivre(
+    'Brazilian white man, around 30, big voluminous curly hair, unshaven stubble',
+    'Serious, closed expression, lips together, no smile at all.',
+    'Head turned slightly to one side, eyes glancing toward the camera, shoulders angled a bit, not square.',
+    'Clearly an adult around 30 years old.') },
+  { id: 'j12-leo-pt', foto: fotoLivre(
+    'Portuguese man, around 33, shaved bald head, heavy thick dark eyebrows, strong jaw',
+    'Intimidating hard stare, not smiling, chin slightly raised, mouth closed.',
+    'Head tilted up a little, body turned three-quarter to the camera, one shoulder forward.',
+    'Clearly an adult in his early thirties.') },
+  { id: 'j13-dudu-pt', foto: fotoLivre(
+    'Portuguese man, around 27, short messy tousled dark hair, faint small scar through one eyebrow, slightly crooked nose',
+    'Grumpy, competitive look, mouth firmly closed, direct unflinching stare into the camera.',
+    'Head tilted slightly, shoulders a bit turned, leaning in a little.',
+    'Clearly an adult in his late twenties.') },
+];
+// ─── RODADA 29E2, 3ª leva (2-out): --jovens5 — só o DUDU (o j13 também saiu por "cara de revista"). Perfil bem diferente dos outros
+// cinco: ~28, gordinho (rosto cheio, bochechas, pescoço largo, ombros redondos), nerd simpático de óculos grossos, cabelo curto bagunçado,
+// sorriso tímido de boca fechada, cabeça inclinada. Pele bem clara e cabelo louro-acinzentado (nenhum dos cinco é claro nem louro). Portugal.
+// Óculos de grau ficam na V6 (REGRA_OCULOS); o corpo "athletic" da POSE pode afinar a barriga, mas o busto (62 % pelo topo) corta antes dela.
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens5
+const MODELOS_JOVENS_5 = [
+  { id: 'j14-dudu-pt', foto: fotoLivre(
+    'Portuguese man, around 28, chubby and noticeably overweight, full round face with soft cheeks and a double chin, wide neck, round sloping shoulders, t-shirt stretched over a round belly, very fair pale skin, short messy light ash-blond hair, thick black-framed prescription glasses',
+    'Friendly nerdy look: shy closed-mouth smile, no teeth showing, gentle eyes.',
+    'Head tilted slightly to one side, shoulders relaxed and turned a little.',
+    'Clearly an adult in his late twenties.') },
+];
+// ─── RODADA 29E2, 4ª leva (2-out): --jovens6 — o DUDU de novo, MESMO perfil do j14, só a POSE muda (dono): cabeça reta e de frente,
+// nada de inclinar nem virar, queixo levemente baixo, ombros quadrados e relaxados, olhar direto. A receita de produção já pede
+// "frontal bust, shoulders square" e mantém a cabeça da foto — basta a foto fictícia nascer reta. prompts/figurinha.js intocado.
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens6
+const MODELOS_JOVENS_6 = [
+  { id: 'j15-dudu-pt', foto: fotoLivre(
+    'Portuguese man, around 28, chubby and noticeably overweight, full round face with soft cheeks and a double chin, wide neck, round sloping shoulders, t-shirt stretched over a round belly, very fair pale skin, short messy light ash-blond hair, thick black-framed prescription glasses',
+    'Friendly nerdy look: shy closed-mouth smile, no teeth showing, gentle eyes looking straight into the camera.',
+    'Head perfectly straight and level, facing the camera directly — not tilted, not turned; chin slightly lowered; shoulders square to the camera and relaxed.',
+    'Clearly an adult in his late twenties.') },
+];
 
 async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   const { chamarFal, emDolares } = require('../../utils/falFila');
@@ -119,7 +183,7 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
     if (gasto >= teto - 0.15) { console.error(`PAREI antes de ${M.id}: gasto US$${gasto.toFixed(3)} perto do teto`); break; }
     try {
       const pedido = await chamarFal('fal-ai/gpt-image-1.5', {
-        prompt: `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
+        prompt: M.foto || `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
         image_size: '1024x1536', quality: 'low', num_images: 1,
       });
       gasto += emDolares('fal-ai/gpt-image-1.5', pedido.custo).usd || 0.02;
@@ -202,6 +266,10 @@ async function gerarCard(fotoUrl, kit, prompt, quality) {
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
   if (process.argv.includes('--jovens')) { await rodarJovens(); return; }
   if (process.argv.includes('--jovens2')) { await rodarJovens(MODELOS_JOVENS_2); return; }
+  if (process.argv.includes('--jovens3')) { await rodarJovens(MODELOS_JOVENS_3); return; }
+  if (process.argv.includes('--jovens4')) { await rodarJovens(MODELOS_JOVENS_4); return; }
+  if (process.argv.includes('--jovens5')) { await rodarJovens(MODELOS_JOVENS_5); return; }
+  if (process.argv.includes('--jovens6')) { await rodarJovens(MODELOS_JOVENS_6); return; }
 
   const refazer = (flag('refazer', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
   const estilo = flag('estilo', 'padrao');
