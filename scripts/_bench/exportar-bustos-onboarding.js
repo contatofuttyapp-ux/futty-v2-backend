@@ -22,13 +22,17 @@ const FOLGA_TOPO = 0.06;
 // nome do arquivo (sem acento, é URL) ← recorte do modelo. Rodada 29E2 (2-out): ficam TIAGÃO (j8), PEDRÃO (j4), RAFA (j10), BRUNINHO (j11) e LÉO (j12),
 // aprovados pelo dono; BRUNINHO e LÉO são a 2ª leva (--jovens4); DUDU é a 4ª (--jovens6: gordinho nerd de óculos, cabeça reta e de frente). 3 Brasil, 3 Portugal.
 // Com --so a,b exporta só esses nomes (os aprovados não são tocados).
+// Rodada 29E3 (2-out): 4 por time (8 rolos) — entram NANDO (j16, Brasil, ~39, grisalho) e CAIO (j17, Portugal, ~24, negro, sério), leva --jovens7.
+// Os 8 são FINAIS (dono, 2-out): não re-exportar. Só o NOME do j12 mudou: LÉO virou GONÇALO (arquivo goncalo.webp, mesmos bytes do leo.webp).
 const BUSTOS = [
   ['bruninho', 'j11-bruninho-br'],
   ['tiagao', 'j8-tiagao-br'],
-  ['leo', 'j12-leo-pt'],
+  ['goncalo', 'j12-leo-pt'],
   ['rafa', 'j10-rafa-pt'],
   ['pedrao', 'j4-homem-negro-br'],
   ['dudu', 'j15-dudu-pt'],
+  ['nando', 'j16-nando-br'],
+  ['caio', 'j17-caio-pt'],
 ];
 const SO = (() => { const i = process.argv.indexOf('--so'); return i > 0 && process.argv[i + 1] ? process.argv[i + 1].split(',') : null; })();
 

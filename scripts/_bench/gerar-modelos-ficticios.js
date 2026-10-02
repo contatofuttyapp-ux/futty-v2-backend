@@ -158,6 +158,23 @@ const MODELOS_JOVENS_6 = [
     'Clearly an adult in his late twenties.') },
 ];
 
+// ─── RODADA 29E3 (2-out): --jovens7 — o dono aprovou os 6 e quer 4 jogadores por time (8 rolos). Dois homens novos, perfis que o elenco
+// ainda não tem (nenhum dos 6 é grisalho nem passa dos 33; e o único negro, PEDRÃO, sorri). "jovens" no nome da leva é só a sequência da
+// bancada — o NANDO tem 38–40. Fictícios, nunca pessoa real, nunca menor, mesma receita V6 e mesmo kit. Os 6 aprovados não são tocados.
+//   node scripts/_bench/gerar-modelos-ficticios.js --jovens7
+const MODELOS_JOVENS_7 = [
+  { id: 'j16-nando-br', foto: fotoLivre(
+    'Brazilian man, around 39, tan weathered skin, short grey hair going white at the temples, sparse patchy grey stubble beard, visible expression wrinkles (crow\'s feet, forehead lines, laugh lines), slightly tired eyes, the easygoing older guy of the neighbourhood pickup game',
+    'Warm wry half-smile from one corner of the mouth, lips closed, amused knowing look.',
+    'Head straight and level, facing the camera, shoulders square and relaxed.',
+    'Clearly a middle-aged adult between 38 and 40 years old, visibly older than a man in his twenties.') },
+  { id: 'j17-caio-pt', foto: fotoLivre(
+    'Black Portuguese man, around 24, deep dark brown skin, hair buzzed extremely short almost to the scalp, clean-shaven, strong sharply defined jawline and cheekbones, lean athletic neck',
+    'Serious, focused and concentrated expression, mouth closed, no smile at all, steady intense gaze straight into the lens.',
+    'Head straight and level, facing the camera, shoulders square.',
+    'Clearly an adult in his mid-twenties.') },
+];
+
 async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   const { chamarFal, emDolares } = require('../../utils/falFila');
   const { gerarFigurinha } = require('../../utils/geracaoFigurinha');
@@ -176,26 +193,43 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
     temporarios.push(caminho);
     return `${supabase.storage.from('kits').getPublicUrl(caminho).data.publicUrl}?v=${Date.now()}`;
   };
-  console.log(`\n${lista.length} MODELOS JOVENS (18–25) · receita real da produção · estimativa ~US$0,40 · teto US${teto.toFixed(2)}\n`);
+  console.log(`\n${lista.length} MODELOS FICTÍCIOS (adultos, nunca menor) · receita real da produção · ~US$0,13 cada · teto US${teto.toFixed(2)}\n`);
   let gasto = 0;
   const feitos = [];
-  for (const M of lista) {
+  // --so id1,id2 corre só esses modelos da leva; --foto-do-disco reaproveita <id>-foto.png se já existir (sem pagar o t2i de novo).
+  // Rodada 29E3 (2-out): o j17 morreu em silêncio depois da foto (sem FALHOU nem resumo — morte nativa/processo, não erro de JS);
+  // o log por passo abaixo existe para a próxima vez dizer ONDE.
+  const SO_IDS = (() => { const i = process.argv.indexOf('--so'); return i > 0 && process.argv[i + 1] ? process.argv[i + 1].split(',') : null; })();
+  const FOTO_DO_DISCO = process.argv.includes('--foto-do-disco');
+  const passo = (id, msg) => console.log(`  · ${id}: ${msg}`);
+  for (const M of (SO_IDS ? lista.filter((m) => SO_IDS.includes(m.id)) : lista)) {
     if (gasto >= teto - 0.15) { console.error(`PAREI antes de ${M.id}: gasto US$${gasto.toFixed(3)} perto do teto`); break; }
     try {
-      const pedido = await chamarFal('fal-ai/gpt-image-1.5', {
-        prompt: M.foto || `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
-        image_size: '1024x1536', quality: 'low', num_images: 1,
-      });
-      gasto += emDolares('fal-ai/gpt-image-1.5', pedido.custo).usd || 0.02;
-      const urlFoto = pedido.dados?.images?.[0]?.url;
-      if (!urlFoto) throw new Error('t2i não devolveu foto');
-      const foto = Buffer.from(await (await fetch(urlFoto)).arrayBuffer());
-      fs.writeFileSync(path.join(saida, `${M.id}-foto.png`), foto);
+      const fotoPath = path.join(saida, `${M.id}-foto.png`);
+      let foto;
+      if (FOTO_DO_DISCO && fs.existsSync(fotoPath)) {
+        foto = fs.readFileSync(fotoPath);
+        passo(M.id, `foto do disco (${foto.length} B), t2i não pago`);
+      } else {
+        const pedido = await chamarFal('fal-ai/gpt-image-1.5', {
+          prompt: M.foto || `${fotoPrompt(M.desc)}\nThe person is clearly an adult in their early twenties.`,
+          image_size: '1024x1536', quality: 'low', num_images: 1,
+        });
+        gasto += emDolares('fal-ai/gpt-image-1.5', pedido.custo).usd || 0.02;
+        const urlFoto = pedido.dados?.images?.[0]?.url;
+        if (!urlFoto) throw new Error('t2i não devolveu foto');
+        foto = Buffer.from(await (await fetch(urlFoto)).arrayBuffer());
+        fs.writeFileSync(fotoPath, foto);
+        passo(M.id, `foto gerada (${foto.length} B)`);
+      }
 
       const quadrada = await preprocessarQuadrado(foto);
+      passo(M.id, `entrada quadrada (${quadrada.length} B)`);
       const fotoUrl = await subir(`${M.id}-entrada.jpg`, quadrada, 'image/jpeg');
+      passo(M.id, 'entrada no storage; chamando a V6');
       const r = await gerarFigurinha({ fotoUrl, kitUrl: kit.url, kitId: 'dark-gold', etiqueta: M.id, publicar: subir });
       gasto += r.custo.usd || 0.114;
+      passo(M.id, `V6 + birefnet ok (US$${(r.custo.usd || 0.114).toFixed(3)}); recortando`);
       const recorte = await sharp(r.recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
       const { razao: ach, cortada } = await medirCoroa(recorte);
       const card = await montarFigurinha(recorte);
@@ -270,6 +304,7 @@ async function gerarCard(fotoUrl, kit, prompt, quality) {
   if (process.argv.includes('--jovens4')) { await rodarJovens(MODELOS_JOVENS_4); return; }
   if (process.argv.includes('--jovens5')) { await rodarJovens(MODELOS_JOVENS_5); return; }
   if (process.argv.includes('--jovens6')) { await rodarJovens(MODELOS_JOVENS_6); return; }
+  if (process.argv.includes('--jovens7')) { await rodarJovens(MODELOS_JOVENS_7); return; }
 
   const refazer = (flag('refazer', '') || '').split(',').map((s) => s.trim()).filter(Boolean);
   const estilo = flag('estilo', 'padrao');
