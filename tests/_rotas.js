@@ -26,14 +26,15 @@ function injetar(modulo, exports) {
 
 /** O utils/db falso, em cima do Supabase falso: só o que as rotas e serviços de equipa leem. */
 function dbFalso(cliente) {
-  const umaLinha = async (tabela, filtro) => {
-    let q = cliente.from(tabela).select('*');
+  const umaLinha = async (tabela, filtro, colunas = '*') => {
+    let q = cliente.from(tabela).select(colunas);
     for (const [k, v] of Object.entries(filtro)) q = q.eq(k, v);
     const { data } = await q.maybeSingle();
     return data || null;
   };
   const getRole = async (teamId, userId) => (await umaLinha('team_members', { team_id: teamId, user_id: userId }))?.role || null;
-  const getTeamBySlug = async (slug) => umaLinha('teams', { slug });
+  // `colunas` chega ao falso (e.cols): um teste pode simular "esta coluna não existe" numa leitura (migração por aplicar).
+  const getTeamBySlug = async (slug, colunas) => umaLinha('teams', { slug }, colunas || '*');
   return {
     supabase: cliente,
     getRole,

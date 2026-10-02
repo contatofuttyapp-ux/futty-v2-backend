@@ -10,7 +10,7 @@ const { obterTeams, obterPedidos } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
 const { verificarImagemReal } = require('../utils/imagemReal');
-const { resolverCidade, lerEscolhaDaLista, normalizarCidade, condicaoPorCidade } = require('../utils/cidade');
+const { resolverCidade, lerEscolhaDaLista, normalizarCidade, condicaoPorCidade, lerBairro, resolverBairro } = require('../utils/cidade');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
@@ -18,6 +18,7 @@ const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido (Rodada 29D)
+const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código> (29H)
 
 const router = express.Router();
 
@@ -72,8 +73,17 @@ router.post(
     // em `cidade_normalizada`, para o Explorar casar por texto) e segue — nunca bloqueia a criação do time.
     const cid = await resolverCidade(req.body || {});
     const cidadeFinal = cid.cidade;
-    const geoLat = cid.geo?.lat ?? null;
-    const geoLng = cid.geo?.lng ?? null;
+    // RODADA 29H (item 12): o bairro opcional. Achou perto da cidade → o ponto do time é o do bairro; senão fica o da cidade.
+    const bar = await resolverBairro(req.body || {}, cid);
+    const geoLat = bar.geo?.lat ?? cid.geo?.lat ?? null;
+    const geoLng = bar.geo?.lng ?? cid.geo?.lng ?? null;
+    // Colunas da migração 073 (bairro e os dois prêmios do time): só vão no insert quando há o que gravar; sem a migração o
+    // time nasce igual, sem elas, e a resposta diz o que ficou de fora (`bairro.salvo`, `premios_salvos`).
+    const extras = {};
+    if (bar.bairro) { extras.bairro = bar.bairro; extras.bairro_normalizado = bar.normalizado; }
+    if (req.body?.mostrar_artilheiro === false) extras.mostrar_artilheiro = false;
+    if (req.body?.mostrar_destaque === false) extras.mostrar_destaque = false;
+    let extrasGravados = true;
 
     await ensureUserRow(req.user);
 
@@ -94,21 +104,31 @@ router.post(
       const colunasDaCidade = { cidade: cidadeFinal, cidade_normalizada: cid.normalizada, geo_lat: geoLat, geo_lng: geoLng };
       let { data, error } = await supabase
         .from('teams')
-        .insert({ ...linhaDoTime, ...colunasDaCidade })
+        .insert({ ...linhaDoTime, ...colunasDaCidade, ...extras })
         .select()
         .single();
+      // Migração 073 por aplicar: sem as colunas do bairro e dos prêmios o time nasce igual, só sem elas.
+      if (error && Object.keys(extras).length && /bairro|mostrar_artilheiro|mostrar_destaque/i.test(error.message || '')) {
+        extrasGravados = false;
+        ({ data, error } = await supabase
+          .from('teams')
+          .insert({ ...linhaDoTime, ...colunasDaCidade })
+          .select()
+          .single());
+      }
       // Migração 066 por aplicar: sem `cidade_normalizada` o resto da cidade (texto e ponto) continua a valer.
       if (error && /cidade_normalizada/i.test(error.message || '')) {
         const { cidade_normalizada: _sem066, ...semNormalizada } = colunasDaCidade; // eslint-disable-line no-unused-vars
         ({ data, error } = await supabase
           .from('teams')
-          .insert({ ...linhaDoTime, ...semNormalizada })
+          .insert({ ...linhaDoTime, ...semNormalizada, ...(extrasGravados ? extras : {}) })
           .select()
           .single());
       }
       // Resiliência: se as colunas geo ainda não existirem, repete sem elas
       // (mesmo fallback do PATCH /api/teams/:slug).
       if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
+        extrasGravados = false;
         ({ data, error } = await supabase
           .from('teams')
           .insert({
@@ -148,7 +168,17 @@ router.post(
     selosCache.invalidarMembro(team.id, req.user.id);
 
     // `geo` (29B, D): o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
-    res.status(201).json({ team, ...(cid.info ? { geo: cid.info } : {}), joga: !jogaGravado });
+    // `bairro` (29H): o mesmo para o bairro — { encontrado, nomeOficial } ou { encontrado: false }; `salvo: false` quando a
+    // migração 073 ainda não existe. `premios_salvos: false`: o pedido de desligar artilheiro/destaque não pôde ser gravado.
+    const bairroResposta = bar.info ? (extrasGravados ? bar.info : { ...bar.info, salvo: false }) : null;
+    const premiosPedidos = req.body?.mostrar_artilheiro === false || req.body?.mostrar_destaque === false;
+    res.status(201).json({
+      team,
+      ...(cid.info ? { geo: cid.info } : {}),
+      ...(bairroResposta ? { bairro: bairroResposta } : {}),
+      ...(premiosPedidos && !extrasGravados ? { premios_salvos: false } : {}),
+      joga: !jogaGravado,
+    });
   })
 );
 
@@ -323,10 +353,11 @@ router.get(
   '/api/teams/:slug',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(
-      req.params.slug,
-      'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng'
-    );
+    const COLUNAS = 'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
+    // RODADA 29H: bairro e os dois prêmios do time (migração 073). Sem a migração a leitura com elas volta vazia (coluna
+    // inexistente) e a página do time NÃO pode cair: repete só com as colunas de sempre.
+    const team = (await getTeamBySlug(req.params.slug, `${COLUNAS}, bairro, mostrar_artilheiro, mostrar_destaque`))
+      || (await getTeamBySlug(req.params.slug, COLUNAS));
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     // Achado 3/23: role e membros só dependem do team.id, não um do outro — em
@@ -364,7 +395,18 @@ router.get(
       created_at: m.created_at,
     }));
 
-    res.json({ team: { ...team, role, joga: !organizam.has(req.user.id) }, members });
+    res.json({
+      team: {
+        ...team,
+        // 29H: sem a migração 073 as colunas não vêm — valem os padrões (tudo ligado, sem bairro).
+        bairro: team.bairro || null,
+        mostrar_artilheiro: team.mostrar_artilheiro !== false,
+        mostrar_destaque: team.mostrar_destaque !== false,
+        role,
+        joga: !organizam.has(req.user.id),
+      },
+      members,
+    });
   })
 );
 
@@ -393,6 +435,9 @@ router.patch(
     }
     if ('publica' in b) patch.publica = !!b.publica;
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
+    // RODADA 29H (item 44): "Artilheiro do dia" e "Destaque do dia" — o editor de resultado só oferece a seção quando ligado.
+    if ('mostrar_artilheiro' in b) patch.mostrar_artilheiro = !!b.mostrar_artilheiro;
+    if ('mostrar_destaque' in b) patch.mostrar_destaque = !!b.mostrar_destaque;
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
     // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra). Limpar a
@@ -401,6 +446,7 @@ router.patch(
     // sem ponto o Explorar casa por texto). Cidade igual à de antes (o painel reenvia o campo a cada "Salvar") não
     // geocodifica de novo nem mexe no ponto.
     let geoInfo = null;
+    let cidResolvida = null; // o resultado da cidade quando ela foi (re)resolvida agora — o bairro, abaixo, parte dele
     if ('cidade' in b) {
       if (!String(b.cidade ?? '').trim()) {
         patch.cidade = null; patch.cidade_normalizada = null; patch.geo_lat = null; patch.geo_lng = null;
@@ -411,12 +457,49 @@ router.patch(
           patch.cidade_normalizada = normalizarCidade(b.cidade); // só completa a coluna nova em time antigo
         } else {
           const cid = await resolverCidade(b);
+          cidResolvida = cid;
           patch.cidade = cid.cidade;
           patch.cidade_normalizada = cid.normalizada;
           patch.geo_lat = cid.geo?.lat ?? null;
           patch.geo_lng = cid.geo?.lng ?? null;
           geoInfo = cid.info;
         }
+      }
+    }
+    // RODADA 29H (item 12): o bairro. O ponto do time passa a ser o do bairro quando o motor o acha perto da cidade; sem
+    // bairro (ou sem cidade onde pôr um) volta a ser o da cidade. O painel reenvia cidade e bairro a cada "Salvar": bairro
+    // igual ao de antes, com a cidade igual, não geocodifica de novo nem mexe no ponto.
+    let bairroInfo = null;
+    if ('bairro' in b) {
+      const novoBairro = lerBairro(b);
+      const { data: atual, error: erroAtual } = await supabase
+        .from('teams').select('cidade, geo_lat, geo_lng, bairro_normalizado').eq('id', team.id).maybeSingle();
+      if (erroAtual && /bairro/i.test(erroAtual.message || '')) throw new HttpError(503, 'Essa opção ainda não está disponível.');
+      const cidadeDoTime = 'cidade' in patch ? patch.cidade : (atual?.cidade ?? null);
+      const normalizadoAntes = atual?.bairro_normalizado || '';
+      const pontoDaCidade = async () => (cidResolvida || (await resolverCidade({ cidade: cidadeDoTime }))).geo;
+      if (!novoBairro || !cidadeDoTime) {
+        patch.bairro = null;
+        patch.bairro_normalizado = null;
+        if (normalizadoAntes && cidadeDoTime && !cidResolvida) {
+          const g = await pontoDaCidade();
+          patch.geo_lat = g?.lat ?? null;
+          patch.geo_lng = g?.lng ?? null;
+        }
+      } else if (!(cidResolvida === null && normalizarCidade(novoBairro) === normalizadoAntes)) {
+        const base = cidResolvida || { cidade: cidadeDoTime, geo: atual?.geo_lat != null ? { lat: atual.geo_lat, lng: atual.geo_lng } : null };
+        const bar = await resolverBairro(b, base);
+        patch.bairro = bar.bairro;
+        patch.bairro_normalizado = bar.normalizado;
+        if (bar.geo) {
+          patch.geo_lat = bar.geo.lat;
+          patch.geo_lng = bar.geo.lng;
+        } else if (!cidResolvida) {
+          const g = await pontoDaCidade();
+          patch.geo_lat = g?.lat ?? null;
+          patch.geo_lng = g?.lng ?? null;
+        }
+        bairroInfo = bar.info;
       }
     }
     if ('cor_fundo' in b) {
@@ -439,13 +522,15 @@ router.patch(
       const sem066 = { ...patch }; delete sem066.cidade_normalizada;
       ({ data: updated, error } = await supabase.from('teams').update(sem066).eq('id', team.id).select().single());
     }
+    // Migração 073 por aplicar: o bairro e os prêmios do time ainda não têm onde ficar — o app diz, em vez de fingir.
+    if (error && /bairro|mostrar_artilheiro|mostrar_destaque/i.test(error.message || '')) throw new HttpError(503, 'Essa opção ainda não está disponível.');
     // Resiliência: se as colunas geo ainda não existirem (DDL 041 por correr), repete sem elas.
     if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
       const semGeo = { ...patch }; delete semGeo.geo_lat; delete semGeo.geo_lng; delete semGeo.cidade; delete semGeo.cidade_normalizada;
       ({ data: updated, error } = await supabase.from('teams').update(semGeo).eq('id', team.id).select().single());
     }
     if (error) throw new HttpError(500, error.message);
-    res.json({ team: updated, ...(geoInfo ? { geo: geoInfo } : {}) });
+    res.json({ team: updated, ...(geoInfo ? { geo: geoInfo } : {}), ...(bairroInfo ? { bairro: bairroInfo } : {}) });
   })
 );
 
@@ -843,7 +928,7 @@ router.patch(
   })
 );
 
-/** POST /api/teams/:slug/convite — gera um token de convite (qualquer membro). */
+/** POST /api/teams/:slug/convite — gera um token de convite (qualquer membro) e, junto, o código do link curto /c/<código> (29H). */
 router.post(
   '/api/teams/:slug/convite',
   requireAuth,
@@ -857,27 +942,27 @@ router.post(
     const { data: convite, error } = await supabase
       .from('convites')
       .insert({ team_id: team.id, token, criado_por: req.user.id, expires_at: expiresAt })
-      .select('token, expires_at')
+      .select('id, token, expires_at')
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    res.status(201).json({ token: convite.token, expires_at: convite.expires_at });
+    // Rodada 29H (item 7): o link curto. `codigo` é null quando a migração 072 ainda não foi aplicada — o convite vale pelo
+    // link longo, como sempre.
+    const codigo = await criarCodigo(supabase, convite.id);
+
+    res.status(201).json({ token: convite.token, codigo, expires_at: convite.expires_at });
   })
 );
 
 /**
- * GET /api/convite/:token — valida um convite (público; auth opcional).
- * Devolve sempre 200 com { valido, motivo, ... }.
+ * GET /api/convite/:token — valida um convite (público; auth opcional). O parâmetro é o token longo (uuid) OU o código
+ * curto de /c/<código> (29H). Devolve sempre 200 com { valido, motivo, ... }.
  */
 router.get(
   '/api/convite/:token',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const { data: convite } = await supabase
-      .from('convites')
-      .select('id, team_id, criado_por, expires_at')
-      .eq('token', req.params.token)
-      .maybeSingle();
+    const convite = await convitePorParametro(supabase, req.params.token, 'id, team_id, criado_por, expires_at');
 
     if (!convite) {
       return res.json({ valido: false, motivo: 'nao_encontrado', team: null });
@@ -942,16 +1027,12 @@ router.get(
   })
 );
 
-/** POST /api/convite/:token/aceitar — entra na equipa e consome o convite. */
+/** POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o código curto (29H). */
 router.post(
   '/api/convite/:token/aceitar',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: convite } = await supabase
-      .from('convites')
-      .select('id, team_id, expires_at')
-      .eq('token', req.params.token)
-      .maybeSingle();
+    const convite = await convitePorParametro(supabase, req.params.token, 'id, team_id, expires_at');
     if (!convite) throw new HttpError(404, 'Convite não encontrado.');
 
     const { data: team } = await supabase
@@ -963,7 +1044,8 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    const teamResumo = { slug: team.slug, nome: team.nome, cor: team.cor };
+    // `id` (29H): o Onboarding marca as boas-vindas do time como vistas (`futty_onboarding_<id>`) logo que a pessoa entra.
+    const teamResumo = { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor };
 
     // Já é membro? -> idempotente, não consome o convite
     const existingRole = await getRole(team.id, req.user.id);
@@ -1245,9 +1327,13 @@ router.get(
       for (const u of usos || []) usosMap[u.convite_id] = (usosMap[u.convite_id] || 0) + 1;
     }
 
+    // O código do link curto (29H, migração 072): best-effort — sem a tabela, o admin segue com o link longo.
+    const codigosMap = await codigosDosConvites(supabase, conviteIds);
+
     const lista = (convites || []).map((c) => ({
       id: c.id,
       token: c.token,
+      codigo: codigosMap[c.id] || null,
       criado_por_nome: c.criado_por ? nomeMap[c.criado_por] || null : null,
       created_at: c.created_at,
       expires_at: c.expires_at,

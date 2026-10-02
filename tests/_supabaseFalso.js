@@ -10,12 +10,16 @@
 // maybeSingle/single/await, e rpc('creditar_brilhante').
 const crypto = require('node:crypto');
 
-const UNICOS_PADRAO = { compras: [['loja', 'transacao_id']] };
+const UNICOS_PADRAO = { compras: [['loja', 'transacao_id']], convite_codigos: [['codigo'], ['convite_id']] };
+
+// Os embeds do PostgREST que algum teste usa (`select('codigo, convites ( id, team_id )')`): tabela → { nome do embed →
+// onde está a outra ponta }. Só a forma "muitos-para-um" (a linha ganha o objeto, ou null). Rodada 29H: o link curto do convite.
+const RELACOES_PADRAO = { convite_codigos: { convites: { tabela: 'convites', local: 'convite_id', remota: 'id' } } };
 
 // Coluna com caminho pontuado ("teams.brilhante_ativo", o filtro sobre um embed do PostgREST) lê dentro da linha.
 const valorDe = (linha, coluna) => (coluna.includes('.') ? coluna.split('.').reduce((o, k) => o?.[k], linha) : linha[coluna]);
 
-function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null } = {}) {
+function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO } = {}) {
   const tabelas = {};
   for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map((l) => ({ ...l }));
   const linhasDe = (nome) => (tabelas[nome] ||= []);
@@ -70,6 +74,11 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       }
       if (e.faixa) alvo = alvo.slice(e.faixa[0], e.faixa[1] + 1);
       if (e.limite != null) alvo = alvo.slice(0, e.limite);
+      for (const [nome, def] of Object.entries(relacoes[tabela] || {})) {
+        if (new RegExp(`\\b${nome}\\s*\\(`).test(e.cols || '')) {
+          alvo = alvo.map((l) => ({ ...l, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null }));
+        }
+      }
       return { data: e.head ? null : alvo.map((l) => ({ ...l })), error: null, count: e.count ? alvo.length : undefined };
     }
 
@@ -85,6 +94,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
     const api = {
       select(cols, opts) {
         if (e.op !== 'select') e.retorna = true;
+        else e.cols = String(cols ?? '');
         if (opts?.count) e.count = true;
         if (opts?.head) e.head = true;
         return api;

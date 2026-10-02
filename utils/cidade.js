@@ -7,6 +7,12 @@
 //   3. nada achou → guarda o TEXTO mesmo assim e avisa na tela; o Explorar passa a casar por texto normalizado
 //      (sem acento, sem maiúscula, sem espaço sobrando) quando o time não tem coordenada.
 // Este módulo é a parte pura dessa regra: normalizar, ler a escolha da lista, decidir e devolver o que gravar.
+//
+// RODADA 29H (item 12, dono 2-out): o BAIRRO, opcional. Antes o ponto do time era o centro da cidade (todos os times de
+// "São Paulo" no mesmo ponto). Agora o admin pode declarar o bairro ("Pinheiros"; em Portugal, a freguesia) e o motor
+// geocodifica "bairro, cidade" UMA vez (Nominatim, como a cidade; ver resolverBairro). Achou perto da cidade → o ponto do
+// time passa a ser o do bairro (~1 km); não achou → fica o ponto da cidade e o app avisa. Freguesia escolhida na lista do app
+// (Portugal) vem com a coordenada e dispensa a chamada. Só o bairro e a cidade, nunca o endereço.
 const { geocodar: geocodarNominatim } = require('./geocode');
 
 const ARREDONDA = (n) => Math.round(n * 100) / 100; // 2 casas ≈ 1,1 km — a mesma precisão do geocode.js
@@ -104,4 +110,57 @@ function condicaoPorCidade(busca, citar = (v) => v) {
   return procurada ? `,and(cidade_normalizada.eq.${citar(procurada)},geo_lat.is.null)` : '';
 }
 
-module.exports = { normalizarCidade, rotuloDaCidade, lerEscolhaDaLista, resolverCidade, timeCasaPorCidade, condicaoPorCidade, PAISES_DA_LISTA };
+// ─── O bairro (29H) ───────────────────────────────────────────────────────────────────────────────────────────────
+
+const RAIO_DO_BAIRRO_KM = 60; // um bairro fica perto do centro da cidade; mais longe que isto é outro lugar com o mesmo nome
+
+/** Distância em km entre dois pontos { lat, lng } (haversine). */
+function distanciaKm(a, b) {
+  const rad = (g) => (g * Math.PI) / 180;
+  const dLat = rad(b.lat - a.lat);
+  const dLng = rad(b.lng - a.lng);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/** O bairro que veio no corpo: texto aparado, até 80 letras; '' quando não veio. */
+function lerBairro(corpo) {
+  return texto(corpo?.bairro, 80);
+}
+
+/** A freguesia escolhida na lista do app (Portugal): { lat, lng } arredondado, ou null — só vale com coordenada de verdade em Portugal. */
+function lerPontoDaLista(corpo) {
+  if (corpo?.bairro_origem !== 'lista') return null;
+  const lat = Number(corpo.bairro_lat);
+  const lng = Number(corpo.bairro_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < 32 || lat > 43 || lng < -32 || lng > -6) return null;
+  return { lat: ARREDONDA(lat), lng: ARREDONDA(lng) };
+}
+
+/**
+ * Decide o que gravar do bairro de um POST /api/teams ou PATCH /api/teams/:slug.
+ *   cidade   o resultado de resolverCidade (ou { cidade, geo } do que já está gravado): o bairro só existe DENTRO de uma cidade
+ *   bairro / normalizado   o texto a guardar e o mesmo normalizado (null se veio vazio)
+ *   geo      { lat, lng } do bairro, ou null (nada achou: o ponto continua o da cidade)
+ *   info     { encontrado: true, nomeOficial: "<bairro>, <cidade>" } | { encontrado: false } | null (sem bairro)
+ *   vazio    true quando o bairro veio vazio ou não há cidade onde pôr um bairro
+ * geocodar é injetável para o teste não falar com a rede.
+ */
+async function resolverBairro(corpo, cidade, { geocodar = geocodarNominatim } = {}) {
+  const vazio = { bairro: null, normalizado: null, geo: null, info: null, vazio: true };
+  const bairro = lerBairro(corpo);
+  if (!bairro || !cidade?.cidade) return vazio;
+  const normalizado = normalizarCidade(bairro);
+  const nomeOficial = `${bairro}, ${cidade.cidade}`;
+  const daLista = lerPontoDaLista(corpo);
+  if (daLista) return { bairro, normalizado, geo: daLista, info: { encontrado: true, nomeOficial }, vazio: false };
+  const g = await geocodar(nomeOficial);
+  // Perto da cidade ou nada: o mesmo nome em outro estado/país (há uma "Vila Nova" em todo canto) não vale.
+  if (g && (!cidade.geo || distanciaKm(g, cidade.geo) <= RAIO_DO_BAIRRO_KM)) {
+    return { bairro, normalizado, geo: { lat: g.lat, lng: g.lng }, info: { encontrado: true, nomeOficial }, vazio: false };
+  }
+  return { bairro, normalizado, geo: null, info: { encontrado: false }, vazio: false };
+}
+
+module.exports = { normalizarCidade, rotuloDaCidade, lerEscolhaDaLista, resolverCidade, timeCasaPorCidade, condicaoPorCidade, PAISES_DA_LISTA, lerBairro, resolverBairro, distanciaKm, RAIO_DO_BAIRRO_KM };
