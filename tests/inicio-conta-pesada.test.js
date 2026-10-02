@@ -171,14 +171,34 @@ test('o payload do Início é o mesmo de sempre: times (com papel e pacote), pri
   assert.equal(r.rsvp.rsvp_aberto, true);
 });
 
-test('a fila de idas ao banco caiu de 4 para 3: com 100 ms por consulta a conta de 2 times responde antes de 4 idas', async (t) => {
+/**
+ * Quantas IDAS EM FILA fez o motor: agrupa as consultas em ondas pelo instante em que COMEÇARAM. Uma onda nova só nasce quando a
+ * anterior terminou (a consulta de baixo depende da de cima), ou seja, ≥ ATRASO depois do começo dela; dentro de uma onda as
+ * consultas começam juntas. Rodada 29H: o teste media o TEMPO de parede (< 4 × 100 ms) e reprovava com a máquina carregada (os
+ * timers do Windows atrasam, 3 idas passavam de 400 ms sem nenhuma regressão). Contar as ondas pelos instantes de começo não
+ * depende da pressa da máquina — só da ordem em que o código pergunta.
+ */
+function idasEmFila(consultas, atraso) {
+  const folga = atraso * 0.75; // uma onda nova começa ≥ atraso depois; 0,75 absorve o jitter dos timers sem juntar duas ondas
+  let ondas = 0;
+  let comecoDaOnda = -Infinity;
+  for (const c of [...consultas].sort((a, b) => a.inicio - b.inicio)) {
+    if (c.inicio - comecoDaOnda >= folga) { ondas += 1; comecoDaOnda = c.inicio; }
+  }
+  return ondas;
+}
+
+test('a fila de idas ao banco caiu de 4 para 3: com 100 ms por consulta a conta de 2 times faz no máximo 3 idas em fila', async (t) => {
   const ATRASO = 100;
   const { pedir, obs } = mundo(t, { atrasoMs: ATRASO });
   const t0 = Date.now();
   const r = await pedir('GET', '/api/inicio', null, DONO);
   const ms = Date.now() - t0;
   assert.equal(r.status, 200);
-  assert.ok(ms < 4 * ATRASO, `${ms} ms com ${ATRASO} ms por ida — 3 idas dão ~${3 * ATRASO}; 4 dariam ~${4 * ATRASO}`);
+  const idas = idasEmFila(obs.consultas, ATRASO);
+  assert.ok(idas <= 3, `${idas} idas em fila — eram 4 antes da Rodada 29B; consultas: ${obs.consultas.map((c) => `${c.tabela}@${c.inicio}`).join(' ')}`);
+  // O relógio fica só como rede de segurança larga (o teste não pode reprovar por pressa da máquina): 6 idas inteiras de folga.
+  assert.ok(ms < 6 * ATRASO, `${ms} ms com ${ATRASO} ms por ida`);
   // O RSVP do próximo jogo sai numa ida só: suas consultas começam juntas, logo depois da lista de jogos.
   const rsvp = obs.consultas.filter((c) => c.tabela === 'rsvp_respostas' || c.tabela === 'rsvp_espera');
   assert.equal(rsvp.length, 2);

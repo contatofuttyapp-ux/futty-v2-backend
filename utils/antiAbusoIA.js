@@ -138,7 +138,7 @@ async function alertarSeNecessario(gastoCents) {
     const ids = (admins || []).map((a) => a.id);
     if (ids.length) {
       await enviarNotificacao(ids, {
-        title: `IA: ${degrau}% do teto diário`,
+        title: `Gerações: ${degrau}% do teto diário`,
         body: diagnostico,
         url: '/gabinete',
       });
@@ -177,7 +177,7 @@ async function verificarAutoFreeze() {
     const ids = (admins || []).map((a) => a.id);
     if (ids.length) {
       await enviarNotificacao(ids, {
-        title: 'IA: travei sozinha',
+        title: 'Gerações: travei sozinha',
         body: `TRAVEI SOZINHA: ${motivo}. Libera no Gabinete.`,
         url: '/gabinete',
       });
