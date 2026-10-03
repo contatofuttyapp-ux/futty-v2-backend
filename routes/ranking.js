@@ -150,6 +150,58 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
   return base.map((b, i) => ({ ...b, posicao: i + 1 }));
 }
 
+/** O jogador esteve no time campeão deste jogo? (times_resultado + campeao_time_index) */
+function noTimeCampeao(g, userId) {
+  if (g.campeao_time_index == null) return false;
+  const t = g.times_resultado?.times?.[g.campeao_time_index];
+  return !!t && Array.isArray(t.jogadores) && t.jogadores.some((j) => j.user_id === userId);
+}
+
+/**
+ * RODADA 29I (achado 97): a pessoa sempre vê a PRÓPRIA vitrine. O ranking só leva quem tem 3 jogos, é visível, está ativo e joga
+ * (quem só organiza o time sai dele) — quem ficava de fora dava 404 e a tela dizia "Perfil só entre companheiros", como se a regra
+ * de dividir time valesse contra o dono do perfil. Aqui monta-se a linha do próprio jogador com os números DELE (os que a vitrine
+ * já mostra: jogos, vitórias, gols, destaques, nota), no mesmo formato do ranking, sem posição e sem pontos (`score: null`) — e sem
+ * mexer na lista nem nas posições dos outros.
+ */
+async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosRecebidos }) {
+  const [{ data: u }, { data: m }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap }] = await Promise.all([
+    supabase.from('users').select('id, nome, nome_jogador, avatar_url, foto_url, avatar_generico, cor_frame').eq('id', userId).maybeSingle(),
+    supabase.from('team_members').select('categoria').eq('team_id', teamId).eq('user_id', userId).maybeSingle(),
+    // Os mesmos agregados do ranking (uma verdade só): vitórias, gols, artilharia e destaques da fonte.
+    agregadosDaEquipa(teamId, { jogos: games }),
+  ]);
+  const agora = Date.now();
+  const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
+  const presenca = (parts || []).filter((p) => {
+    const g = gameById[p.game_id];
+    return p.confirmado && !!g && !(g.cancelado || g.status === 'cancelado') && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
+  }).length;
+  const notas = (votosRecebidos || []).map((v) => Number(v.nota)).filter(Number.isFinite);
+  const notaInterna = notas.length >= MIN_VOTOS ? notas.reduce((a, b) => a + b, 0) / notas.length : null;
+  return {
+    user_id: userId,
+    sou_eu: true,
+    nome: u?.nome || 'Jogador',
+    nome_jogador: u?.nome_jogador || null,
+    avatar_url: u?.avatar_url || null,
+    foto_url: u?.foto_url || null,
+    avatar_generico: u?.avatar_generico || null,
+    cor_frame: u?.cor_frame || 'dourado',
+    categoria: m?.categoria === 'GR' ? 'GR' : 'linha',
+    nota: notaParaExibir(notaInterna),
+    nota_interna: notaInterna,
+    total_votos: notas.length,
+    minha_nota: null,
+    vitorias: vitoriasMap[userId] || 0,
+    gols: golsMap[userId] || 0,
+    artilharia: artilhariaMap[userId] || 0,
+    destaques: destaquesMap[userId] || 0,
+    presenca,
+    score: null, // fora do ranking: sem pontos
+  };
+}
+
 /** GET /api/teams/:slug/ranking — ranking completo (sem períodos). */
 router.get(
   '/api/teams/:slug/ranking',
@@ -222,7 +274,9 @@ router.get(
       supabase.from('team_members').select('team_id').eq('user_id', userId),
       jogosP,
     ]);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    // 29I (achado 97): o próprio id passa SEMPRE — antes de qualquer verificação de time em comum.
+    const ehOProprio = userId === req.user.id;
+    if (!role && !ehOProprio) throw new HttpError(403, 'Você não é membro deste time.');
     marcarFase(res, 'onda2');
 
     const games = teamGames || [];
@@ -254,7 +308,9 @@ router.get(
     ]);
     marcarFase(res, 'onda3');
 
-    const jogador = ranking.find((r) => r.user_id === userId);
+    let jogador = ranking.find((r) => r.user_id === userId);
+    // Fora do ranking (menos de 3 jogos, oculto, inativo ou só organiza o time): a PRÓPRIA pessoa ainda vê a vitrine.
+    if (!jogador && ehOProprio) jogador = await montarJogadorForaDoRanking({ teamId: team.id, userId, games, parts, votosRecebidos });
     if (!jogador) throw new HttpError(404, 'Jogador não encontrado neste time.');
 
     // Posição entre quem tem nota (>= MIN_VOTOS votos)
@@ -295,17 +351,12 @@ router.get(
       if (p.confirmado && encerrado) jogosConfirmados += 1;
     }
 
-    const noTimeCampeao = (g) => {
-      if (g.campeao_time_index == null) return false;
-      const t = g.times_resultado?.times?.[g.campeao_time_index];
-      return !!t && Array.isArray(t.jogadores) && t.jogadores.some((j) => j.user_id === userId);
-    };
     // Sem campeão definido → 'empate' (resultado neutro).
-    const resultadoDe = (g) => (g.campeao_time_index == null ? 'empate' : noTimeCampeao(g) ? 'vitoria' : 'derrota');
+    const resultadoDe = (g) => (g.campeao_time_index == null ? 'empate' : noTimeCampeao(g, userId) ? 'vitoria' : 'derrota');
 
     // Conquistas (carreira — todos os jogos do time).
     const conquistas = {
-      campeao: games.filter((g) => noTimeCampeao(g)).length,
+      campeao: games.filter((g) => noTimeCampeao(g, userId)).length,
       artilheiro: games.filter((g) => g.artilheiro_user_id === userId).length,
       destaque: games.filter((g) => g.destaque_user_id === userId).length,
       rodada: games.filter((g) => g.rodada_user_id === userId).length,
