@@ -641,7 +641,7 @@ router.get(
     // Achado 3/23: estas 4 leituras só dependem de team.id, nenhuma do resultado
     // das outras — corriam em série. Em paralelo; só a busca de presenças (que
     // precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
-    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam] = await Promise.all([
+    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam, { data: todosOsJogos }] = await Promise.all([
       supabase
         .from('team_members')
         .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
@@ -655,9 +655,23 @@ router.get(
       // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
       agregadosDaEquipa(team.id),
       idsQueSoOrganizam(team.id), // Rodada 29B (E)
+      // 29I (achado 104): todos os jogos, para contar as PRESENÇAS de cada um (a aba Estatísticas do admin).
+      supabase.from('games').select('id, data, status, cancelado').eq('team_id', team.id),
     ]);
     if (error) throw new HttpError(500, error.message);
     const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = agregados;
+
+    // Presenças = jogos em que a pessoa ESTEVE: confirmada num jogo já encerrado e não cancelado (a mesma conta do perfil do
+    // jogador). Antes a seção "Presença" das Estatísticas listava vitórias.
+    const agora = Date.now();
+    const idsEncerrados = (todosOsJogos || [])
+      .filter((g) => !(g.cancelado || g.status === 'cancelado') && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora)))
+      .map((g) => g.id);
+    const presencasTotais = {}; // user_id -> n de jogos
+    if (idsEncerrados.length) {
+      const { data: confirmadas } = await supabase.from('game_players').select('user_id').in('game_id', idsEncerrados).eq('confirmado', true);
+      for (const gp of confirmadas || []) presencasTotais[gp.user_id] = (presencasTotais[gp.user_id] || 0) + 1;
+    }
 
     const MIN_VOTOS = 3;
     const votosAgg = {}; // user_id -> { sum, count }
@@ -715,6 +729,7 @@ router.get(
         artilharia: artilhariaMap[uid] || 0,
         vitorias: vitoriasMap[uid] || 0,
         destaque: destaquesMap[uid] || 0,
+        presencas: presencasTotais[uid] || 0, // jogos em que a pessoa esteve (todos os encerrados)
         presencas_recentes: presencas,
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
         nota_media: notaMedia,
