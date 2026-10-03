@@ -329,7 +329,12 @@ router.get(
     res.json({
       // logo_url (achado 121, 29J): a prévia do link (functions/_shared/previaDoLink.js) usa o
       // logo do time como og:image quando existe — "o mínimo" para a prévia parar de ser genérica.
-      equipa: { nome: game.teams.nome, slug: game.teams.slug, fuso: fusoDoTime(game.teams), logo_url: game.teams.logo_url || null },
+      // cidade (achado 112, 29K): o rabicho do fuso ("horário de São Paulo") precisa dela.
+      // cor (achado 114, 29K): o resultado já montado (DrawnTeams) pinta o cabeçalho de cada time com ela.
+      equipa: { nome: game.teams.nome, slug: game.teams.slug, cor: game.teams.cor || null, fuso: fusoDoTime(game.teams), cidade: game.teams.cidade || null, logo_url: game.teams.logo_url || null },
+      // jogo (achado 112, 29K): quando e onde — a página pública mostrava só o time e os times sorteados,
+      // sem a informação que quem recebe o link no grupo foi mesmo procurar.
+      jogo: { data: game.data || null, local: game.local || null },
       times_resultado: game.times_resultado || null,
       resultado: {
         nivel: game.resultado_nivel || 0,

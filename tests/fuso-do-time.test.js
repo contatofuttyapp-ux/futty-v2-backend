@@ -196,6 +196,23 @@ test('achado 121 (29J): GET /api/p/:gameId leva o logo_url do time (a prévia do
   assert.equal((await pedir('GET', '/api/p/jogo-sem-logo')).json.equipa.logo_url, null, 'time sem logo: null, nunca undefined');
 });
 
+test('achados 112/114 (29K): GET /api/p/:gameId leva jogo.data/local e equipa.cor/cidade — o mínimo pra "quando e onde" e o resultado já montado', async (t) => {
+  const comCidade = { ...TIME, id: 'time-cidade', slug: 'com-cidade', cidade: 'Campinas' };
+  const tabelas = cenario({
+    teams: [comCidade],
+    team_members: [{ team_id: comCidade.id, user_id: ADMIN, role: 'admin', created_at: '2026-01-01T00:00:00Z', teams: comCidade }],
+    games: [{ id: 'jogo-com-cidade', team_id: comCidade.id, teams: comCidade, data: JOGO_ISO, local: 'Society Madalena — campo 2', status: 'agendado', game_players: [] }],
+  });
+  const { carregados } = carregar(tabelas, ['routes/games']);
+  const pedir = subir([carregados['routes/games']], t);
+  const r = await pedir('GET', '/api/p/jogo-com-cidade');
+  assert.equal(r.status, 200);
+  assert.equal(r.json.jogo.data, JOGO_ISO);
+  assert.equal(r.json.jogo.local, 'Society Madalena — campo 2');
+  assert.equal(r.json.equipa.cidade, 'Campinas');
+  assert.equal(r.json.equipa.cor, 'verde');
+});
+
 test('sem a coluna fuso (migração 076 por aplicar) o time vale o padrão America/Sao_Paulo', async (t) => {
   const { fuso: _fuso, ...semFuso } = TIME; // eslint-disable-line no-unused-vars
   const { carregados } = carregarComInicio(cenario({
