@@ -16,6 +16,7 @@ const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
+const { normalizarFuso, lerComFuso } = require('../utils/fuso');
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
 const PERFIL_COLS_BASE =
@@ -186,14 +187,16 @@ async function obterMe(user) {
 // cada parte recebe o resultado pronto. As funções soltas (rotas antigas) continuam a fazer a sua própria consulta.
 //
 // O select é a união do que cada parte lia (colunas que já existem em produção: eram lidas por elas).
-const VINCULOS_SELECT = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
+const VINCULOS_SELECT_SEM_FUSO = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
+// 29I (achado 83): o fuso do time vai junto, na mesma consulta (sem ida nova). Sem a migração 076 a leitura repete sem ele.
+const VINCULOS_SELECT = VINCULOS_SELECT_SEM_FUSO.replace(' revotar_pedido_em )', ' revotar_pedido_em, fuso )');
 
 async function obterVinculos(userId) {
-  const { data, error } = await supabase
+  const { data, error } = await lerComFuso((comFuso) => supabase
     .from('team_members')
-    .select(VINCULOS_SELECT)
+    .select(comFuso ? VINCULOS_SELECT : VINCULOS_SELECT_SEM_FUSO)
     .eq('user_id', userId)
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true }));
   if (error) throw new HttpError(500, error.message);
   return data || [];
 }
@@ -206,7 +209,7 @@ function montarTeams(vinculos, soOrganiza) {
     .map((row) => {
       // `revotar_pedido_em` veio no select compartilhado, mas nunca fez parte desta resposta: não entra.
       const { revotar_pedido_em: _revotar, ...time } = row.teams; // eslint-disable-line no-unused-vars
-      return { ...time, role: row.role, joga: !soOrganiza.has(row.teams.id) };
+      return { ...time, fuso: normalizarFuso(time.fuso), role: row.role, joga: !soOrganiza.has(row.teams.id) };
     });
 }
 
@@ -279,11 +282,10 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
   const [memberships, soOrganiza] = vinculos
     ? [vinculos, soOrganizaDado || new Set()]
     : await Promise.all([
-      supabase
+      lerComFuso((comFuso) => supabase
         .from('team_members')
-        .select('team_id, ausente_proximo, teams ( id, nome, slug )')
-        .eq('user_id', userId)
-        .then((r) => r.data),
+        .select(comFuso ? 'team_id, ausente_proximo, teams ( id, nome, slug, fuso )' : 'team_id, ausente_proximo, teams ( id, nome, slug )')
+        .eq('user_id', userId)).then((r) => r.data),
       timesEmQueSoOrganiza(userId),
     ]);
   const teamById = {};
@@ -332,6 +334,8 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
       team_id: g.team_id,
       team_name: team.nome || null,
       team_slug: team.slug || null,
+      // 29I (achado 83): a hora do jogo é a do campo — o fuso do time vai no próprio jogo (aqui o time não vem embutido).
+      fuso: normalizarFuso(team.fuso),
       ausente_proximo: ausenteByTeam[g.team_id] || false,
       eu_jogo: !soOrganiza.has(g.team_id),
     };
@@ -549,6 +553,8 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const minhaEspera = (filaRows || []).find((r) => r.user_id === userId);
 
   return {
+    // 29I (achado 83): o prazo de confirmação e a hora do jogo se leem no relógio do campo.
+    fuso: normalizarFuso(game.teams?.fuso),
     rsvp_aberto: game.rsvp_aberto || false,
     rsvp_prazo: game.rsvp_prazo || null,
     rsvp_fechado: game.rsvp_fechado || false,

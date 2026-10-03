@@ -19,8 +19,25 @@ const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido (Rodada 29D)
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código> (29H)
+const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time (29I, achado 83)
 
 const router = express.Router();
+
+/**
+ * 29I (achado 83): no time recém-criado, grava o fuso derivado do ponto da cidade geocodificada. Melhor esforço: sem ponto, sem
+ * fuso derivável ou sem a migração 076, não grava nada e o time fica no padrão (America/Sao_Paulo, o que a coluna nasce valendo —
+ * por isso o padrão nem precisa de escrita). Devolve o fuso que o time passou a ter.
+ */
+async function gravarFusoDoTimeNovo(team, geo) {
+  const derivado = fusoDaCoordenada(geo?.lat, geo?.lng);
+  if (!derivado || derivado === FUSO_PADRAO) return fusoDoTime(team);
+  const { error } = await supabase.from('teams').update({ fuso: derivado }).eq('id', team.id);
+  if (error) {
+    if (!erroDaColunaFuso(error)) console.error('[teams] não deu para gravar o fuso do time:', error.message);
+    return fusoDoTime(team);
+  }
+  return derivado;
+}
 
 const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
@@ -166,6 +183,9 @@ router.post(
       throw new HttpError(500, memberError.message);
     }
     selosCache.invalidarMembro(team.id, req.user.id);
+
+    // 29I (achado 83): o fuso nasce da cidade geocodificada (da lista do app ou do Nominatim); sem cidade ou sem ponto, o padrão.
+    team.fuso = await gravarFusoDoTimeNovo(team, cid.geo);
 
     // `geo` (29B, D): o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
     // `bairro` (29H): o mesmo para o bairro — { encontrado, nomeOficial } ou { encontrado: false }; `salvo: false` quando a
@@ -398,6 +418,7 @@ router.get(
     res.json({
       team: {
         ...team,
+        fuso: fusoDoTime(team), // 29I (achado 83): sem a migração 076 a coluna não vem — vale o padrão
         // 29H: sem a migração 073 as colunas não vêm — valem os padrões (tudo ligado, sem bairro).
         bairro: team.bairro || null,
         mostrar_artilheiro: team.mostrar_artilheiro !== false,
@@ -463,6 +484,9 @@ router.patch(
           patch.geo_lat = cid.geo?.lat ?? null;
           patch.geo_lng = cid.geo?.lng ?? null;
           geoInfo = cid.info;
+          // 29I (achado 83): a cidade mudou, o fuso acompanha — derivado do ponto da cidade; sem ponto, fica o que o time tinha.
+          const fusoDaCidade = fusoDaCoordenada(cid.geo?.lat, cid.geo?.lng);
+          if (fusoDaCidade) patch.fuso = fusoDaCidade;
         }
       }
     }
@@ -517,6 +541,11 @@ router.patch(
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
     let { data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single();
+    // Migração 076 por aplicar: sem `fuso` o resto da edição vale igual (o time continua no padrão America/Sao_Paulo).
+    if (error && 'fuso' in patch && erroDaColunaFuso(error)) {
+      delete patch.fuso;
+      ({ data: updated, error } = await supabase.from('teams').update(patch).eq('id', team.id).select().single());
+    }
     // Migração 066 por aplicar: sem `cidade_normalizada` o texto e o ponto da cidade continuam a valer.
     if (error && /cidade_normalizada/i.test(error.message || '')) {
       const sem066 = { ...patch }; delete sem066.cidade_normalizada;
@@ -530,7 +559,7 @@ router.patch(
       ({ data: updated, error } = await supabase.from('teams').update(semGeo).eq('id', team.id).select().single());
     }
     if (error) throw new HttpError(500, error.message);
-    res.json({ team: updated, ...(geoInfo ? { geo: geoInfo } : {}), ...(bairroInfo ? { bairro: bairroInfo } : {}) });
+    res.json({ team: { ...updated, fuso: fusoDoTime(updated) }, ...(geoInfo ? { geo: geoInfo } : {}), ...(bairroInfo ? { bairro: bairroInfo } : {}) });
   })
 );
 
@@ -976,11 +1005,12 @@ router.get(
     // próximo jogo e de que cidade. Entram na MESMA leva (a cidade vem no select do time; a contagem e o próximo
     // jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
     const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }, organizam] = await Promise.all([
-      supabase
+      // 29I (achado 83): o fuso do time vai junto — o "próximo jogo" da página do convite é lido no relógio do campo.
+      lerComFuso((comFuso) => supabase
         .from('teams')
-        .select('id, nome, slug, cor, logo_url, cor_fundo, cidade')
+        .select(comFuso ? 'id, nome, slug, cor, logo_url, cor_fundo, cidade, fuso' : 'id, nome, slug, cor, logo_url, cor_fundo, cidade')
         .eq('id', convite.team_id)
-        .single(),
+        .single()),
       supabase
         .from('users')
         .select('nome, nome_jogador')
@@ -1021,8 +1051,9 @@ router.get(
       // (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin declarou.
       membros: Math.max(0, (membrosTotal ?? 0) - organizam.size),
       proximoJogo: proximo?.data || null,
+      fuso: fusoDoTime(team), // 29I (achado 83): o instante do próximo jogo se lê neste fuso (o do campo)
       cidade: team?.cidade || null,
-      team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null } : null,
+      team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null, fuso: fusoDoTime(team) } : null,
     });
   })
 );
@@ -1440,12 +1471,11 @@ router.get(
     let proximo_jogo = null;
     if (futuros[0]) {
       const g = futuros[0];
-      const d = new Date(g.data);
-      const pad = (n) => String(n).padStart(2, '0');
       proximo_jogo = {
         id: g.id,
         date: g.data,
-        time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+        time: horaNoFuso(g.data, fusoDoTime(team)), // 29I (achado 83): HH:MM no relógio do campo (era o do servidor)
+        fuso: fusoDoTime(team),
         location: g.local,
         confirmados: confByGame[g.id] || 0,
       };

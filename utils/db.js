@@ -7,6 +7,7 @@ const { createClient } = require('@supabase/supabase-js');
 const { HttpError } = require('./http');
 const { RATING_DEFAULT } = require('./helpers');
 const { chaveSecreta } = require('./chavesSupabase');
+const { lerComFuso } = require('./fuso');
 
 // Rodada 28: a chave secreta nova (SUPABASE_SECRET_KEY, sb_secret_…) manda; a
 // service_role antiga (SUPABASE_SERVICE_KEY) só vale enquanto a nova não estiver no
@@ -29,7 +30,14 @@ const supabase = createClient(SUPABASE_URL, CHAVE_SECRETA, {
  *  Lazy-require do store para evitar dependência circular (plataformaStore → db). */
 async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, created_at') {
   const cols = /(^|,\s*)id(\s*,|$)/.test(columns) ? columns : `id, ${columns}`;
-  const { data } = await supabase.from('teams').select(cols).eq('slug', slug).maybeSingle();
+  // Rodada 29I (achado 83): o fuso do time vai em TODA leitura de time — a resposta que devolve `team` já leva a hora do campo.
+  // Sem a migração 076 a leitura repete sem a coluna (utils/fuso.js#lerComFuso) e o time vale o padrão.
+  const pedeFuso = !/\bfuso\b|\*/.test(cols);
+  const { data } = await lerComFuso((comFuso) => supabase
+    .from('teams')
+    .select(comFuso && pedeFuso ? `${cols}, fuso` : cols)
+    .eq('slug', slug)
+    .maybeSingle());
   if (!data) return null;
   // eslint-disable-next-line global-require
   const plataforma = require('./plataformaStore');
@@ -115,13 +123,13 @@ async function requireTeamMember(slug, userId) {
   return { team, role };
 }
 
-/** Carrega um jogo com a equipa associada (game.teams). Null se não existir. */
+/** Carrega um jogo com a equipa associada (game.teams, com o fuso dela — 29I). Null se não existir. */
 async function loadGame(id) {
-  const { data } = await supabase
+  const { data } = await lerComFuso((comFuso) => supabase
     .from('games')
-    .select('*, teams ( id, slug, nome, cor )')
+    .select(comFuso ? '*, teams ( id, slug, nome, cor, fuso )' : '*, teams ( id, slug, nome, cor )')
     .eq('id', id)
-    .maybeSingle();
+    .maybeSingle());
   return data || null;
 }
 

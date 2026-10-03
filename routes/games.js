@@ -10,6 +10,7 @@ const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
 const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
+const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
 
 const router = express.Router();
 
@@ -26,14 +27,8 @@ function statusEfetivoJogo(game) {
   return comecou ? 'em_curso' : 'agendado';
 }
 
-/** Data curta PT (ex.: "12/06 · 20:30") para o corpo das notificações. */
-function dataCurtaPT(iso) {
-  try {
-    return new Date(iso).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
+// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time, 29I achado 83), não no
+// do servidor (o Cloud Run roda em UTC: "20:30" de São Paulo saía como "23:30").
 
 /** IDs dos membros de uma equipa (para notificações). */
 async function membrosDaEquipa(teamId) {
@@ -77,14 +72,15 @@ router.post(
     if (insert.error) throw new HttpError(500, insert.error.message);
     const game = insert.data;
 
-    res.status(201).json({ game });
+    const fuso = fusoDoTime(team);
+    res.status(201).json({ game: { ...game, fuso } });
 
     // Notifica os membros — EXCETO em jogo histórico (silencioso por lei).
     if (!eHistorico) {
       membrosDaEquipa(team.id).then((memberIds) =>
         enviarNotificacao(memberIds, {
           title: '⚽ Novo jogo criado',
-          body: `${team.nome || 'Seu time'} · ${dataCurtaPT(game.data)}`,
+          body: `${team.nome || 'Seu time'} · ${dataCurtaNoFuso(game.data, fuso)}`,
           url: '/home',
         })
       );
@@ -129,7 +125,7 @@ router.get(
       cancelado: !!g.cancelado || g.status === 'cancelado',
       confirmados: counts[g.id] || 0,
     }));
-    res.json({ team: { ...team, role }, games: lista });
+    res.json({ team: { ...team, fuso: fusoDoTime(team), role }, games: lista });
   })
 );
 
@@ -204,7 +200,7 @@ router.get(
 
     const team = game.teams;
     res.json({
-      team: { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor, role },
+      team: { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor, fuso: fusoDoTime(team), role },
       game: {
         id: game.id,
         data: game.data,
@@ -288,7 +284,7 @@ router.get(
     }
 
     res.json({
-      equipa: { nome: game.teams.nome, slug: game.teams.slug },
+      equipa: { nome: game.teams.nome, slug: game.teams.slug, fuso: fusoDoTime(game.teams) },
       times_resultado: game.times_resultado || null,
       resultado: {
         nivel: game.resultado_nivel || 0,
@@ -381,7 +377,7 @@ router.patch(
       }
     }
 
-    res.json({ game: updated });
+    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
   })
 );
 
@@ -566,7 +562,7 @@ router.post(
       .select('id, times_resultado, num_times, sorteio_realizado, status')
       .single();
     if (error) throw new HttpError(500, error.message);
-    res.json({ game: updated });
+    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
   })
 );
 
@@ -713,6 +709,7 @@ router.post(
     res.json({
       game: {
         id: updated.id,
+        fuso: fusoDoTime(game.teams),
         num_times: sorteio.numTimes,
         sorteio_realizado: true,
         times_resultado: resultado,
@@ -803,16 +800,18 @@ router.patch(
     const b = req.body || {};
     const patch = {};
 
-    // Recombina data/hora (a coluna `data` guarda ambas).
+    // Recombina data/hora (a coluna `data` guarda ambas). 29I (achado 83): data e hora são as do CAMPO — lidas e escritas no
+    // fuso do time, nunca no do servidor (UTC no Cloud Run: "20:00" virava 17:00 em São Paulo) nem no do aparelho de quem edita.
     if ('date' in b || 'time' in b) {
-      const base = new Date(game.data);
+      const fuso = fusoDoTime(game.teams);
+      const base = partesNoFuso(game.data, fuso);
       const pad = (n) => String(n).padStart(2, '0');
       const datePart = b.date
         ? String(b.date).slice(0, 10)
-        : `${base.getFullYear()}-${pad(base.getMonth() + 1)}-${pad(base.getDate())}`;
-      const timePart = b.time ? String(b.time).slice(0, 5) : `${pad(base.getHours())}:${pad(base.getMinutes())}`;
-      const combinado = new Date(`${datePart}T${timePart}:00`);
-      if (Number.isNaN(combinado.getTime())) throw new HttpError(400, 'Data/hora inválida.');
+        : (base ? `${base.ano}-${pad(base.mes)}-${pad(base.dia)}` : '');
+      const timePart = b.time ? String(b.time).slice(0, 5) : (base ? `${pad(base.hora)}:${pad(base.minuto)}` : '');
+      const combinado = instanteNoFuso(datePart, timePart, fuso);
+      if (!combinado) throw new HttpError(400, 'Data/hora inválida.');
       patch.data = combinado.toISOString();
     }
     if ('location' in b) patch.local = b.location ? String(b.location).trim() : null;
@@ -826,7 +825,7 @@ router.patch(
 
     const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
     if (error) throw new HttpError(500, error.message);
-    res.json({ game: updated });
+    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
   })
 );
 
@@ -890,11 +889,11 @@ router.post(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    res.json({ ok: true, game: updated });
+    res.json({ ok: true, game: { ...updated, fuso: fusoDoTime(game.teams) } });
 
     // Notifica todos os membros da equipa (fire-and-forget, após responder).
     const membros = await membrosDaEquipa(game.teams.id);
-    const corpo = `O jogo de ${dataCurtaPT(game.data)} foi cancelado.` + (motivo ? ` Motivo: ${motivo}` : '');
+    const corpo = `O jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))} foi cancelado.` + (motivo ? ` Motivo: ${motivo}` : '');
     enviarNotificacao(membros, {
       title: 'Jogo cancelado ❌',
       body: corpo,
@@ -958,17 +957,22 @@ router.post(
     const n = Number(semanas);
     if (![4, 8, 12].includes(n)) throw new HttpError(400, 'Semanas deve ser 4, 8 ou 12.');
 
-    // Próximas N datas para o dia da semana escolhido (a partir de hoje).
-    const datas = [];
-    const cursor = new Date();
-    cursor.setHours(horas, minutos, 0, 0);
+    // Próximas N datas para o dia da semana escolhido (a partir de hoje). 29I (achado 83): "hoje", o dia da semana e a hora são
+    // os do CAMPO (fuso do time), não os do servidor — o Cloud Run roda em UTC, e "quinta 20:00" saía às 17:00 de São Paulo.
+    const fuso = fusoDoTime(team);
+    const hojeNoCampo = partesNoFuso(new Date(), fuso);
+    const horaTexto = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`;
+    // O dia do calendário `k` dias depois de hoje (aritmética em UTC só para somar dias: sem fuso, sem horário de verão).
+    const diaDoCalendario = (k) => {
+      const d = new Date(Date.UTC(hojeNoCampo.ano, hojeNoCampo.mes - 1, hojeNoCampo.dia + k));
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+    };
     // Avança até ao próximo dia da semana (inclui hoje se ainda for no futuro).
-    const avancarDias = (dia - cursor.getDay() + 7) % 7;
-    cursor.setDate(cursor.getDate() + avancarDias);
-    if (cursor.getTime() <= Date.now()) cursor.setDate(cursor.getDate() + 7);
+    let deslocamento = (dia - hojeNoCampo.diaDaSemana + 7) % 7;
+    if (instanteNoFuso(diaDoCalendario(deslocamento), horaTexto, fuso).getTime() <= Date.now()) deslocamento += 7;
+    const datas = [];
     for (let i = 0; i < n; i += 1) {
-      datas.push(new Date(cursor));
-      cursor.setDate(cursor.getDate() + 7);
+      datas.push(instanteNoFuso(diaDoCalendario(deslocamento + 7 * i), horaTexto, fuso));
     }
 
     // Jogos já existentes da equipa (para detetar colisões ± 1 hora).
@@ -1001,7 +1005,7 @@ router.post(
       if (error) throw new HttpError(500, error.message);
     }
 
-    res.status(201).json({ criados: aInserir.length, datas: criadas, ignorados });
+    res.status(201).json({ criados: aInserir.length, datas: criadas, ignorados, fuso });
 
     // Notifica os membros se algo foi criado (fire-and-forget).
     if (aInserir.length) {

@@ -8,6 +8,7 @@ const { supabase, requireTeamMember, getTeamBySlug, getRole } = require('../util
 const store = require('../utils/campeonatoStore');
 const selosCache = require('../utils/selosCache');
 const { buildRanking } = require('./ranking');
+const { fusoDoTime, dataNoFuso } = require('../utils/fuso');
 
 const router = express.Router();
 
@@ -206,7 +207,8 @@ router.post(
       convidado: !!j.convidado,
     })));
 
-    const dataJogo = game.data ? new Date(game.data).toLocaleDateString('pt-BR') : null;
+    // 29I (achado 83): a data do jogo no nome do campeonato é a do CAMPO (fuso do time), não a do servidor.
+    const dataJogo = game.data ? dataNoFuso(game.data, fusoDoTime(team)) : null;
     const nome = dataJogo ? `Campeonato do sorteio · ${dataJogo}` : 'Campeonato do sorteio';
 
     const camp = await store.criar(team.id, req.user.id, { nome, formato, usar_sorteio: false, nomes, plantel });

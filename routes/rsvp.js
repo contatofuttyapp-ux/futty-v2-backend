@@ -8,17 +8,11 @@ const { supabase, getRole, loadGame, goleirosDoTime } = require('../utils/db');
 const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
+const { fusoDoTime, dataCurtaNoFuso } = require('../utils/fuso');
 
 const router = express.Router();
 
-/** Data curta PT (ex.: "12/06 · 20:30") para o corpo das notificações. */
-function dataCurtaPT(iso) {
-  try {
-    return new Date(iso).toLocaleString('pt-PT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '';
-  }
-}
+// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time, 29I achado 83).
 
 /**
  * Promove o primeiro da lista de espera de um jogo (se houver vaga libertada):
@@ -54,7 +48,7 @@ async function promoverDaEspera(game) {
 
   enviarNotificacao([primeiro.user_id], {
     title: '✅ Vaga disponível!',
-    body: `Você foi confirmado para o jogo de ${dataCurtaPT(game.data)}. Confirme sua presença no app.`,
+    body: `Você foi confirmado para o jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))}. Confirme sua presença no app.`,
     url: `/equipa/${game.teams.slug}`,
   });
 }
@@ -110,7 +104,7 @@ router.post(
       await supabase.from('rsvp_respostas').upsert(ausenteRows, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
     }
 
-    res.json({ game: updated });
+    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
   })
 );
 
@@ -157,7 +151,7 @@ router.post(
       if (gpErr) throw new HttpError(500, gpErr.message);
     }
 
-    res.json({ game: updated });
+    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
   })
 );
 

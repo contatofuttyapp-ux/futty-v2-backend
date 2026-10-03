@@ -1,0 +1,41 @@
+-- =====================================================================
+-- Futty v2.0 — Migração 076: fuso horário do time (Rodada 29I, bloco 1,
+-- achado 83, 3-out). Idempotente e aditiva. ⚠️ Correr manualmente no SQL
+-- Editor do Supabase (DDL é do utilizador) — junto com as demais pendentes,
+-- antes do "publica".
+--
+-- POR QUÊ (varredura da Freaky, 3-out): o app formatava data e hora de jogo
+-- com o relógio do APARELHO. O jogo gravado como 2026-10-08T23:00Z é quinta,
+-- 20h, em São Paulo — e aparecia como "sexta, 09/10, 00:00" para quem estava
+-- em Lisboa: mudava a hora E o dia da semana. Numa pelada a hora do jogo é a
+-- hora do campo, sempre.
+--
+-- O QUE FAZ: cada time passa a ter o seu fuso (nome IANA, ex.:
+-- 'America/Sao_Paulo', 'Europe/Lisbon'). O jogo continua gravado como
+-- instante (timestamptz, UTC); o fuso diz em que relógio ele se lê. O motor
+-- entrega `fuso` em toda resposta que devolve jogo, presença, sorteio,
+-- resultado, ranking e Resenha, e o app formata sempre nele
+-- (frontend/src/utils/dataHora.js).
+--
+--   · teams.fuso   text not null default 'America/Sao_Paulo'
+--
+-- Quem preenche: o motor deriva o fuso da cidade geocodificada quando o time
+-- é criado ou muda de cidade (utils/fuso.js, a partir da coordenada). Se não
+-- der para derivar, fica o padrão. Os times que já existem ficam em
+-- America/Sao_Paulo (o padrão cobre o Brasil quase todo; um time do Acre, de
+-- Manaus ou de Portugal passa a ter o fuso certo na próxima vez que a cidade
+-- for salva).
+--
+-- SEM esta migração: o motor segue funcionando — lê e escreve a coluna com
+-- tolerância (repete sem ela quando não existe) e o app usa o padrão
+-- America/Sao_Paulo.
+-- =====================================================================
+
+ALTER TABLE IF EXISTS public.teams
+  ADD COLUMN IF NOT EXISTS fuso text NOT NULL DEFAULT 'America/Sao_Paulo';
+
+-- =====================================================================
+-- Reversão:
+-- ALTER TABLE IF EXISTS public.teams
+--   DROP COLUMN IF EXISTS fuso;
+-- =====================================================================

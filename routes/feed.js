@@ -16,6 +16,7 @@ const { urlDeMidiaValida } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
+const { fusoDoTime, horaNoFuso, lerComFuso } = require('../utils/fuso');
 
 const router = express.Router();
 
@@ -216,10 +217,11 @@ router.get(
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
     // Equipas do utilizador
-    const { data: memberships } = await supabase
+    // 29I (achado 83): o fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
+    const { data: memberships } = await lerComFuso((comFuso) => supabase
       .from('team_members')
-      .select('team_id, teams ( id, nome, slug )')
-      .eq('user_id', req.user.id);
+      .select(comFuso ? 'team_id, teams ( id, nome, slug, fuso )' : 'team_id, teams ( id, nome, slug )')
+      .eq('user_id', req.user.id));
     marcarFase(res, 'equipas');
     const teamMap = {};
     for (const m of memberships || []) {
@@ -351,14 +353,15 @@ router.get(
     });
 
     const jogoItems = (games || []).map((g) => {
-      const dt = g.data ? new Date(g.data) : null;
       const team = teamMap[g.team_id] || {};
+      const fuso = fusoDoTime(team);
       return {
         kind: 'jogo',
         id: g.id,
         created_at: g.created_at,
         date: g.data,
-        time: dt ? dt.toISOString().slice(11, 16) : null, // HH:MM (UTC)
+        time: g.data ? horaNoFuso(g.data, fuso) : null, // HH:MM no relógio do campo (era UTC)
+        fuso, // 29I (achado 83): a data e a hora do jogo se leem neste fuso
         location: g.local,
         team_id: g.team_id,
         team_name: team.nome || null,
@@ -392,6 +395,7 @@ router.get(
         created_at: p.created_at,
         team_id: p.team_id,
         team_name: team.nome || null,
+        fuso: fusoDoTime(team),
         author_id: p.author_id,
         author_nome: nomeOf(p.author_id),
         author_avatar_url: avatarOf(p.author_id),
@@ -690,6 +694,7 @@ router.patch(
     res.json({
       game: {
         ...updated,
+        fuso: fusoDoTime(game.teams), // 29I (achado 83)
         artilheiro_nome: updated.artilheiro_user_id ? nomes[updated.artilheiro_user_id] || null : null,
         destaque_nome: updated.destaque_user_id ? nomes[updated.destaque_user_id] || null : null,
         rodada_nome: updated.rodada_user_id ? nomes[updated.rodada_user_id] || null : null,
