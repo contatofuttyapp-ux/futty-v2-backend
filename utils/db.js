@@ -127,7 +127,7 @@ async function requireTeamMember(slug, userId) {
 async function loadGame(id) {
   const { data } = await lerComFuso((novas) => supabase
     .from('games')
-    .select(novas ? `*, teams ( id, slug, nome, cor, cidade, ${novas} )` : '*, teams ( id, slug, nome, cor, cidade )')
+    .select(novas ? `*, teams ( id, slug, nome, cor, cidade, logo_url, ${novas} )` : '*, teams ( id, slug, nome, cor, cidade, logo_url )')
     .eq('id', id)
     .maybeSingle());
   return data || null;

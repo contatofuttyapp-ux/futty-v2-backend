@@ -679,6 +679,33 @@ router.post(
 );
 
 /**
+ * DELETE /api/teams/:slug/logo — remove o logo da equipa (só admin; achado 118, Rodada 29J).
+ * Sem logo, EscudoEquipa volta a desenhar o escudo (editor de escudo, Ajustes). O ficheiro
+ * sai do bucket nas 3 extensões possíveis (o upload grava em path fixo "logos/{teamId}.{ext}";
+ * sem saber qual foi a última, tenta as 3 — a que não existir simplesmente não apaga nada).
+ */
+router.delete(
+  '/api/teams/:slug/logo',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover o logo.');
+
+    // Best-effort: a limpeza do ficheiro no bucket nunca pode travar a remoção do logo.
+    try {
+      await supabase.storage.from('avatars').remove(Object.values(LOGO_EXT).map((ext) => `logos/${team.id}.${ext}`));
+    } catch { /* storage fora do ar, ou nada para apagar — segue */ }
+
+    const { error } = await supabase.from('teams').update({ logo_url: null }).eq('id', team.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ ok: true });
+  })
+);
+
+/**
  * GET /api/teams/:slug/membros — membros com role/stats (qualquer membro).
  * Ordena: admins primeiro, depois por nome.
  */

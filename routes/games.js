@@ -104,22 +104,32 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, created_at')
+      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, rsvp_aberto, rsvp_fechado, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
 
-    // Contagem de confirmados por jogo
+    // Contagem de confirmados por jogo (achados 109/116): enquanto o RSVP está aberto e ainda não
+    // fechado, a presença de verdade vive em rsvp_respostas — game_players só é sincronizado no
+    // "Fechar presença" (routes/rsvp.js). Fora disso (sem RSVP, ou já fechado), vale game_players,
+    // como sempre (o "Vou" simples de Jogo.jsx/Inicio.jsx escreve direto nele).
     const ids = (games || []).map((g) => g.id);
+    const idsComRsvpAberto = new Set((games || []).filter((g) => g.rsvp_aberto && !g.rsvp_fechado).map((g) => g.id));
+    const idsSemRsvpAberto = ids.filter((id) => !idsComRsvpAberto.has(id));
     const counts = {};
-    if (ids.length) {
-      const { data: gp } = await supabase
-        .from('game_players')
-        .select('game_id, confirmado')
-        .in('game_id', ids);
-      for (const row of gp || []) {
-        if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
-      }
+    const [gpResult, rsvpResult] = await Promise.all([
+      idsSemRsvpAberto.length
+        ? supabase.from('game_players').select('game_id, confirmado').in('game_id', idsSemRsvpAberto)
+        : Promise.resolve({ data: [] }),
+      idsComRsvpAberto.size
+        ? supabase.from('rsvp_respostas').select('game_id, status').in('game_id', [...idsComRsvpAberto])
+        : Promise.resolve({ data: [] }),
+    ]);
+    for (const row of gpResult.data || []) {
+      if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
+    }
+    for (const row of rsvpResult.data || []) {
+      if (row.status === 'confirmado') counts[row.game_id] = (counts[row.game_id] || 0) + 1;
     }
 
     const lista = (games || []).map((g) => ({
@@ -317,7 +327,9 @@ router.get(
     }
 
     res.json({
-      equipa: { nome: game.teams.nome, slug: game.teams.slug, fuso: fusoDoTime(game.teams) },
+      // logo_url (achado 121, 29J): a prévia do link (functions/_shared/previaDoLink.js) usa o
+      // logo do time como og:image quando existe — "o mínimo" para a prévia parar de ser genérica.
+      equipa: { nome: game.teams.nome, slug: game.teams.slug, fuso: fusoDoTime(game.teams), logo_url: game.teams.logo_url || null },
       times_resultado: game.times_resultado || null,
       resultado: {
         nivel: game.resultado_nivel || 0,

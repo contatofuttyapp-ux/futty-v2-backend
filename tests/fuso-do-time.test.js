@@ -176,6 +176,26 @@ test('time de Lisboa: o fuso dele sai no jogo, na lista e na vista pública do s
   assert.equal((await pedir('GET', '/api/p/jogo-pt')).json.equipa.fuso, 'Europe/Lisbon');
 });
 
+test('achado 121 (29J): GET /api/p/:gameId leva o logo_url do time (a prévia do link usa como og:image); sem logo, null', async (t) => {
+  const semLogo = { ...TIME };
+  const comLogo = { ...TIME, id: 'time-logo', slug: 'com-logo', logo_url: 'https://x/logos/time-logo.png?v=1' };
+  const tabelas = cenario({
+    teams: [semLogo, comLogo],
+    team_members: [
+      { team_id: semLogo.id, user_id: ADMIN, role: 'admin', created_at: '2026-01-01T00:00:00Z', teams: semLogo },
+      { team_id: comLogo.id, user_id: ADMIN, role: 'admin', created_at: '2026-01-01T00:00:00Z', teams: comLogo },
+    ],
+    games: [
+      { id: 'jogo-sem-logo', team_id: semLogo.id, teams: semLogo, data: JOGO_ISO, local: 'Quadra', status: 'agendado', game_players: [] },
+      { id: 'jogo-com-logo', team_id: comLogo.id, teams: comLogo, data: JOGO_ISO, local: 'Relvado', status: 'agendado', game_players: [] },
+    ],
+  });
+  const { carregados } = carregar(tabelas, ['routes/games']);
+  const pedir = subir([carregados['routes/games']], t);
+  assert.equal((await pedir('GET', '/api/p/jogo-com-logo')).json.equipa.logo_url, 'https://x/logos/time-logo.png?v=1');
+  assert.equal((await pedir('GET', '/api/p/jogo-sem-logo')).json.equipa.logo_url, null, 'time sem logo: null, nunca undefined');
+});
+
 test('sem a coluna fuso (migração 076 por aplicar) o time vale o padrão America/Sao_Paulo', async (t) => {
   const { fuso: _fuso, ...semFuso } = TIME; // eslint-disable-line no-unused-vars
   const { carregados } = carregarComInicio(cenario({

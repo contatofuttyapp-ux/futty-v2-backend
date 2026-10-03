@@ -352,11 +352,12 @@ router.get(
   '/api/p/campeonato/:slug/:id',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug, 'id, nome, slug');
+    const team = await getTeamBySlug(req.params.slug, 'id, nome, slug, logo_url');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
-    res.json({ campeonato: enriquecer(camp), equipa: { nome: team.nome, slug: team.slug } });
+    // logo_url (achado 121, 29J): og:image da prévia do link, quando o time tem logo.
+    res.json({ campeonato: enriquecer(camp), equipa: { nome: team.nome, slug: team.slug, logo_url: team.logo_url || null } });
   })
 );
 
