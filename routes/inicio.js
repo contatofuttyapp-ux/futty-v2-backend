@@ -63,6 +63,11 @@ router.get(
     // O contador de pedidos pendentes (badge do chip de quem administra) sai ao lado: ninguém espera por ele, só a resposta.
     const pendentesP = teamsP.then((t) => (t?.teams && t.teams.some((x) => x.role === 'admin') ? seguro(inicioService.contarPedidosPendentes(t.teams)) : null));
 
+    // 29I, bloco 3: as pendências do card "Seu time" (só quem administra algum time) — ao lado, ninguém espera por elas.
+    const seuTimeP = medir(res, 'seu_time', teamsP.then((t) => (
+      t?.teams?.some((x) => x.role === 'admin') ? seguro(inicioService.obterSeuTime(t.teams)) : []
+    )));
+
     const convitesP = medir(res, 'convites', baseP.then(([vinculos, soOrganiza]) => (
       seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true }))
     )));
@@ -80,7 +85,7 @@ router.get(
       }),
     ]));
 
-    const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2] = await Promise.all([
+    const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2, seu_time] = await Promise.all([
       medir(res, 'me', seguro(inicioService.obterMe(req.user))),
       teamsP,
       pendentesP,
@@ -104,6 +109,7 @@ router.get(
       // Query indexada por user_id, na mesma leva das outras.
       medir(res, 'pedidos_brilhante', seguro(pedidosVivos(userId))),
       onda2P,
+      seuTimeP,
     ]);
     const [votacao_status, campeonato, rsvp] = onda2;
     // 'dados' = o tempo real de espera de TODAS as partes juntas. As medidas por
@@ -113,6 +119,8 @@ router.get(
 
     res.json({
       me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp,
+      // 29I, bloco 3: [{ team_id, slug, nome, fuso, pendencias }] — um por time em que a pessoa é admin ([] = não administra nenhum).
+      seu_time: seu_time || [],
       // `ad` continua a ser o slot do Início e com a MESMA forma de antes
       // ({ ad }) — telas e testes que já o liam não mudam. `ads` é a novidade:
       // os slots de todas as páginas, para o app não voltar a pedir por tela.

@@ -33,9 +33,9 @@ async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, c
   // Rodada 29I (achado 83): o fuso do time vai em TODA leitura de time — a resposta que devolve `team` já leva a hora do campo.
   // Sem a migração 076 a leitura repete sem a coluna (utils/fuso.js#lerComFuso) e o time vale o padrão.
   const pedeFuso = !/\bfuso\b|\*/.test(cols);
-  const { data } = await lerComFuso((comFuso) => supabase
+  const { data } = await lerComFuso((novas) => supabase
     .from('teams')
-    .select(comFuso && pedeFuso ? `${cols}, fuso` : cols)
+    .select(novas && pedeFuso ? `${cols}, ${novas}` : cols)
     .eq('slug', slug)
     .maybeSingle());
   if (!data) return null;
@@ -123,11 +123,11 @@ async function requireTeamMember(slug, userId) {
   return { team, role };
 }
 
-/** Carrega um jogo com a equipa associada (game.teams, com o fuso dela — 29I). Null se não existir. */
+/** Carrega um jogo com a equipa associada (game.teams, com o fuso, a cidade e o escudo dela — 29I). Null se não existir. */
 async function loadGame(id) {
-  const { data } = await lerComFuso((comFuso) => supabase
+  const { data } = await lerComFuso((novas) => supabase
     .from('games')
-    .select(comFuso ? '*, teams ( id, slug, nome, cor, fuso )' : '*, teams ( id, slug, nome, cor )')
+    .select(novas ? `*, teams ( id, slug, nome, cor, cidade, ${novas} )` : '*, teams ( id, slug, nome, cor, cidade )')
     .eq('id', id)
     .maybeSingle());
   return data || null;

@@ -9,6 +9,7 @@ const { pushAdminLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getTeamBySlug, getRole } = require('../utils/db');
 const { endpointPushValido } = require('../utils/validarUrl');
+const { CATEGORIAS, preferenciasCompletas, mesclarPreferencias, erroDaColunaNotificacoes, quemQuer } = require('../utils/notificacoes'); // 29I, bloco 3
 
 const router = express.Router();
 
@@ -215,15 +216,58 @@ router.post(
 );
 
 /**
+ * GET /api/push/preferencias — as notificações que EU quero receber (Perfil → Notificações, Rodada 29I bloco 3).
+ * { preferencias: { jogos, pedidos, figurinha, resenha } (true = ligada), categorias (a ordem da tela),
+ *   admin (administra algum time: só então a tela mostra "Pedidos de entrada"), salvavel (false sem a migração 079) }.
+ */
+router.get(
+  '/preferencias',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const [{ data: eu, error }, { data: adminDe }] = await Promise.all([
+      supabase.from('users').select('notificacoes').eq('id', req.user.id).maybeSingle(),
+      supabase.from('team_members').select('team_id').eq('user_id', req.user.id).eq('role', 'admin').limit(1),
+    ]);
+    if (error && !erroDaColunaNotificacoes(error)) throw new HttpError(500, error.message);
+    res.json({
+      preferencias: preferenciasCompletas(error ? null : eu?.notificacoes),
+      categorias: CATEGORIAS,
+      admin: (adminDe || []).length > 0,
+      salvavel: !error,
+    });
+  })
+);
+
+/** PATCH /api/push/preferencias { jogos?: bool, pedidos?: bool, figurinha?: bool, resenha?: bool } — liga/desliga um tipo. */
+router.patch(
+  '/preferencias',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    await ensureUserRow(req.user);
+    const { data: eu, error: erroLer } = await supabase.from('users').select('notificacoes').eq('id', req.user.id).maybeSingle();
+    if (erroDaColunaNotificacoes(erroLer)) throw new HttpError(503, 'Essa opção ainda não está disponível.');
+    if (erroLer) throw new HttpError(500, erroLer.message);
+    const { erro, paraGravar, preferencias } = mesclarPreferencias(eu?.notificacoes, req.body);
+    if (erro) throw new HttpError(400, erro);
+    const { error } = await supabase.from('users').update({ notificacoes: paraGravar }).eq('id', req.user.id);
+    if (erroDaColunaNotificacoes(error)) throw new HttpError(503, 'Essa opção ainda não está disponível.');
+    if (error) throw new HttpError(500, error.message);
+    res.json({ preferencias, salvavel: true });
+  })
+);
+
+/**
  * Envia uma notificação push a uma lista de utilizadores (fire-and-forget).
  * Nunca lança: erros são engolidos; subscrições mortas (403/404/410) são apagadas.
  * @param {string[]} userIds destinatários
  * @param {{title:string, body?:string, url?:string}} payload
+ * @param {{categoria?: 'jogos'|'pedidos'|'figurinha'|'resenha'}} [opcoes] o tipo do aviso (29I, bloco 3): quem desligou esse tipo
+ *   em Perfil → Notificações fica de fora. Sem categoria = aviso que não se desliga (o "Avisar o time" do admin, o Gabinete).
  */
-async function enviarNotificacao(userIds, payload) {
+async function enviarNotificacao(userIds, payload, opcoes = {}) {
   try {
     if (!pushConfigurado) return;
-    const ids = (userIds || []).filter(Boolean);
+    const ids = await quemQuer(supabase, (userIds || []).filter(Boolean), opcoes.categoria);
     if (!ids.length) return;
 
     const { data: subs } = await supabase

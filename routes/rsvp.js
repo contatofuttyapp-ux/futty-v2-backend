@@ -50,7 +50,7 @@ async function promoverDaEspera(game) {
     title: '✅ Vaga disponível!',
     body: `Você foi confirmado para o jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))}. Confirme sua presença no app.`,
     url: `/time/${game.teams.slug}`,
-  });
+  }, { categoria: 'jogos' });
 }
 
 // Carrega o jogo e garante que o utilizador é admin da equipa.

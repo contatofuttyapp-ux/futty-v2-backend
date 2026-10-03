@@ -150,6 +150,8 @@ test('convite válido, anônimo: devolve o time COM logo_url e cor_fundo, quem c
     nome: 'Várzea FC',
     slug: 'varzea-fc',
     cor: '#8b5cf6',
+    escudo_cor2: null, // 29I, bloco 3: o escudo do time sem logo (sem a 077, ou time de uma cor: sólido)
+    escudo_padrao: null,
     logo_url: 'https://x.supabase.co/storage/v1/object/public/avatars/logos/t.png?v=1',
     cor_fundo: '#1a1a2e',
     fuso: 'America/Sao_Paulo', // 29I (achado 83): o próximo jogo da página se lê no relógio do campo (time sem fuso = o padrão)

@@ -72,23 +72,48 @@ test('instanteNoFuso: "quinta 20:00 no campo" vira o instante certo, e é o inve
   assert.equal(instanteNoFuso('lixo', '20:00', 'America/Sao_Paulo'), null);
 });
 
-test('lerComFuso: pede a coluna; se ela não existe repete sem ela e lembra por um minuto', async () => {
+// Um banco falso que só tem as colunas de `existem`: a leitura que pede outra recebe o erro do PostgREST com o nome dela.
+const bancoCom = (existem, chamadas) => async (novas) => {
+  chamadas.push(novas);
+  const falta = (novas ? novas.split(', ') : []).find((c) => !existem.includes(c));
+  return falta ? { data: null, error: { message: `column teams.${falta} does not exist` } } : { data: { colunas: novas }, error: null };
+};
+
+test('lerComFuso: pede as colunas novas; se alguma não existe repete sem ela e lembra por um minuto', async () => {
   esquecerFaltaDaColuna();
   const chamadas = [];
-  const semColuna = async (comFuso) => {
-    chamadas.push(comFuso);
-    return comFuso ? { data: null, error: { message: 'column teams.fuso does not exist' } } : { data: { id: 1 }, error: null };
-  };
-  assert.deepEqual((await lerComFuso(semColuna)).data, { id: 1 });
-  assert.deepEqual(chamadas, [true, false]); // tentou com, repetiu sem
-  await lerComFuso(semColuna);
-  assert.deepEqual(chamadas, [true, false, false]); // lembrou: nem tentou com a coluna de novo
+  const semNenhuma = bancoCom([], chamadas);
+  assert.deepEqual((await lerComFuso(semNenhuma)).data, { colunas: '' });
+  assert.equal(chamadas.at(-1), '', 'acabou lendo sem nenhuma coluna nova');
+  const n = chamadas.length;
+  await lerComFuso(semNenhuma);
+  assert.deepEqual(chamadas.slice(n), [''], 'lembrou: nem tentou com as colunas de novo');
   esquecerFaltaDaColuna();
-  const comColuna = async (comFuso) => ({ data: { id: 2, fuso: comFuso ? 'Europe/Lisbon' : undefined }, error: null });
+  const comColuna = async (novas) => ({ data: { id: 2, fuso: /fuso/.test(novas) ? 'Europe/Lisbon' : undefined }, error: null });
   assert.equal((await lerComFuso(comColuna)).data.fuso, 'Europe/Lisbon');
   // um erro que não é da coluna não é engolido
   const outroErro = async () => ({ data: null, error: { message: 'connection refused' } });
   assert.equal((await lerComFuso(outroErro)).error.message, 'connection refused');
+  esquecerFaltaDaColuna();
+});
+
+test('lerComFuso (29I, bloco 3): só a coluna que falta sai — com a 076 aplicada e a 077/079 não, o fuso continua valendo', async () => {
+  esquecerFaltaDaColuna();
+  const chamadas = [];
+  const so076 = bancoCom(['fuso'], chamadas);
+  assert.deepEqual((await lerComFuso(so076)).data, { colunas: 'fuso' });
+  assert.deepEqual(chamadas, [
+    'fuso, escudo_cor2, escudo_padrao, jogadores_por_time',
+    'fuso, escudo_padrao, jogadores_por_time',
+    'fuso, jogadores_por_time',
+    'fuso',
+  ]);
+  const n = chamadas.length;
+  await lerComFuso(so076);
+  assert.deepEqual(chamadas.slice(n), ['fuso'], 'lembrou das três que faltam: uma ida só');
+  esquecerFaltaDaColuna();
+  const tudo = bancoCom(['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time'], []);
+  assert.deepEqual((await lerComFuso(tudo)).data, { colunas: 'fuso, escudo_cor2, escudo_padrao, jogadores_por_time' });
   esquecerFaltaDaColuna();
 });
 

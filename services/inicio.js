@@ -14,6 +14,7 @@ const { temIdadeMinima } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
+const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time" (29I, bloco 3)
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { normalizarFuso, lerComFuso } = require('../utils/fuso');
@@ -187,14 +188,15 @@ async function obterMe(user) {
 // cada parte recebe o resultado pronto. As funções soltas (rotas antigas) continuam a fazer a sua própria consulta.
 //
 // O select é a união do que cada parte lia (colunas que já existem em produção: eram lidas por elas).
-const VINCULOS_SELECT_SEM_FUSO = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
+const VINCULOS_SELECT_SEM_FUSO = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, cidade, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
 // 29I (achado 83): o fuso do time vai junto, na mesma consulta (sem ida nova). Sem a migração 076 a leitura repete sem ele.
-const VINCULOS_SELECT = VINCULOS_SELECT_SEM_FUSO.replace(' revotar_pedido_em )', ' revotar_pedido_em, fuso )');
+// 29I bloco 3: com as outras colunas novas do time (escudo, jogadores por time) — mesma tolerância, coluna a coluna.
+const vinculosSelect = (novas) => VINCULOS_SELECT_SEM_FUSO.replace(' revotar_pedido_em )', ` revotar_pedido_em, ${novas} )`);
 
 async function obterVinculos(userId) {
-  const { data, error } = await lerComFuso((comFuso) => supabase
+  const { data, error } = await lerComFuso((novas) => supabase
     .from('team_members')
-    .select(comFuso ? VINCULOS_SELECT : VINCULOS_SELECT_SEM_FUSO)
+    .select(novas ? vinculosSelect(novas) : VINCULOS_SELECT_SEM_FUSO)
     .eq('user_id', userId)
     .order('created_at', { ascending: true }));
   if (error) throw new HttpError(500, error.message);
@@ -222,6 +224,40 @@ async function contarPedidosPendentes(teams) {
   for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
   for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
   return teams;
+}
+
+// ─── O card "Seu time" do Início (Rodada 29I, bloco 3) ───────────────────────────────────────────────────────────────
+// Para cada time em que a pessoa é admin: as pendências (utils/pendenciasAdmin.js) — pedidos de entrada, o próximo jogo sem
+// presença aberta, o último sem resultado, denúncias à espera. Três leituras em paralelo (pedidos, jogos, denúncias), fora do
+// caminho crítico do Início. Sem time de admin, lista vazia (a tela não mostra o card).
+const JOGO_PENDENCIA_COLS = 'id, team_id, data, status, cancelado, resultado_nivel, rsvp_aberto, rsvp_fechado';
+const ULTIMOS_PARA_PENDENCIA = 4; // o último que aconteceu, com folga para os cancelados
+
+async function obterSeuTime(teams) {
+  const admin = (teams || []).filter((t) => t.role === 'admin');
+  if (!admin.length) return [];
+  const ids = admin.map((t) => t.id);
+  const agoraIso = new Date().toISOString();
+  const [pedidos, proximos, passados, denuncias] = await Promise.all([
+    supabase.from('team_join_requests').select('team_id').in('team_id', ids).eq('status', 'pending'),
+    supabase.from('games').select(JOGO_PENDENCIA_COLS).in('team_id', ids).gte('data', agoraIso).order('data', { ascending: true }).limit(ids.length * 4),
+    Promise.all(ids.map((id) => supabase.from('games').select(JOGO_PENDENCIA_COLS).eq('team_id', id).lt('data', agoraIso)
+      .order('data', { ascending: false }).limit(ULTIMOS_PARA_PENDENCIA))),
+    Promise.all(ids.map((id) => Promise.resolve().then(() => casosDaEquipaComCache(id)).catch(() => []))),
+  ]);
+  const pedidosPorTime = {};
+  for (const p of pedidos.data || []) pedidosPorTime[p.team_id] = (pedidosPorTime[p.team_id] || 0) + 1;
+  return admin.map((t, i) => {
+    const jogos = [...(proximos.data || []).filter((g) => g.team_id === t.id), ...(passados[i]?.data || [])];
+    const casos = (denuncias[i] || []).filter((c) => c.estado === 'fila' || c.estado === 'escalada');
+    return {
+      team_id: t.id,
+      slug: t.slug,
+      nome: t.nome,
+      fuso: normalizarFuso(t.fuso),
+      pendencias: pendenciasDoTime({ pedidos: pedidosPorTime[t.id] || 0, jogos, denuncias: casos.length }),
+    };
+  });
 }
 
 async function obterTeams(userId) {
@@ -282,9 +318,9 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
   const [memberships, soOrganiza] = vinculos
     ? [vinculos, soOrganizaDado || new Set()]
     : await Promise.all([
-      lerComFuso((comFuso) => supabase
+      lerComFuso((novas) => supabase
         .from('team_members')
-        .select(comFuso ? 'team_id, ausente_proximo, teams ( id, nome, slug, fuso )' : 'team_id, ausente_proximo, teams ( id, nome, slug )')
+        .select(/fuso/.test(novas) ? 'team_id, ausente_proximo, teams ( id, nome, slug, cidade, fuso )' : 'team_id, ausente_proximo, teams ( id, nome, slug, cidade )')
         .eq('user_id', userId)).then((r) => r.data),
       timesEmQueSoOrganiza(userId),
     ]);
@@ -662,6 +698,7 @@ async function obterAdsSessao(userId) {
 const VALIDADE_ADS_MS = 4 * 60 * 1000;
 
 module.exports = {
+  obterSeuTime,
   obterMe,
   obterVinculos,
   montarTeams,

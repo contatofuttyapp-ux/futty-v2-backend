@@ -120,25 +120,50 @@ function horaNoFuso(iso, fuso = FUSO_PADRAO) {
 // causa da coluna, repete sem ela e o time vale o padrão. A falta é lembrada por um minuto (sem repetir o erro a cada
 // pedido); depois disso a leitura com a coluna é tentada de novo, e a migração aplicada passa a valer sozinha.
 const MEMORIA_DA_FALTA_MS = 60 * 1000;
-let faltaAte = 0;
+const faltaAte = new Map(); // coluna → até quando se dá por ausente
 
 const erroDaColunaFuso = (erro) => !!erro && /\bfuso\b/i.test(erro.message || '');
 
-/**
- * Roda `consulta(comFuso)` — uma função que monta e dispara a leitura, pedindo ou não a coluna `fuso` — e, se a coluna não
- * existir, repete sem ela. Devolve o { data, error } da consulta que valeu.
- */
-async function lerComFuso(consulta) {
-  if (Date.now() >= faltaAte) {
-    const resposta = await consulta(true);
-    if (!erroDaColunaFuso(resposta.error)) return resposta;
-    faltaAte = Date.now() + MEMORIA_DA_FALTA_MS;
-  }
-  return consulta(false);
+// Rodada 29I, bloco 3: o mesmo jeito vale para TODAS as colunas novas do time — o fuso (076), o escudo de duas cores e padrão (077)
+// e os jogadores por time padrão (079). Elas viajam juntas nas leituras do time (a mesma ida ao banco); a que faltar sai da leitura
+// SOZINHA (o erro do banco diz qual é) e as outras continuam valendo — com a 076 aplicada e a 077 não, o fuso vale e o escudo fica
+// sólido. Cada uma que falta vale o seu padrão (fuso de São Paulo, escudo sólido, 5 por time) até o Pedro aplicar a migração dela.
+const COLUNAS_NOVAS_DO_TIME = ['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time'];
+const COLUNAS_NOVAS_DO_TIME_SQL = COLUNAS_NOVAS_DO_TIME.join(', ');
+const RE_COLUNA_NOVA = new RegExp(`\\b(${COLUNAS_NOVAS_DO_TIME.join('|')})\\b`, 'i');
+const erroDeColunaNova = (erro) => !!erro && RE_COLUNA_NOVA.test(erro.message || '');
+
+/** As colunas novas que, até onde se sabe, existem — "fuso, escudo_cor2, …" (vazio = nenhuma). */
+function colunasPresentes() {
+  const agora = Date.now();
+  return COLUNAS_NOVAS_DO_TIME.filter((c) => !(faltaAte.get(c) > agora)).join(', ');
 }
 
-/** Só para os testes: esquece que a coluna faltava. */
-const esquecerFaltaDaColuna = () => { faltaAte = 0; };
+/** Qual das colunas novas o erro do banco diz que não existe (a primeira citada), ou null. */
+function colunaQueFalta(erro) {
+  const m = RE_COLUNA_NOVA.exec(erro?.message || '');
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * Roda `consulta(novas)` — uma função que monta e dispara a leitura; `novas` é o pedaço do select com as colunas novas do time
+ * que existem ("fuso, escudo_cor2, …"), ou '' quando nenhuma (o select pede as novas só se vier algo). A coluna que o banco disser que
+ * não existe sai e a leitura repete com as outras. Devolve o { data, error } da consulta que valeu.
+ */
+async function lerComFuso(consulta) {
+  for (let tentativa = 0; tentativa <= COLUNAS_NOVAS_DO_TIME.length; tentativa += 1) {
+    const novas = colunasPresentes();
+    const resposta = await consulta(novas);
+    const falta = novas ? colunaQueFalta(resposta.error) : null;
+    // Erro que não é de coluna nova — ou de uma que esta leitura nem pediu — não é assunto daqui: volta como veio.
+    if (!falta || !novas.split(', ').includes(falta)) return resposta;
+    faltaAte.set(falta, Date.now() + MEMORIA_DA_FALTA_MS);
+  }
+  return consulta('');
+}
+
+/** Só para os testes: esquece que as colunas faltavam. */
+const esquecerFaltaDaColuna = () => { faltaAte.clear(); };
 
 module.exports = {
   FUSO_PADRAO,
@@ -152,6 +177,9 @@ module.exports = {
   dataNoFuso,
   horaNoFuso,
   erroDaColunaFuso,
+  erroDeColunaNova,
+  COLUNAS_NOVAS_DO_TIME,
+  COLUNAS_NOVAS_DO_TIME_SQL,
   lerComFuso,
   esquecerFaltaDaColuna,
 };

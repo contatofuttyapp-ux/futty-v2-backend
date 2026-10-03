@@ -589,7 +589,7 @@ router.post(
           title: 'Sua figurinha foi liberada ✨',
           body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`,
           url: '/figurinha',
-        });
+        }, { categoria: 'figurinha' });
         console.log('[gabinete/brilhantes] uniforme do pacote fixado', { teamId, kitId, membros: ids.length });
         return res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: ids.length });
       }

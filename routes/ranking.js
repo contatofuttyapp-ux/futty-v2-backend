@@ -512,6 +512,14 @@ router.post(
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem pedir revotação.');
 
+    // 29I, bloco 3 (dono): em Ajustes → AÇÕES DEFINITIVAS, "Pedir para votar de novo" ZERA as notas do time antes de pedir — todo mundo
+    // vota do zero. O app pede a confirmação; sem `zerar` (app antigo) segue só o pedido, como era.
+    if (req.body?.zerar === true) {
+      const { error: erroZerar } = await supabase.from('votes').delete().eq('team_id', team.id);
+      if (erroZerar) throw new HttpError(500, erroZerar.message);
+      selosCache.invalidarEquipa(team.id);
+    }
+
     const { error } = await supabase.from('teams').update({ revotar_pedido_em: new Date().toISOString() }).eq('id', team.id);
     if (error) throw new HttpError(500, error.message);
     res.json({ pedido: true });

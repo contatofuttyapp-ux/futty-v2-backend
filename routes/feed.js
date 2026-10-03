@@ -218,9 +218,9 @@ router.get(
     marcarFase(res, 'auth');
     // Equipas do utilizador
     // 29I (achado 83): o fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
-    const { data: memberships } = await lerComFuso((comFuso) => supabase
+    const { data: memberships } = await lerComFuso((novas) => supabase
       .from('team_members')
-      .select(comFuso ? 'team_id, teams ( id, nome, slug, fuso )' : 'team_id, teams ( id, nome, slug )')
+      .select(/fuso/.test(novas) ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
       .eq('user_id', req.user.id));
     marcarFase(res, 'equipas');
     const teamMap = {};
@@ -711,7 +711,7 @@ router.patch(
           title: '🏆 Resultado registrado!',
           body: `Veja quem foi o destaque em ${game.local || 'Jogo'}`,
           url: '/feed',
-        })
+        }, { categoria: 'resenha' }) // 29I, bloco 3: o tipo "Resenha" do Perfil → Notificações
       );
   })
 );

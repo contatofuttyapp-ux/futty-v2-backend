@@ -1189,7 +1189,7 @@ function resolverDireitoEKit(direito, kitPedido) {
 async function avisarQuePintou(job) {
   if (job.estado !== 'pronta') return;
   if (Date.now() - job.ultimaConsulta < 6000) return;
-  enviarNotificacao([job.userId], { title: 'Futty', body: 'Sua figurinha ficou pronta', url: '/figurinha' });
+  enviarNotificacao([job.userId], { title: 'Futty', body: 'Sua figurinha ficou pronta', url: '/figurinha' }, { categoria: 'figurinha' });
 }
 
 /** Já há uma pintura desta pessoa em curso: o app novo acompanha a que existe; o antigo (que espera a figurinha na resposta) recebe um aviso claro. */

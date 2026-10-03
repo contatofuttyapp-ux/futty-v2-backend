@@ -3,6 +3,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings, goleirosDoTime } = require('../utils/db');
+const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // item 68 (29I, bloco 3): o padrão do time
 const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
@@ -11,6 +12,7 @@ const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
 const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
+const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código> (29I, bloco 3)
 
 const router = express.Router();
 
@@ -44,11 +46,12 @@ router.post(
     const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime, historico } = req.body || {};
     if (!teamSlug || !data) throw new HttpError(400, 'Time e data são obrigatórios.');
 
-    const porTime = parseInt(jogadoresPorTime, 10);
-    if (!porTime || porTime < 1) throw new HttpError(400, 'Indique quantos jogadores por time.');
-
     const team = await getTeamBySlug(teamSlug, 'id, slug, nome');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
+
+    // Item 68 (29I, bloco 3): sem número no pedido, o jogo nasce com o padrão do time (Ajustes); com número, é o "mudar só neste jogo".
+    const porTime = jogadoresPorTime == null || jogadoresPorTime === '' ? jogadoresPorTimeDoTime(team) : parseInt(jogadoresPorTime, 10);
+    if (!porTime || porTime < 1) throw new HttpError(400, 'Indique quantos jogadores por time.');
 
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
@@ -82,7 +85,7 @@ router.post(
           title: '⚽ Novo jogo criado',
           body: `${team.nome || 'Seu time'} · ${dataCurtaNoFuso(game.data, fuso)}`,
           url: '/home',
-        })
+        }, { categoria: 'jogos' }) // 29I, bloco 3: quem desligou "Jogos e presença" no Perfil fica de fora
       );
     }
   })
@@ -237,6 +240,36 @@ router.get(
         : null,
       jaVotei: (votosCount || 0) > 0,
     });
+  })
+);
+
+/**
+ * POST /api/games/:id/link-curto — o código do link curto do sorteio (futtyapp.com.br/s/<código>), criado na primeira vez.
+ * Qualquer membro do time (quem compartilha o sorteio no grupo). { codigo } — null sem a migração 078: o app manda o link longo.
+ */
+router.post(
+  '/api/games/:id/link-curto',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.team_id, req.user.id);
+    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    res.json({ codigo: await codigoDoSorteio(supabase, game.id) });
+  })
+);
+
+/**
+ * GET /api/s/:codigo — para onde o link curto do sorteio leva: { slug, gameId } (sem login, como a vista pública /api/p/).
+ * O app troca /s/<código> por /p/<slug>/<id>, a página de sempre. Código inexistente (ou sem a 078) = 404.
+ */
+router.get(
+  '/api/s/:codigo',
+  asyncHandler(async (req, res) => {
+    const gameId = await jogoDoCodigo(supabase, req.params.codigo);
+    const game = gameId ? await loadGame(gameId) : null;
+    if (!game || !game.teams) throw new HttpError(404, 'Esse sorteio não existe.');
+    res.json({ slug: game.teams.slug, gameId: game.id });
   })
 );
 
@@ -723,7 +756,7 @@ router.post(
       title: '🎲 Sorteio realizado!',
       body: `O sorteio de ${game.local || 'Jogo'} está pronto`,
       url: `/time/${game.teams.slug}/jogo/${game.id}`,
-    });
+    }, { categoria: 'jogos' });
   })
 );
 
@@ -898,7 +931,7 @@ router.post(
       title: 'Jogo cancelado ❌',
       body: corpo,
       url: `/time/${game.teams.slug}`,
-    });
+    }, { categoria: 'jogos' });
   })
 );
 
@@ -987,7 +1020,7 @@ router.post(
     const existentesTs = (existentes || []).map((g) => new Date(g.data).getTime());
     const colide = (d) => existentesTs.some((ts) => Math.abs(ts - d.getTime()) <= 3600000);
 
-    const porTime = 5; // valor por defeito; o admin ajusta depois por jogo.
+    const porTime = jogadoresPorTimeDoTime(team); // item 68 (29I, bloco 3): o padrão do time (sem ele, 5); o admin ajusta depois por jogo.
     const aInserir = [];
     const criadas = [];
     let ignorados = 0;
@@ -1014,7 +1047,7 @@ router.post(
           title: '⚽ Novos jogos agendados',
           body: `${team.nome || 'Seu time'} · ${aInserir.length} jogos nas próximas semanas`,
           url: '/home',
-        })
+        }, { categoria: 'jogos' })
       );
     }
   })

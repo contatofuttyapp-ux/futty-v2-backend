@@ -21,6 +21,8 @@ const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" 
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código> (29H)
 const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols (29I, achado 78)
 const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time (29I, achado 83)
+const { PALETA, CORES_ANTIGAS, lerEscudo, erroDeEscudoSemMigracao, escudoDoTime } = require('../utils/escudo'); // o escudo do time (29I, bloco 3)
+const { lerJogadoresPorTime, jogadoresPorTimeDoTime, erroDaColunaJogadoresPorTime } = require('../utils/jogadoresPorTime'); // item 68 (29I, bloco 3)
 
 const router = express.Router();
 
@@ -40,7 +42,8 @@ async function gravarFusoDoTimeNovo(team, geo) {
   return derivado;
 }
 
-const CORES_VALIDAS = ['verde', 'azul', 'vermelho', 'preto'];
+// 29I, bloco 3: a cor principal do escudo vem da paleta de 12 (utils/escudo.js); as 4 chaves antigas continuam valendo.
+const CORES_VALIDAS = [...new Set([...PALETA, ...CORES_ANTIGAS])];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
 // RODADA 20 (23-set, decisão do dono): o link vira "de grupo" — o MESMO link
 // serve pra todo mundo, vale 30 dias (era 7, uso único), e o admin revoga
@@ -132,6 +135,11 @@ router.post(
         .insert({ ...linhaDoTime, ...colunasDaCidade, ...extras })
         .select()
         .single();
+      // Migração 077 por aplicar: a regra antiga do banco só aceita 4 cores — o time nasce com a de sempre (roxo) e o admin troca depois.
+      if (error && /teams_cor_check/i.test(error.message || '')) {
+        linhaDoTime.cor = 'verde';
+        ({ data, error } = await supabase.from('teams').insert({ ...linhaDoTime, ...colunasDaCidade, ...extras }).select().single());
+      }
       // Migração 073 por aplicar: sem as colunas do bairro e dos prêmios o time nasce igual, só sem elas.
       if (error && Object.keys(extras).length && /bairro|mostrar_artilheiro|mostrar_destaque/i.test(error.message || '')) {
         extrasGravados = false;
@@ -159,7 +167,7 @@ router.post(
           .insert({
             nome: nome.trim(),
             slug,
-            cor: corFinal,
+            cor: linhaDoTime.cor,
             criado_por: req.user.id,
             publica: !!publica,
             localizacao: localizacaoFinal,
@@ -236,10 +244,12 @@ router.get(
     // geo_lat/geo_lng (arredondados) vão no payload → o cliente calcula a distância
     // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
     const COLUNAS = 'id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
-    const montar = (comNormalizada) => {
+    // 29I, bloco 3: o escudo (segunda cor e padrão, migração 077) vai junto — sem a migração a leitura repete sem ele (lerComFuso).
+    const montar = (comNormalizada, novas) => {
+      const escudo = (novas || '').split(', ').filter((c) => c.startsWith('escudo_')).join(', ');
       let query = supabase
         .from('teams')
-        .select(comNormalizada ? `${COLUNAS}, cidade_normalizada` : COLUNAS)
+        .select([COLUNAS, comNormalizada ? 'cidade_normalizada' : '', escudo].filter(Boolean).join(', '))
         .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
       // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
       // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
@@ -259,9 +269,9 @@ router.get(
       return query;
     };
 
-    let { data: teamsRaw, error } = await montar(true);
+    let { data: teamsRaw, error } = await lerComFuso((novas) => montar(true, novas));
     // Migração 066 por aplicar: sem a coluna a busca continua como era.
-    if (error && /cidade_normalizada/i.test(error.message || '')) ({ data: teamsRaw, error } = await montar(false));
+    if (error && /cidade_normalizada/i.test(error.message || '')) ({ data: teamsRaw, error } = await lerComFuso((novas) => montar(false, novas)));
     if (error) throw new HttpError(500, error.message);
 
     // Equipa suspensa = invisível na descoberta.
@@ -294,7 +304,7 @@ router.get(
         id: t.id,
         nome: t.nome,
         slug: t.slug,
-        cor: t.cor,
+        ...escudoDoTime(t), // cor + escudo_cor2 + escudo_padrao (29I, bloco 3)
         logo_url: t.logo_url || null,
         cor_fundo: t.cor_fundo || null,
         modo_visibilidade: t.modo_visibilidade,
@@ -324,10 +334,14 @@ router.get(
   '/api/teams/publicas',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { data: teamsRaw, error } = await supabase
-      .from('teams')
-      .select('id, nome, slug, descricao, localizacao, logo_url, cor_fundo, modo_visibilidade')
-      .in('modo_visibilidade', ['publico_aberto', 'publico_aprovacao']);
+    // 29I, bloco 3: a cor e o escudo vão junto (o card desenha o escudo do time sem logo); sem a 077, só a cor.
+    const { data: teamsRaw, error } = await lerComFuso((novas) => {
+      const escudo = (novas || '').split(', ').filter((c) => c.startsWith('escudo_')).join(', ');
+      return supabase
+        .from('teams')
+        .select(['id, nome, slug, cor, descricao, localizacao, logo_url, cor_fundo, modo_visibilidade', escudo].filter(Boolean).join(', '))
+        .in('modo_visibilidade', ['publico_aberto', 'publico_aprovacao']);
+    });
     if (error) throw new HttpError(500, error.message);
 
     // Equipa suspensa = invisível na descoberta.
@@ -360,6 +374,7 @@ router.get(
         slug: t.slug,
         descricao: t.descricao,
         localizacao: t.localizacao,
+        ...escudoDoTime(t),
         logo_url: t.logo_url || null,
         cor_fundo: t.cor_fundo || null,
         modo_visibilidade: t.modo_visibilidade,
@@ -428,6 +443,8 @@ router.get(
       team: {
         ...team,
         fuso: fusoDoTime(team), // 29I (achado 83): sem a migração 076 a coluna não vem — vale o padrão
+        ...escudoDoTime(team), // 29I, bloco 3: sem a 077 o escudo vale sólido, uma cor
+        jogadores_por_time: jogadoresPorTimeDoTime(team), // item 68: sem a 079 vale 5
         // 29H: sem a migração 073 as colunas não vêm — valem os padrões (tudo ligado, sem bairro).
         bairro: team.bairro || null,
         mostrar_artilheiro: team.mostrar_artilheiro !== false,
@@ -459,9 +476,15 @@ router.patch(
       if (v.length > 60) throw new HttpError(400, 'Nome: máximo 60 caracteres.');
       patch.nome = v;
     }
-    if ('cor' in b) {
-      if (!CORES_VALIDAS.includes(b.cor)) throw new HttpError(400, 'Cor inválida.');
-      patch.cor = b.cor;
+    // 29I, bloco 3 (achado 102): UM controle, "Escudo do time" — cor principal (teams.cor) + segunda cor + padrão, da paleta fixa.
+    const escudo = lerEscudo(b);
+    if (escudo.erro) throw new HttpError(400, escudo.erro);
+    Object.assign(patch, escudo.patch);
+    // Item 68: o padrão de jogadores por time (o "Novo jogo" já vem com ele).
+    if ('jogadores_por_time' in b) {
+      const n = lerJogadoresPorTime(b.jogadores_por_time);
+      if (n === undefined) throw new HttpError(400, 'Escolha de 2 a 11 jogadores por time.');
+      patch.jogadores_por_time = n;
     }
     if ('publica' in b) patch.publica = !!b.publica;
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
@@ -578,13 +601,19 @@ router.patch(
     }
     // Migração 073 por aplicar: o bairro e os prêmios do time ainda não têm onde ficar — o app diz, em vez de fingir.
     if (error && /bairro|mostrar_artilheiro|mostrar_destaque/i.test(error.message || '')) throw new HttpError(503, 'Essa opção ainda não está disponível.');
+    // Migrações 077 (escudo: segunda cor, padrão, as 12 cores) e 079 (jogadores por time) por aplicar: idem.
+    if (erroDeEscudoSemMigracao(error) || erroDaColunaJogadoresPorTime(error)) throw new HttpError(503, 'Essa opção ainda não está disponível.');
     // Resiliência: se as colunas geo ainda não existirem (DDL 041 por correr), repete sem elas.
     if (error && /geo_lat|geo_lng|cidade/i.test(error.message || '')) {
       const semGeo = { ...patch }; delete semGeo.geo_lat; delete semGeo.geo_lng; delete semGeo.cidade; delete semGeo.cidade_normalizada;
       ({ data: updated, error } = await supabase.from('teams').update(semGeo).eq('id', team.id).select().single());
     }
     if (error) throw new HttpError(500, error.message);
-    res.json({ team: { ...updated, fuso: fusoDoTime(updated) }, ...(geoInfo ? { geo: geoInfo } : {}), ...(bairroInfo ? { bairro: bairroInfo } : {}) });
+    res.json({
+      team: { ...updated, fuso: fusoDoTime(updated), ...escudoDoTime(updated), jogadores_por_time: jogadoresPorTimeDoTime(updated) },
+      ...(geoInfo ? { geo: geoInfo } : {}),
+      ...(bairroInfo ? { bairro: bairroInfo } : {}),
+    });
   })
 );
 
@@ -1046,9 +1075,9 @@ router.get(
     // jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
     const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }, organizam] = await Promise.all([
       // 29I (achado 83): o fuso do time vai junto — o "próximo jogo" da página do convite é lido no relógio do campo.
-      lerComFuso((comFuso) => supabase
+      lerComFuso((novas) => supabase
         .from('teams')
-        .select(comFuso ? 'id, nome, slug, cor, logo_url, cor_fundo, cidade, fuso' : 'id, nome, slug, cor, logo_url, cor_fundo, cidade')
+        .select(novas ? `id, nome, slug, cor, logo_url, cor_fundo, cidade, ${novas}` : 'id, nome, slug, cor, logo_url, cor_fundo, cidade')
         .eq('id', convite.team_id)
         .single()),
       supabase
@@ -1093,7 +1122,7 @@ router.get(
       proximoJogo: proximo?.data || null,
       fuso: fusoDoTime(team), // 29I (achado 83): o instante do próximo jogo se lê neste fuso (o do campo)
       cidade: team?.cidade || null,
-      team: team ? { nome: team.nome, slug: team.slug, cor: team.cor, logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null, fuso: fusoDoTime(team) } : null,
+      team: team ? { nome: team.nome, slug: team.slug, ...escudoDoTime(team), logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null, fuso: fusoDoTime(team) } : null,
     });
   })
 );
@@ -1156,6 +1185,28 @@ router.post(
   })
 );
 
+/**
+ * 29I, bloco 3 (dono): chegou pedido de entrada → push para os admins do time ("Fulano quer entrar no <time>"), que leva à aba
+ * Elenco, onde se aceita. Tipo "pedidos" em Perfil → Notificações: quem desligou não recebe. Nunca lança.
+ */
+function avisarAdminsDoPedido(team, userId) {
+  Promise.resolve().then(async () => {
+    const [{ data: admins }, { data: quem }, { data: time }] = await Promise.all([
+      supabase.from('team_members').select('user_id').eq('team_id', team.id).eq('role', 'admin'),
+      supabase.from('users').select('nome, nome_jogador').eq('id', userId).maybeSingle(),
+      supabase.from('teams').select('nome').eq('id', team.id).maybeSingle(),
+    ]);
+    const ids = (admins || []).map((a) => a.user_id).filter((id) => id && id !== userId);
+    if (!ids.length) return;
+    const nome = quem?.nome_jogador || quem?.nome || 'Alguém';
+    await enviarNotificacao(ids, {
+      title: `${nome} quer entrar no ${time?.nome || 'seu time'}`,
+      body: 'Toque para aceitar ou recusar.',
+      url: `/time/${team.slug}?aba=elenco`,
+    }, { categoria: 'pedidos' });
+  }).catch(() => {});
+}
+
 /** POST /api/teams/:slug/pedir-entrada — pedir entrada numa equipa pública. */
 router.post(
   '/api/teams/:slug/pedir-entrada',
@@ -1181,6 +1232,7 @@ router.post(
     }
 
     const mensagem = req.body?.mensagem ? String(req.body.mensagem).trim().slice(0, 300) : null;
+    const avisar = () => avisarAdminsDoPedido(team, req.user.id); // fire-and-forget, nunca atrasa nem derruba o pedido
 
     const { data, error } = await supabase
       .from('team_join_requests')
@@ -1205,6 +1257,7 @@ router.post(
             .eq('id', existente.id)
             .select('id, status')
             .single();
+          avisar();
           return res.json({ pedido: reaberto || existente });
         }
         return res.json({ pedido: existente || { id: null, status: 'pending' } });
@@ -1212,6 +1265,7 @@ router.post(
       throw new HttpError(500, error.message);
     }
 
+    avisar();
     res.status(201).json({ pedido: data });
   })
 );
