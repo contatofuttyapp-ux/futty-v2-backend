@@ -200,9 +200,9 @@ async function criarTudo() {
   const estado = { teamSlug: SLUG, teamId: time.id, gameId: game.id, seed: resultado.seed, capitaoEmail: emailDe(capitao.apelido) };
   fs.writeFileSync(DESTINO_ESTADO, JSON.stringify(estado, null, 2));
   ok(`sessão do capitão em ${path.relative(process.cwd(), DESTINO_SESSAO)}`);
-  console.log(`\nSorteio: /equipa/${SLUG}/jogo/${game.id}/sorteio`);
-  console.log(`Ranking: /equipa/${SLUG}/ranking`);
-  console.log(`Jogo (presença): /equipa/${SLUG}/jogo/${game.id}`);
+  console.log(`\nSorteio: /time/${SLUG}/jogo/${game.id}/sorteio`);
+  console.log(`Ranking: /time/${SLUG}/ranking`);
+  console.log(`Jogo (presença): /time/${SLUG}/jogo/${game.id}`);
 }
 
 (async () => {

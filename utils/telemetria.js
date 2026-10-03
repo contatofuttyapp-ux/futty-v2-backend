@@ -20,10 +20,10 @@ const VERSAO = /^[\w .()+-]{1,40}$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Palavra fixa de rota: só letras minúsculas e hífen, como todas as rotas do app e do motor.
 const PALAVRA_DE_ROTA = /^[a-z]+(-[a-z]+)*$/;
-// Onde o segmento SEGUINTE é o slug de um time (app: /equipa/:slug, /admin/:slug; motor:
+// Onde o segmento SEGUINTE é o slug de um time (app: /time/:slug, /admin/:slug; motor:
 // /api/teams/:slug, /api/equipas/:slug). O slug de time pode ser só letras ("teste-abcde") e
 // passaria por palavra de rota — por isso a posição manda, não a forma.
-const ANTES_DO_SLUG = new Set(['teams', 'equipas', 'equipa', 'admin']);
+const ANTES_DO_SLUG = new Set(['teams', 'equipas', 'equipa', 'time', 'admin']); // 'equipa' = o endereço antigo (29I: /equipa → /time), que ainda chega por link já enviado
 
 const MS_MAX = 120000; // 2 minutos: acima disso não é tela lenta, é tela abandonada
 const MAX_ROTAS = 20;
@@ -31,7 +31,7 @@ const MAX_ROTA_CHARS = 100;
 
 /**
  * O padrão de uma rota, sem nada que identifique alguém ou algum time:
- *   /equipa/missa-de-quinta-ogqq6/jogador/5b1c…  →  /equipa/:slug/jogador/:id
+ *   /time/missa-de-quinta-ogqq6/jogador/5b1c…  →  /time/:slug/jogador/:id
  *   /api/teams/missa-de-quinta-ogqq6/ranking?x=1 →  /api/teams/:slug/ranking
  * Qualquer segmento que não seja palavra fixa de rota vira `:x` (número, token, e-mail, slug solto).
  */

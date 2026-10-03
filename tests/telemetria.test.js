@@ -28,7 +28,11 @@ const valido = () => ({
 test('normalizarRota: slug de time, id, token, e-mail e número viram padrão', () => {
   const uuid = '5b1c2d3e-aaaa-4bbb-8ccc-0123456789ab';
   const casos = [
-    ['/equipa/missa-de-quinta-ogqq6/ranking', '/equipa/:slug/ranking'],
+    ['/equipa/missa-de-quinta-ogqq6/ranking', '/equipa/:slug/ranking'], // o endereço antigo ainda chega por link já enviado
+    // 29I (achado 103): /equipa virou /time — o slug continua sendo escondido pela POSIÇÃO, não pela forma
+    ['/time/missa-de-quinta-ogqq6/ranking', '/time/:slug/ranking'],
+    ['/time/teste-abcde', '/time/:slug'],
+    [`/time/teste-abcde/jogador/${uuid}`, '/time/:slug/jogador/:id'],
     // slug SÓ de letras: passaria por palavra de rota — é a posição que o denuncia
     ['/equipa/teste-abcde', '/equipa/:slug'],
     [`/equipa/teste-abcde/jogador/${uuid}`, '/equipa/:slug/jogador/:id'],

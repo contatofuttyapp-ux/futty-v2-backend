@@ -495,7 +495,7 @@ async function criar() {
   fs.writeFileSync(ARQ_ESTADO, JSON.stringify(estado, null, 2), 'utf8');
   ok(`estado em LOJA/demo-estado.json (sem senha)`);
   console.log(`\nPronto. Login: ${EMAIL_BRUNINHO} · senha em ${ARQ_SENHA}`);
-  console.log(`Início: https://futty.pages.dev/home · Sorteio: /equipa/${TIME.slug}/jogo/${proximo.id}/sorteio (depois de --sortear)`);
+  console.log(`Início: https://futty.pages.dev/home · Sorteio: /time/${TIME.slug}/jogo/${proximo.id}/sorteio (depois de --sortear)`);
 }
 
 // Sorteio do próximo jogo, igual a POST /api/games/:id/sortear (routes/games.js).
@@ -529,7 +529,7 @@ async function sortear() {
   if (e2) throw new Error(`games(sorteio): ${e2.message}`);
   for (const t of resultado.times) info(`${t.nome} (média ${t.rating_medio}): ${t.jogadores.map((j) => j.nome).join(', ')}`);
   if (resultado.reservas.length) info(`reservas: ${resultado.reservas.map((r) => r.nome).join(', ')}`);
-  ok(`sorteio gravado (semente ${resultado.seed}) — /equipa/${estado.teamSlug}/jogo/${game.id}/sorteio`);
+  ok(`sorteio gravado (semente ${resultado.seed}) — /time/${estado.teamSlug}/jogo/${game.id}/sorteio`);
 }
 
 // Devolve a vitrine ao estado da loja, sem criar nem apagar nada: o próximo jogo

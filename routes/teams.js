@@ -19,6 +19,7 @@ const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido (Rodada 29D)
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código> (29H)
+const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols (29I, achado 78)
 const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time (29I, achado 83)
 
 const router = express.Router();
@@ -83,6 +84,12 @@ router.post(
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
+    // 29I (achado 78): o artilheiro depende dos gols — gols desligados com artilheiro ligado é combinação incoerente e o motor recusa.
+    // `mostrar_gols` agora também vem no POST (antes ia num PATCH logo depois): o time nasce já com os dois prêmios coerentes.
+    const golsLigados = req.body?.mostrar_gols !== false;
+    if (!combinacaoDePremiosCoerente({ mostrar_gols: req.body?.mostrar_gols, mostrar_artilheiro: req.body?.mostrar_artilheiro })) {
+      throw new HttpError(400, MSG_ARTILHEIRO_PRECISA_DOS_GOLS);
+    }
 
     // GEO (14-set, mesma regra do PATCH /api/teams/:slug): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO
     // (a morada exacta nunca entra). RODADA 29B (D), regra completa em utils/cidade.js: cidade DA LISTA do app →
@@ -117,6 +124,7 @@ router.post(
         publica: !!publica,
         localizacao: localizacaoFinal,
         descricao: descricaoFinal,
+        ...(golsLigados ? {} : { mostrar_gols: false }),
       };
       const colunasDaCidade = { cidade: cidadeFinal, cidade_normalizada: cid.normalizada, geo_lat: geoLat, geo_lng: geoLng };
       let { data, error } = await supabase
@@ -156,6 +164,7 @@ router.post(
             publica: !!publica,
             localizacao: localizacaoFinal,
             descricao: descricaoFinal,
+            ...(golsLigados ? {} : { mostrar_gols: false }),
           })
           .select()
           .single());
@@ -459,6 +468,22 @@ router.patch(
     // RODADA 29H (item 44): "Artilheiro do dia" e "Destaque do dia" — o editor de resultado só oferece a seção quando ligado.
     if ('mostrar_artilheiro' in b) patch.mostrar_artilheiro = !!b.mostrar_artilheiro;
     if ('mostrar_destaque' in b) patch.mostrar_destaque = !!b.mostrar_destaque;
+    // RODADA 29I (achado 78): o artilheiro depende dos gols. A combinação que o time vai TER depois desta gravação (o do pedido, ou o que
+    // já estava) não pode ser "gols desligados e artilheiro ligado": o motor recusa. Religar os gols não religa o artilheiro sozinho.
+    if ('mostrar_gols' in patch || 'mostrar_artilheiro' in patch) {
+      let { data: atual, error: erroAtual } = await supabase.from('teams').select('mostrar_gols, mostrar_artilheiro').eq('id', team.id).maybeSingle();
+      // Sem a migração 073 a coluna do artilheiro não existe: só os gols contam (o artilheiro nem pode ser gravado) — vale como desligado,
+      // para desligar os gols não esbarrar numa combinação que, sem a coluna, não existe.
+      if (erroAtual) {
+        const { data: soGols } = await supabase.from('teams').select('mostrar_gols').eq('id', team.id).maybeSingle();
+        atual = { ...soGols, mostrar_artilheiro: false };
+      }
+      const depois = {
+        mostrar_gols: 'mostrar_gols' in patch ? patch.mostrar_gols : atual?.mostrar_gols,
+        mostrar_artilheiro: 'mostrar_artilheiro' in patch ? patch.mostrar_artilheiro : atual?.mostrar_artilheiro,
+      };
+      if (!combinacaoDePremiosCoerente(depois)) throw new HttpError(400, MSG_ARTILHEIRO_PRECISA_DOS_GOLS);
+    }
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
     // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra). Limpar a
@@ -1320,7 +1345,7 @@ router.patch(
           Promise.resolve(enviarNotificacao([pedido.user_id], {
             title: `Você entrou no time ${team.nome}!`,
             body: 'Confirme presença e veja o próximo jogo.',
-            url: `/equipa/${team.slug}?entrou=1`,
+            url: `/time/${team.slug}?entrou=1`,
           })),
           new Promise((resolve) => { teto = setTimeout(resolve, 4000); }),
         ]);

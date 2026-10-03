@@ -1,5 +1,5 @@
 // Futty v2.0 — RODADA 29D: o aceite de um pedido de entrada (PATCH /api/teams/:slug/pedidos/:pedidoId) avisa quem foi aceito
-// por push — "Você entrou no <time>!" com o link /equipa/<slug>?entrou=1, que abre as boas-vindas do time no app. Sem banco e
+// por push — "Você entrou no <time>!" com o link /time/<slug>?entrou=1, que abre as boas-vindas do time no app. Sem banco e
 // sem rede (Supabase falso em memória; enviarNotificacao trocado por um gravador). O que se prova:
 //   · o payload (título, corpo, url) e o destinatário (quem pediu, mais ninguém);
 //   · o aceite devolve 200 e grava o membro COM e SEM falha no push (rejeitado, lançado na hora, ou pendurado);
@@ -42,7 +42,7 @@ test('aprovar avisa quem pediu: título com o nome do time, corpo da casa e o li
   assert.equal(membroDe(tabelas, QUEM_PEDIU)?.role, 'member', 'virou membro');
   assert.deepEqual(notificacoes, [{
     ids: [QUEM_PEDIU],
-    payload: { title: 'Você entrou no time Várzea FC!', body: 'Confirme presença e veja o próximo jogo.', url: '/equipa/varzea-fc?entrou=1' },
+    payload: { title: 'Você entrou no time Várzea FC!', body: 'Confirme presença e veja o próximo jogo.', url: '/time/varzea-fc?entrou=1' },
   }]);
 });
 

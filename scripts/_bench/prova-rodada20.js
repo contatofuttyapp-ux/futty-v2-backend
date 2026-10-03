@@ -105,7 +105,7 @@ async function main() {
   }
 
   fs.writeFileSync(path.join(PASTA_CAPTURAS, 'estado-rodada20.json'), JSON.stringify({ teamSlug: SLUG, tokenUsado: token }, null, 2));
-  console.log(`\nEquipa: /equipa/${SLUG} (como capitão) · Convite já usado: /convite/${token} (como "segundo")`);
+  console.log(`\nTime: /time/${SLUG} (como capitão) · Convite já usado: /convite/${token} (como "segundo")`);
 }
 
 (async () => {

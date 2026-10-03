@@ -99,7 +99,7 @@ router.post(
     const caso = store.novoCaso({ teamId, targetType, targetId, reporterId: req.user.id, categoria, descricao, pesoReporter: quota.peso, agoraISO: agora });
 
     // Triagem (Fable/regras). Contexto conservador, sem identidade em claro no log.
-    const contexto = `equipa ${teamId || '—'}; denunciante peso ${quota.peso?.toFixed?.(2) || 1}`;
+    const contexto = `time ${teamId || '—'}; denunciante peso ${quota.peso?.toFixed?.(2) || 1}`;
     const v = await triar({ categoria, tipo, conteudo, contexto });
     store.logar(caso, { quem: `triagem:${v.motor}`, tipo: 'triagem', quando: agoraISO(), decisao: v.decisao, confianca: v.confianca, justificativa: v.justificativa });
 

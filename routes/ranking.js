@@ -526,7 +526,7 @@ router.post(
       return enviarNotificacao(naoVotaramIds, {
         title: '⭐ Atualize a sua nota',
         body: 'O admin pediu que atualizem as notas',
-        url: `/equipa/${team.slug}/ranking`,
+        url: `/time/${team.slug}/ranking`,
       });
     });
   })

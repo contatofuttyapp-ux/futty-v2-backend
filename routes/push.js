@@ -128,7 +128,7 @@ router.post(
       title: titulo.slice(0, 60),
       body: mensagem.slice(0, 200),
       icon: '/icons/icon-192.png',
-      url: `/equipa/${team.slug}`,
+      url: `/time/${team.slug}`,
     });
 
     let enviadas = 0;
@@ -189,7 +189,7 @@ router.post(
       title: titulo.slice(0, 60),
       body: mensagem.slice(0, 200),
       icon: '/icons/icon-192.png',
-      url: `/equipa/${team.slug}`,
+      url: `/time/${team.slug}`,
     });
 
     let enviadas = 0;

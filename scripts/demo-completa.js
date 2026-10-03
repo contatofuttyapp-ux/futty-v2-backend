@@ -757,7 +757,7 @@ async function criarDenuncia(ids, teamId, post) {
   ok('1 post denunciado — aparece na fila do admin do time E na fila do Gabinete');
 }
 
-// Campeonato do STORAGE (N times) = a tela /equipa/:slug/campeonato e os SELOS.
+// Campeonato do STORAGE (N times) = a tela /time/:slug/campeonato e os SELOS.
 async function criarCampeonatosStorage(ids, teamId, donos) {
   await campStore.ensureCampeonatosBucket();
   const plantel = (apelidos) => apelidos.map((a) => ({ user_id: ids[a], nome: a, avatar_url: GENERICO[porApelido(a).av], convidado: false }));
@@ -924,8 +924,8 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('    → Toque num jogador para ver o radar (nota, vitórias, gols, artilharia, destaque, fidelidade).');
   l('');
   l('  JOGO → SORTEIO');
-  l(`    → Sorteio guardado 5x5:   /equipa/${SLUG}/jogo/${guardados['5x5']}/sorteio`);
-  l(`    → Sorteio guardado 11x11: /equipa/${SLUG}/jogo/${guardados['11x11']}/sorteio`);
+  l(`    → Sorteio guardado 5x5:   /time/${SLUG}/jogo/${guardados['5x5']}/sorteio`);
+  l(`    → Sorteio guardado 11x11: /time/${SLUG}/jogo/${guardados['11x11']}/sorteio`);
   l(`    → Sorteio AO VIVO (18 confirmados, 2 times de 9): abra o jogo de ${new Date(futuro.data).toLocaleDateString('pt-BR')} e toque em Sortear.`);
   l('');
   l('  CAMPEONATO (aba do time)');

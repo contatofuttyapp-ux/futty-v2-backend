@@ -722,7 +722,7 @@ router.post(
     enviarNotificacao(confirmadosIds, {
       title: '🎲 Sorteio realizado!',
       body: `O sorteio de ${game.local || 'Jogo'} está pronto`,
-      url: `/equipa/${game.teams.slug}/jogo/${game.id}`,
+      url: `/time/${game.teams.slug}/jogo/${game.id}`,
     });
   })
 );
@@ -897,7 +897,7 @@ router.post(
     enviarNotificacao(membros, {
       title: 'Jogo cancelado ❌',
       body: corpo,
-      url: `/equipa/${game.teams.slug}`,
+      url: `/time/${game.teams.slug}`,
     });
   })
 );

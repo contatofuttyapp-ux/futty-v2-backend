@@ -168,7 +168,7 @@ async function subirFotoDePartida(userId) {
   fs.mkdirSync(path.dirname(DESTINO), { recursive: true });
   fs.writeFileSync(DESTINO, JSON.stringify(sessoes, null, 2));
   console.log(`sessões em ${DESTINO}`);
-  console.log(`  Ranking:  /equipa/${SLUG}/ranking`);
-  console.log(`  Presença: /equipa/${SLUG}/jogo/${game.id}`);
-  console.log(`  Sorteio:  /equipa/${SLUG}/jogo/${game.id}/sorteio`);
+  console.log(`  Ranking:  /time/${SLUG}/ranking`);
+  console.log(`  Presença: /time/${SLUG}/jogo/${game.id}`);
+  console.log(`  Sorteio:  /time/${SLUG}/jogo/${game.id}/sorteio`);
 })().catch((e) => { console.error('[time-rodada27] ERRO:', e.message); process.exit(1); });
