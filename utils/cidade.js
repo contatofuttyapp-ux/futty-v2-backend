@@ -13,6 +13,8 @@
 // geocodifica "bairro, cidade" UMA vez (Nominatim, como a cidade; ver resolverBairro). Achou perto da cidade → o ponto do
 // time passa a ser o do bairro (~1 km); não achou → fica o ponto da cidade e o app avisa. Freguesia escolhida na lista do app
 // (Portugal) vem com a coordenada e dispensa a chamada. Só o bairro e a cidade, nunca o endereço.
+// RODADA 29T-C: o mesmo vale para o bairro/distrito escolhido da lista no Brasil (IBGE) — o ponto da lista vale em qualquer país,
+// desde que perto (RAIO_DO_BAIRRO_KM) do ponto da cidade; o Nominatim não diz "Não achamos" para um bairro que o app ofereceu.
 const { geocodar: geocodarNominatim } = require('./geocode');
 
 const ARREDONDA = (n) => Math.round(n * 100) / 100; // 2 casas ≈ 1,1 km — a mesma precisão do geocode.js
@@ -128,14 +130,22 @@ function lerBairro(corpo) {
   return texto(corpo?.bairro, 80);
 }
 
-/** A freguesia escolhida na lista do app (Portugal): { lat, lng } arredondado, ou null — só vale com coordenada de verdade em Portugal. */
-function lerPontoDaLista(corpo) {
+/** Número de verdade ou NaN: null, '' e booleano não viram 0 (Number(null) é 0, e 0,0 não é lugar nenhum). */
+const numeroOuNaN = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
+
+/**
+ * O bairro escolhido na lista do app (freguesia em Portugal, bairro/distrito no Brasil): { lat, lng } arredondado, ou null.
+ * 29T-C: vale em qualquer país, desde que o ponto esteja a até RAIO_DO_BAIRRO_KM do ponto da cidade (`cidadeGeo`); longe demais, ou
+ * sem ponto da cidade para comparar, não vale como "da lista" — quem chamou cai na geocodificação de sempre.
+ */
+function lerPontoDaLista(corpo, cidadeGeo) {
   if (corpo?.bairro_origem !== 'lista') return null;
-  const lat = Number(corpo.bairro_lat);
-  const lng = Number(corpo.bairro_lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (lat < 32 || lat > 43 || lng < -32 || lng > -6) return null;
-  return { lat: ARREDONDA(lat), lng: ARREDONDA(lng) };
+  const lat = numeroOuNaN(corpo.bairro_lat);
+  const lng = numeroOuNaN(corpo.bairro_lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  if (!Number.isFinite(cidadeGeo?.lat) || !Number.isFinite(cidadeGeo?.lng)) return null;
+  const ponto = { lat: ARREDONDA(lat), lng: ARREDONDA(lng) };
+  return distanciaKm(ponto, cidadeGeo) <= RAIO_DO_BAIRRO_KM ? ponto : null;
 }
 
 /**
@@ -153,7 +163,7 @@ async function resolverBairro(corpo, cidade, { geocodar = geocodarNominatim } = 
   if (!bairro || !cidade?.cidade) return vazio;
   const normalizado = normalizarCidade(bairro);
   const nomeOficial = `${bairro}, ${cidade.cidade}`;
-  const daLista = lerPontoDaLista(corpo);
+  const daLista = lerPontoDaLista(corpo, cidade.geo);
   if (daLista) return { bairro, normalizado, geo: daLista, info: { encontrado: true, nomeOficial }, vazio: false };
   const g = await geocodar(nomeOficial);
   // Perto da cidade ou nada: o mesmo nome em outro estado/país (há uma "Vila Nova" em todo canto) não vale.

@@ -86,6 +86,46 @@ test('resolverBairro: sem bairro, ou sem cidade onde pôr um, não faz nada (e n
   assert.deepEqual(chamadas, []);
 });
 
+// ─── 29T-C: o bairro da lista vale no Brasil também ───────────────────────────
+const SP_CIDADE = { cidade: 'São Paulo, SP', geo: { lat: -23.55, lng: -46.63 } };
+
+test('resolverBairro 29T-C: bairro da lista no Brasil, perto da cidade, vale — coordenada da lista, nenhuma chamada ao Nominatim', async () => {
+  const { geocodar, chamadas } = geocodarFalso();
+  const r = await resolverBairro({ bairro: 'Pinheiros', bairro_origem: 'lista', bairro_lat: -23.5673, bairro_lng: -46.7016 }, SP_CIDADE, { geocodar });
+  assert.deepEqual(r.geo, { lat: -23.57, lng: -46.7 }, 'arredondado a 2 casas (~1 km)');
+  assert.deepEqual(r.info, { encontrado: true, nomeOficial: 'Pinheiros, São Paulo, SP' });
+  assert.deepEqual(chamadas, []);
+});
+
+test('resolverBairro 29T-C: bairro da lista LONGE da cidade (> RAIO_DO_BAIRRO_KM) não vale como "da lista" — cai na geocodificação de hoje', async () => {
+  const { geocodar, chamadas } = geocodarFalso({ 'Pinheiros, São Paulo, SP': { lat: -23.57, lng: -46.69 } });
+  const longe = { bairro: 'Pinheiros', bairro_origem: 'lista', bairro_lat: -19.9, bairro_lng: -43.9 }; // BH: ~490 km
+  const r = await resolverBairro(longe, SP_CIDADE, { geocodar });
+  assert.deepEqual(chamadas, ['Pinheiros, São Paulo, SP']);
+  assert.deepEqual(r.geo, { lat: -23.57, lng: -46.69 }, 'o ponto é o que o Nominatim achou, não o da lista');
+  const semNada = await resolverBairro(longe, SP_CIDADE, { geocodar: geocodarFalso().geocodar });
+  assert.equal(semNada.geo, null, 'longe e o Nominatim também não achou: fica o ponto da cidade');
+  assert.deepEqual(semNada.info, { encontrado: false });
+});
+
+test('resolverBairro 29T-C: bairro da lista SEM ponto da cidade para comparar não vale como "da lista"', async () => {
+  const { geocodar, chamadas } = geocodarFalso();
+  const corpo = { bairro: 'Pinheiros', bairro_origem: 'lista', bairro_lat: -23.57, bairro_lng: -46.7 };
+  await resolverBairro(corpo, { cidade: 'São Paulo, SP', geo: null }, { geocodar });
+  assert.deepEqual(chamadas, ['Pinheiros, São Paulo, SP']);
+});
+
+test('resolverBairro 29T-C: coordenada ausente, nula ou vazia não vira 0,0; sem origem "lista" o ponto enviado é ignorado', async () => {
+  const { geocodar, chamadas } = geocodarFalso();
+  for (const ponto of [{}, { bairro_lat: null, bairro_lng: null }, { bairro_lat: '', bairro_lng: '' }, { bairro_lat: 'x', bairro_lng: 'y' }, { bairro_lat: 95, bairro_lng: -46.7 }]) {
+    await resolverBairro({ bairro: 'Pinheiros', bairro_origem: 'lista', ...ponto }, SP_CIDADE, { geocodar });
+  }
+  assert.equal(chamadas.length, 5, 'nenhum valeu como ponto da lista: os cinco foram ao Nominatim');
+  const sem = geocodarFalso();
+  await resolverBairro({ bairro: 'Pinheiros', bairro_lat: -23.57, bairro_lng: -46.7 }, SP_CIDADE, { geocodar: sem.geocodar });
+  assert.deepEqual(sem.chamadas, ['Pinheiros, São Paulo, SP'], 'sem bairro_origem "lista" é texto digitado');
+});
+
 // ─── as rotas ─────────────────────────────────────────────────────────────────
 function cenario(t, { respostas = {}, teams = [], falhar = null } = {}) {
   const { geocodar, chamadas } = geocodarFalso(respostas);
@@ -228,4 +268,51 @@ test('GET /api/teams/:slug devolve bairro e os dois prêmios (padrão ligado) �
   assert.deepEqual([b.json.team.bairro, b.json.team.mostrar_artilheiro, b.json.team.mostrar_destaque], [null, true, true]);
   const inexistente = await antigo.pedir('GET', '/api/teams/nao-existe', null, DONO);
   assert.equal(inexistente.status, 404);
+});
+
+// ─── 29T-C: o bairro da lista no Brasil e o Radar que devolve o bairro ────────
+test('POST /api/teams com bairro da lista no Brasil: o ponto é o da lista e o Nominatim nem é chamado', async (t) => {
+  const { pedir, tabelas, chamadas } = cenario(t);
+  const r = await pedir('POST', '/api/teams', { nome: 'Savassi FC', ...BH, bairro: 'Savassi', bairro_origem: 'lista', bairro_lat: SAVASSI.lat, bairro_lng: SAVASSI.lng }, DONO);
+  assert.equal(r.status, 201, JSON.stringify(r.json));
+  assert.deepEqual(r.json.bairro, { encontrado: true, nomeOficial: 'Savassi, Belo Horizonte, MG' });
+  assert.deepEqual([tabelas.teams[0].geo_lat, tabelas.teams[0].geo_lng], [SAVASSI.lat, SAVASSI.lng]);
+  assert.deepEqual(chamadas, [], 'nem a cidade nem o bairro foram à rede: os dois vieram da lista');
+});
+
+test('PATCH com bairro da lista no Brasil: ponto da lista, sem Nominatim; ponto longe da cidade volta ao Nominatim', async (t) => {
+  const { pedir, tabelas, chamadas } = cenario(t, { teams: [{ ...TIME_BH }], respostas: { 'Savassi, Belo Horizonte, MG': SAVASSI } });
+  const perto = await pedir('PATCH', '/api/teams/varzea-fc', { cidade: 'Belo Horizonte, MG', bairro: 'Savassi', bairro_origem: 'lista', bairro_lat: SAVASSI.lat, bairro_lng: SAVASSI.lng }, DONO);
+  assert.equal(perto.status, 200);
+  assert.deepEqual(chamadas, []);
+  assert.deepEqual([tabelas.teams[0].geo_lat, tabelas.teams[0].geo_lng], [SAVASSI.lat, SAVASSI.lng]);
+  const longe = await pedir('PATCH', '/api/teams/varzea-fc', { cidade: 'Belo Horizonte, MG', bairro: 'Centro', bairro_origem: 'lista', bairro_lat: SAVASSI_DE_OUTRO_ESTADO.lat, bairro_lng: SAVASSI_DE_OUTRO_ESTADO.lng }, DONO);
+  assert.equal(longe.status, 200);
+  assert.ok(chamadas.includes('Centro, Belo Horizonte, MG'), 'o ponto da lista estava a ~490 km: vale a geocodificação de hoje');
+  assert.notDeepEqual([tabelas.teams[0].geo_lat, tabelas.teams[0].geo_lng], [SAVASSI_DE_OUTRO_ESTADO.lat, SAVASSI_DE_OUTRO_ESTADO.lng], 'o ponto longe nunca é gravado');
+});
+
+const NO_RADAR = { modo_visibilidade: 'publico_aprovacao', cidade: 'Brasília, DF', cidade_normalizada: 'brasilia', geo_lat: -15.78, geo_lng: -47.93 };
+
+test('GET /api/teams/explorar devolve o bairro de cada time (null quando não tem)', async (t) => {
+  const comBairro = { ...TIME_SP, ...NO_RADAR, bairro: 'Guará' };
+  const semBairro = { id: '22222222-2222-2222-2222-222222222222', nome: 'Pelada da Asa', slug: 'pelada-da-asa', cor: 'azul', ...NO_RADAR };
+  const { pedir } = cenario(t, { teams: [comBairro, semBairro] });
+  const r = await pedir('GET', '/api/teams/explorar', null, DONO);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const porSlug = Object.fromEntries(r.json.teams.map((x) => [x.slug, x]));
+  assert.equal(porSlug['varzea-fc'].bairro, 'Guará');
+  assert.equal(porSlug['varzea-fc'].cidade, 'Brasília, DF', 'o bairro vai JUNTO com a cidade, não no lugar dela');
+  assert.equal(porSlug['pelada-da-asa'].bairro, null);
+});
+
+test('GET /api/teams/explorar sem a migração 073: a lista vem do mesmo jeito, só sem bairro (o Radar não cai)', async (t) => {
+  const falhar = (tabela, op, e) => (tabela === 'teams' && op === 'select' && /\bbairro\b/.test(e.cols || '') ? SEM_073 : null);
+  // o banco sem a 073 não tem a coluna: a linha do time nem traz `bairro`
+  const { pedir } = cenario(t, { teams: [{ ...TIME_SP, ...NO_RADAR }], falhar });
+  const r = await pedir('GET', '/api/teams/explorar', null, DONO);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.equal(r.json.teams.length, 1);
+  assert.equal(r.json.teams[0].bairro, null);
+  assert.equal(r.json.teams[0].cidade_normalizada, 'brasilia', 'a busca por cidade segue valendo');
 });

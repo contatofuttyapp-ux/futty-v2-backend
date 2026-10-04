@@ -245,11 +245,12 @@ router.get(
     // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
     const COLUNAS = 'id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
     // 29I, bloco 3: o escudo (segunda cor e padrão, migração 077) vai junto — sem a migração a leitura repete sem ele (lerComFuso).
-    const montar = (comNormalizada, novas) => {
+    // 29T-C: o bairro (coluna da migração 073) vai junto; sem ela a leitura repete sem o bairro e os times valem sem bairro.
+    const montar = (comNormalizada, comBairro, novas) => {
       const escudo = (novas || '').split(', ').filter((c) => c.startsWith('escudo_')).join(', ');
       let query = supabase
         .from('teams')
-        .select([COLUNAS, comNormalizada ? 'cidade_normalizada' : '', escudo].filter(Boolean).join(', '))
+        .select([COLUNAS, comNormalizada ? 'cidade_normalizada' : '', comBairro ? 'bairro' : '', escudo].filter(Boolean).join(', '))
         .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
       // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
       // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
@@ -269,9 +270,18 @@ router.get(
       return query;
     };
 
-    let { data: teamsRaw, error } = await lerComFuso((novas) => montar(true, novas));
-    // Migração 066 por aplicar: sem a coluna a busca continua como era.
-    if (error && /cidade_normalizada/i.test(error.message || '')) ({ data: teamsRaw, error } = await lerComFuso((novas) => montar(false, novas)));
+    // Migração 066 (cidade_normalizada) ou 073 (bairro) por aplicar: a coluna que faltar sai e a busca continua como era.
+    let comNormalizada = true;
+    let comBairro = true;
+    let teamsRaw;
+    let error;
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      ({ data: teamsRaw, error } = await lerComFuso((novas) => montar(comNormalizada, comBairro, novas)));
+      const mensagem = error?.message || '';
+      if (comBairro && /bairro/i.test(mensagem)) comBairro = false;
+      else if (comNormalizada && /cidade_normalizada/i.test(mensagem)) comNormalizada = false;
+      else break;
+    }
     if (error) throw new HttpError(500, error.message);
 
     // Equipa suspensa = invisível na descoberta.
@@ -311,6 +321,7 @@ router.get(
         localizacao: t.localizacao,
         cidade: t.cidade || null,
         cidade_normalizada: t.cidade_normalizada || null, // 29B (D): o app casa por texto quando não há ponto
+        bairro: t.bairro || null, // 29T-C: o card do Radar mostra "Bairro · Cidade"
         descricao: t.descricao,
         geo_lat: t.geo_lat ?? null, // arredondado ~1km; só entra na busca por distância se não-nulo
         geo_lng: t.geo_lng ?? null,
