@@ -19,7 +19,9 @@ const RELACOES_PADRAO = { convite_codigos: { convites: { tabela: 'convites', loc
 // Coluna com caminho pontuado ("teams.brilhante_ativo", o filtro sobre um embed do PostgREST) lê dentro da linha.
 const valorDe = (linha, coluna) => (coluna.includes('.') ? coluna.split('.').reduce((o, k) => o?.[k], linha) : linha[coluna]);
 
-function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO } = {}) {
+// `tetoLinhas` (Rodada 29Y): o PostgREST nunca devolve mais de N linhas por resposta (o Supabase corta em 1.000), com ou sem .range.
+// Sem a opção, o falso devolve tudo, como antes. O teste de contagem passa 1000 para simular o teto de verdade.
+function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO, tetoLinhas = Infinity } = {}) {
   const tabelas = {};
   for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map((l) => ({ ...l }));
   const linhasDe = (nome) => (tabelas[nome] ||= []);
@@ -68,12 +70,19 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         tabelas[tabela] = todas.filter((l) => !passa(l));
         return { data: null, error: null };
       }
-      if (e.ordem) {
-        const { col, asc } = e.ordem;
-        alvo = [...alvo].sort((a, b) => (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (asc ? 1 : -1));
+      if (e.ordens?.length) {
+        // Vários .order() encadeados = ordem composta, como o PostgREST (order=created_at.desc,id.asc).
+        alvo = [...alvo].sort((a, b) => {
+          for (const { col, asc } of e.ordens) {
+            const c = (a[col] > b[col] ? 1 : a[col] < b[col] ? -1 : 0) * (asc ? 1 : -1);
+            if (c) return c;
+          }
+          return 0;
+        });
       }
       if (e.faixa) alvo = alvo.slice(e.faixa[0], e.faixa[1] + 1);
       if (e.limite != null) alvo = alvo.slice(0, e.limite);
+      if (alvo.length > tetoLinhas) alvo = alvo.slice(0, tetoLinhas);
       for (const [nome, def] of Object.entries(relacoes[tabela] || {})) {
         if (new RegExp(`\\b${nome}\\s*\\(`).test(e.cols || '')) {
           alvo = alvo.map((l) => ({ ...l, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null }));
@@ -135,7 +144,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       gte(c, v) { e.filtros.push((l) => l[c] >= v); return api; },
       lt(c, v) { e.filtros.push((l) => l[c] < v); return api; },
       lte(c, v) { e.filtros.push((l) => l[c] <= v); return api; },
-      order(col, { ascending = true } = {}) { e.ordem = { col, asc: ascending }; return api; },
+      order(col, { ascending = true } = {}) { (e.ordens ||= []).push({ col, asc: ascending }); return api; },
       range(de, ate) { e.faixa = [de, ate]; return api; },
       limit(n) { e.limite = n; return api; },
       maybeSingle: umSo(false),

@@ -14,6 +14,7 @@ const RECARREGAR = [
   'utils/soOrganiza', 'utils/agregados', 'utils/direitoBrilhante', 'services/inicio', 'utils/cidade',
   'routes/rsvp', 'routes/games', 'routes/ranking', 'routes/teams', 'routes/brilhantes',
   'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth', 'routes/inicio', 'routes/feed', 'utils/blocksStore',
+  'routes/superadmin', 'utils/resenhaCota', 'utils/plataformaStore', // Rodada 29Y: guardam o supabase no require, como os de cima
 ];
 const caminho = (m) => require.resolve(`../${m}`);
 
@@ -81,7 +82,8 @@ function carregar(tabelas, modulos, opcoes = {}) {
   const notificacoes = [];
   const restaurar = [
     injetar('utils/db', dbFalso(cliente)),
-    injetar('middleware/auth', { requireAuth: exigirLogin, optionalAuth: passaAdiante, invalidarSessaoDoPedido: () => {} }),
+    // `requireSuperAdmin` (Rodada 29Y): o gate de super-admin não é o que estes testes provam; quem chega logado passa.
+    injetar('middleware/auth', { requireAuth: exigirLogin, requireSuperAdmin: exigirLogin, optionalAuth: passaAdiante, invalidarSessaoDoPedido: () => {} }),
     // `opcoes.push(ids, payload)` troca o gravador padrão (um teste que quer um push que falha, por exemplo).
     injetar('routes/push', { enviarNotificacao: opcoes.push || ((ids, payload) => { notificacoes.push({ ids, payload }); }) }),
     injetar('utils/nsfwFilter', { filtroNSFWFailClosed: passaAdiante, filtroNSFW: passaAdiante }),

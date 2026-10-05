@@ -95,25 +95,38 @@ router.patch(
   })
 );
 
+// Rodada 29Y: o Supabase devolve no máximo 1.000 linhas por resposta (o teto do PostgREST). Uma consulta sem paginação
+// cortava a lista de equipas e a contagem de membros calado. Lê em páginas de 1.000 com .range até uma página vir menor.
+// A ordem tem de ser TOTAL para as páginas não se repetirem nem pularem linhas: quem chama termina o .order() com 'id'.
+const PAGINA_SUPABASE = 1000;
+async function lerTudo(consulta) {
+  const linhas = [];
+  for (let de = 0; ; de += PAGINA_SUPABASE) {
+    const { data, error } = await consulta().range(de, de + PAGINA_SUPABASE - 1);
+    if (error) throw new HttpError(500, error.message);
+    linhas.push(...(data || []));
+    if (!data || data.length < PAGINA_SUPABASE) return linhas;
+  }
+}
+
 /**
  * GET /api/super/teams — lista todas as equipas com nr. de membros e uso de
- * mídia da Resenha (Rodada 15: cota de 500 MB por time).
+ * mídia da Resenha (Rodada 15: cota de 500 MB por time). Lê tudo, sem teto de 1.000 (Rodada 29Y).
  */
 router.get(
   '/api/super/teams',
   requireSuperAdmin,
   asyncHandler(async (req, res) => {
-    const { data: teams, error } = await supabase
+    const teams = await lerTudo(() => supabase
       .from('teams')
       .select('id, slug, nome, created_at')
-      .order('created_at', { ascending: false });
-    if (error) throw new HttpError(500, error.message);
+      .order('created_at', { ascending: false })
+      .order('id'));
 
-    // Contagem de membros numa só query (evita N+1) e tally em JS.
-    const { data: membros, error: mErr } = await supabase.from('team_members').select('team_id');
-    if (mErr) throw new HttpError(500, mErr.message);
+    // Contagem de membros: TODOS os vínculos (em páginas) e tally em JS, sem N+1.
+    const membros = await lerTudo(() => supabase.from('team_members').select('team_id').order('id'));
     const contagem = {};
-    for (const m of membros || []) contagem[m.team_id] = (contagem[m.team_id] || 0) + 1;
+    for (const m of membros) contagem[m.team_id] = (contagem[m.team_id] || 0) + 1;
 
     const [{ equipas: susEquipas }, bytesPorTime] = await Promise.all([
       plataforma.conjuntos(),
@@ -121,7 +134,7 @@ router.get(
     ]);
     const cotaMb = Math.round(cotaBytesPorTime() / (1024 * 1024));
     res.json({
-      teams: (teams || []).map((t) => {
+      teams: teams.map((t) => {
         const bytes = bytesPorTime[t.id];
         return {
           ...t,
