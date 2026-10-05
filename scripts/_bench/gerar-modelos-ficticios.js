@@ -248,6 +248,142 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   console.log(`saída: ${saida}\ncópias: ${REDES}\n`);
 }
 
+// ─── PRINTS DAS LOJAS, AJUSTE 2 DO DONO (5-out): --loja — os 4 lugares que ainda eram silhueta no Sorteio da peça 01 ──────────────
+// (LOJA-PRINTS-OUT.md, "Ajuste 2"). Receita de produção (V6, kit Dark Gold) e o enquadramento do avatar do Bruninho: o recorte INTEIRO,
+// com peito e uniforme, tratado como routes/auth.js trata (trim + 40 px de folga no topo + 512×640) — não o close do rosto de
+// public/onboarding/. Três fictícios novos (adultos, nunca pessoa real, sem parecença com famosos, diferentes entre si e dos 8 rostos que
+// já estão na peça) e o PRÓPRIO DONO, a partir da foto original que ele subiu (lida do Storage só para leitura, guardada em
+// LOJA/demo-avatares/foto-dono.jpg). "Índio" e "Nego Di" (apelidos de cor/etnia) saem da peça: no lugar do Índio entra o PAREDÃO; no do
+// Nego Di, o dono. Careca e Zé Gordo ficam e ganham rosto que combina.
+//
+// Nada vai para o banco nem para o Storage: a entrada vai à fal como data URI (as levas acima subiam-na no bucket `kits`; aqui nem isso).
+// Saída fora do repositório, em LOJA/demo-avatares/. Teto de US$1,50 para o ajuste INTEIRO: o custo de cada chamada é o lido da fal e fica
+// anotado em custos.json, que soma entre corridas — a corrida para ANTES de gastar se a próxima chamada passaria do teto.
+//   node scripts/_bench/gerar-modelos-ficticios.js --loja                  os 3 fictícios
+//   node scripts/_bench/gerar-modelos-ficticios.js --loja --dono 1         uma tentativa do dono (até 3: ele quer ver o uniforme perfeito)
+//   node scripts/_bench/gerar-modelos-ficticios.js --loja --dono-final 2   a tentativa escolhida vira dono-avatar.png / dono-card.png (grátis)
+//   opções: --so l1-careca,l3-paredao   --foto-do-disco (reusa <id>-foto.png sem pagar o t2i de novo)
+// Por modelo: <id>-foto.png (o t2i), <id>-entrada.jpg (o quadrado da produção), <id>-v6.png (a V6 crua, no cinza), <id>-recorte.png,
+// <id>-avatar.png (o que a captura serve no Sorteio) e <id>-card.png (a figurinha na moldura, para a folha).
+const MODELOS_LOJA = [
+  { id: 'l1-careca', foto: fotoLivre(
+    'Brazilian man, around 45, bald on top with a shiny bare scalp and a short-cropped horseshoe of dark hair greying at the sides (natural male-pattern baldness, not a shaved head), clean-shaven, round cheerful face, light tan skin with sun-reddened cheeks, small creases around the eyes',
+    'Hearty open laugh caught mid-moment, eyes crinkled, teeth showing.',
+    'Head straight and level, facing the camera, shoulders square and relaxed.',
+    'Clearly a middle-aged adult in his mid-forties.') },
+  { id: 'l2-ze-gordo', foto: fotoLivre(
+    'Brazilian man, around 38, big and heavyset, broad round face with full cheeks, thick neck, wide rounded shoulders, t-shirt stretched over a big round belly, thick full bushy black beard, short straight black hair, light olive skin, dark brown eyes',
+    'Relaxed, good-natured closed-mouth smile under the beard, calm self-assured look.',
+    'Head straight and level, facing the camera, shoulders square and relaxed.',
+    'Clearly an adult in his late thirties.') },
+  // 1ª foto (5-out) saiu com "cara de revista" — o que o dono reprovou nos modelos do onboarding em 2-out. Esta é a de rosto comum.
+  { id: 'l3-paredao', foto: fotoLivre(
+    'Brazilian man of Japanese descent, around 33, tall and lanky, long narrow face, slightly protruding ears, short spiky black hair, thin patchy goatee, ordinary everyday looks (not a model): a few small acne scars, slightly uneven skin, light skin with warm undertone',
+    'Concentrated goalkeeper stare, eyebrows slightly furrowed, mouth closed, no smile.',
+    'Head straight and level, facing the camera, shoulders square.',
+    'Clearly an adult in his early thirties.') },
+];
+const TETO_LOJA = 1.5;
+// Estimativas só para o freio ANTES de cada chamada (o que se anota é sempre o custo lido da fal).
+const ESTIMATIVA_LOJA = { t2i: 0.04, v6: 0.13 };
+
+async function rodarLoja() {
+  const { chamarFal, emDolares } = require('../../utils/falFila');
+  const { gerarFigurinha, V6_ENDPOINT, BIREFNET_ENDPOINT } = require('../../utils/geracaoFigurinha');
+  const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
+  const { lerKit, achatamento: medirCoroa, montarFigurinha, baixar } = require('./comum');
+  const saida = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-avatares');
+  fs.mkdirSync(saida, { recursive: true });
+
+  const finalDono = flag('dono-final', '');
+  if (finalDono) {
+    for (const parte of ['avatar', 'card']) {
+      const de = path.join(saida, `dono-t${finalDono}-${parte}.png`);
+      if (!fs.existsSync(de)) throw new Error(`falta ${de}`);
+      fs.copyFileSync(de, path.join(saida, `dono-${parte}.png`));
+    }
+    console.log(`dono: a tentativa ${finalDono} vira dono-avatar.png e dono-card.png`);
+    return;
+  }
+
+  const arqCustos = path.join(saida, 'custos.json');
+  const custos = fs.existsSync(arqCustos) ? JSON.parse(fs.readFileSync(arqCustos, 'utf8')) : { teto_usd: TETO_LOJA, total_usd: 0, chamadas: [] };
+  const gasto = () => custos.chamadas.reduce((s, c) => s + (c.usd || 0), 0);
+  const anotar = (id, etapa, endpoint, usd, nota) => {
+    custos.chamadas.push({ quando: new Date().toISOString(), id, etapa, endpoint, usd, nota });
+    custos.total_usd = Number(gasto().toFixed(4));
+    fs.writeFileSync(arqCustos, JSON.stringify(custos, null, 2));
+  };
+  const cabe = (estimativa, id) => {
+    if (gasto() + estimativa > TETO_LOJA) {
+      throw new Error(`PAREI antes de ${id}: US$${gasto().toFixed(3)} já gastos + ~US$${estimativa.toFixed(2)} passaria do teto de US$${TETO_LOJA.toFixed(2)}`);
+    }
+  };
+
+  const tentativa = flag('dono', '');
+  if (tentativa && !['1', '2', '3'].includes(tentativa)) throw new Error('--dono 1, 2 ou 3 (até 3 tentativas)');
+  const so = flag('so', '').split(',').filter(Boolean);
+  const alvos = tentativa
+    ? [{ id: `dono-t${tentativa}`, fotoArquivo: path.join(saida, 'foto-dono.jpg') }]
+    : MODELOS_LOJA.filter((m) => !so.length || so.includes(m.id));
+  const FOTO_DO_DISCO = process.argv.includes('--foto-do-disco');
+  const kit = lerKit('dark-gold');
+  console.log(`\n${alvos.length} figurinha(s) para o Sorteio da loja · V6 · já gastos US$${gasto().toFixed(3)} de US$${TETO_LOJA.toFixed(2)}\n`);
+
+  for (const M of alvos) {
+    try {
+      let foto;
+      const fotoPath = path.join(saida, `${M.id}-foto.png`);
+      if (M.fotoArquivo) {
+        if (!fs.existsSync(M.fotoArquivo)) throw new Error(`falta ${M.fotoArquivo}: a foto ORIGINAL do dono (a que ele subiu, não a figurinha)`);
+        foto = fs.readFileSync(M.fotoArquivo);
+      } else if (FOTO_DO_DISCO && fs.existsSync(fotoPath)) {
+        foto = fs.readFileSync(fotoPath);
+        console.log(`  · ${M.id}: foto do disco, t2i não pago`);
+      } else {
+        cabe(ESTIMATIVA_LOJA.t2i + ESTIMATIVA_LOJA.v6, M.id);
+        const pedido = await chamarFal('fal-ai/gpt-image-1.5', { prompt: M.foto, image_size: '1024x1536', quality: 'low', num_images: 1 });
+        const c = emDolares('fal-ai/gpt-image-1.5', pedido.custo);
+        anotar(M.id, 't2i', 'fal-ai/gpt-image-1.5', c.usd, `${c.nota} · ${pedido.custo.campo || 'sem campo'}`);
+        const urlFoto = pedido.dados?.images?.[0]?.url;
+        if (!urlFoto) throw new Error('t2i não devolveu foto');
+        foto = await baixar(urlFoto);
+        fs.writeFileSync(fotoPath, foto);
+        console.log(`  · ${M.id}: foto fictícia (US$${c.usd ?? '?'})`);
+      }
+
+      cabe(ESTIMATIVA_LOJA.v6, M.id);
+      const quadrada = await preprocessarQuadrado(foto);
+      fs.writeFileSync(path.join(saida, `${M.id}-entrada.jpg`), quadrada);
+      const r = await gerarFigurinha({
+        fotoUrl: `data:image/jpeg;base64,${quadrada.toString('base64')}`,
+        kitUrl: kit.url,
+        kitId: 'dark-gold',
+        etiqueta: M.id,
+        receita: 'v6',
+        publicar: () => { throw new Error('a V6 não sobe nada'); },
+      });
+      for (const [etapa, p] of Object.entries(r.custo.parcelas)) anotar(M.id, etapa, etapa === 'v6' ? V6_ENDPOINT : BIREFNET_ENDPOINT, p.usd, p.nota);
+      fs.writeFileSync(path.join(saida, `${M.id}-v6.png`), await baixar(r.urls.v6));
+
+      const recorte = await sharp(r.recorteBuffer).trim({ threshold: 10 }).png().toBuffer();
+      const { razao: ach, cortada } = await medirCoroa(recorte);
+      // O avatar como a produção grava (routes/auth.js, ETAPA 3) — é o formato do avatar do Bruninho no Sorteio.
+      const avatar = await sharp(recorte)
+        .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+        .resize({ height: 640, width: 512, fit: 'inside' })
+        .png().toBuffer();
+      fs.writeFileSync(path.join(saida, `${M.id}-recorte.png`), recorte);
+      fs.writeFileSync(path.join(saida, `${M.id}-avatar.png`), avatar);
+      fs.writeFileSync(path.join(saida, `${M.id}-card.png`), await montarFigurinha(recorte));
+      console.log(`OK ${M.id.padEnd(12)} V6 US$${r.custo.usd.toFixed(4)} · achat ${ach === null ? '-' : ach.toFixed(2)}${cortada ? ' (CORTADA)' : ''} · total US$${gasto().toFixed(4)}`);
+    } catch (e) {
+      console.error(`FALHOU ${M.id}: ${e.message}`);
+    }
+  }
+  console.log(`\ncusto real acumulado do ajuste: US$${gasto().toFixed(4)} de US$${TETO_LOJA.toFixed(2)} (${arqCustos})\nsaída: ${saida}\n`);
+}
+
 /** Prompt REAL de produção (auth.js já tem {{KIT}} e {{KIT_CHECKLIST}}). */
 function producao(kitId) {
   const src = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'auth.js'), 'utf8');
@@ -298,6 +434,7 @@ async function gerarCard(fotoUrl, kit, prompt, quality) {
 
 (async () => {
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
+  if (process.argv.includes('--loja')) { await rodarLoja(); return; }
   if (process.argv.includes('--jovens')) { await rodarJovens(); return; }
   if (process.argv.includes('--jovens2')) { await rodarJovens(MODELOS_JOVENS_2); return; }
   if (process.argv.includes('--jovens3')) { await rodarJovens(MODELOS_JOVENS_3); return; }
