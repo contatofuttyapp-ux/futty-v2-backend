@@ -9,6 +9,7 @@
 // DEPOIS de requireAuth (precisam de req.user.id já resolvido).
 const crypto = require('node:crypto');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
+const { ipRealDoPedido } = require('../utils/cloudflareIps');
 
 // Chave por utilizador autenticado; IP como fallback (rotas nunca deviam
 // chegar aqui sem req.user, mas o fallback evita um TypeError se a ordem dos
@@ -105,13 +106,13 @@ const LIMITES = limitesPara(process.env.NODE_ENV === 'production');
 /**
  * IP real de quem pediu. Pela função da Cloudflare (o site) todo pedido chega ao
  * Cloud Run do MESMO IP, o do edge; ela reencaminha o IP de verdade em
- * CF-Connecting-IP, e é ele que conta. Direto no Cloud Run (as imagens, o app da
- * loja) o header não vem e vale req.ip. O empate, de olhos abertos: quem bate
- * direto no Cloud Run pode forjar o header e trocar de balde. O teto por IP é a
- * rede grossa; a fina é por sessão, e essa não se forja sem a sessão de alguém.
+ * CF-Connecting-IP, e é ele que conta — mas SÓ quando o pedido veio de fato da
+ * Cloudflare (utils/cloudflareIps.js): o cabeçalho é texto, e quem bate direto no
+ * Cloud Run o escreveria à vontade para ganhar um balde novo a cada pedido. Direto
+ * no Cloud Run (as imagens, o app da loja) ou com o cabeçalho forjado, vale o req.ip.
  */
 function chaveDoPedido(req) {
-  return ipKeyGenerator(req.get('cf-connecting-ip') || req.ip);
+  return ipKeyGenerator(ipRealDoPedido(req));
 }
 
 /** O balde de UMA sessão: "sessao:" + 16 hex do sha256 do token (o token em si não fica na memória do limiter). */

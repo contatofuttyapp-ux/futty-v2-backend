@@ -9,6 +9,7 @@ const path = require('node:path');
 const express = require('express');
 const { criarSupabaseFalso } = require('./_supabaseFalso');
 const { HttpError } = require('../utils/http');
+const { tratadorDeErros } = require('../middleware/erros');
 
 const RECARREGAR = [
   'utils/soOrganiza', 'utils/agregados', 'utils/direitoBrilhante', 'services/inicio', 'utils/cidade',
@@ -105,8 +106,9 @@ function subir(routers, t) {
   const app = express();
   app.use(express.json());
   for (const r of routers) app.use(r);
-  // Igual ao server.js: o código de um HttpError vai no corpo (é por ele que o app escolhe a mensagem).
-  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code } : {}) }));
+  // O MESMO tratador do server.js: o código de um HttpError vai no corpo (é por ele que o app escolhe a mensagem) e
+  // o erro do servidor (5xx) nunca leva o texto do banco ao cliente.
+  app.use(tratadorDeErros);
   const servidor = app.listen(0);
   t.after(() => servidor.close());
   const base = `http://127.0.0.1:${servidor.address().port}`;

@@ -11,6 +11,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
 const { filtroNSFW } = require('../utils/nsfwFilter');
+const { exigirImagemReal } = require('../utils/imagemReal');
 const { removerFicheirosPorUrl } = require('../utils/storage');
 const { urlDeMidiaValida } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
@@ -71,6 +72,8 @@ const UPLOAD_MIME = {
 };
 // Fotos estáticas que passam por compressão (o GIF fica de fora: animado).
 const IMAGENS_COMPRIMIVEIS = new Set(['image/jpeg', 'image/png', 'image/webp']);
+// O formato REAL dos bytes de uma imagem tem de ser um destes (vídeo não passa por aqui: não vai ao sharp).
+const IMAGENS_DA_RESENHA = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
 const STORAGE_BUCKET = 'resenha';
 // Regex de menção: @<uuid> dentro do corpo do comentário.
 const MENTION_RE = /@([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
@@ -723,6 +726,7 @@ router.post(
   '/api/feed/upload',
   requireAuth,
   receberFicheiro,
+  exigirImagemReal(IMAGENS_DA_RESENHA), // SVG (ou outro formato) com Content-Type de imagem: 400, antes de qualquer sharp
   filtroNSFW, // bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum arquivo enviado.');

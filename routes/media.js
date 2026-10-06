@@ -34,7 +34,7 @@ class ArquivoAusente extends Error {}
 // SEGURANCA-REVISAO-10SET.md secção 3: isento do limiter geral da
 // /api (server.js) porque um feed com muitas fotos dispara uma chamada por
 // <img>, de uma vez. Sem sessão (o token HMAC é a própria autorização), por isso
-// conta por IP, o real (CF-Connecting-IP quando vem, senão req.ip). Teto e chave
+// conta por IP, o real (CF-Connecting-IP quando o pedido vem da Cloudflare, senão req.ip). Teto e chave
 // em middleware/limiters.js.
 const mediaLimiter = criarLimiteDeMidia();
 

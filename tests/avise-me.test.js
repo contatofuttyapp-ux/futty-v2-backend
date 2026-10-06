@@ -29,6 +29,7 @@ const passaAdiante = (_req, _res, next) => next();
 async function montar({ linhas = [], falhar = null, limite = passaAdiante } = {}, t) {
   const { cliente, tabelas } = criarSupabaseFalso({ avisos_lancamento: linhas }, { unicos: UNICOS, falhar });
   const app = express();
+  app.set('trust proxy', 1); // como o server.js: o endereço que o Google viu vem em X-Forwarded-For
   app.use(express.json());
   app.use(criarRotaAviseMe({ supabase: cliente, limite }));
   const servidor = app.listen(0);
@@ -132,7 +133,9 @@ test('outro erro do banco: 500 sem vazar a mensagem interna', async (t) => {
 // ─── 4. limiter ───────────────────────────────────────────────────────────────
 test('limiter: 10 por hora por IP real — o 11º leva 429, e outro IP (CF-Connecting-IP) não paga por ele', async (t) => {
   const { pedir } = await montar({ limite: criarLimiteDeAviseMe() }, t);
-  const doIpA = { 'cf-connecting-ip': '203.0.113.10' };
+  // Pela Cloudflare: o edge (X-Forwarded-For) e o IP real em CF-Connecting-IP — só assim o cabeçalho vale (tests/cloudflare-ips.test.js).
+  const pelaCloudflare = (ip) => ({ 'x-forwarded-for': '173.245.48.5', 'cf-connecting-ip': ip });
+  const doIpA = pelaCloudflare('203.0.113.10');
   for (let i = 1; i <= 10; i += 1) {
     const r = await pedir({ email: `pessoa${i}@exemplo.com` }, doIpA);
     assert.equal(r.status, 201, `pedido ${i}`);
@@ -140,7 +143,7 @@ test('limiter: 10 por hora por IP real — o 11º leva 429, e outro IP (CF-Conne
   const barrado = await pedir({ email: 'pessoa11@exemplo.com' }, doIpA);
   assert.equal(barrado.status, 429);
   assert.match(barrado.json.error, /Tente de novo mais tarde/);
-  const outroIp = await pedir({ email: 'outra@exemplo.com' }, { 'cf-connecting-ip': '203.0.113.99' });
+  const outroIp = await pedir({ email: 'outra@exemplo.com' }, pelaCloudflare('203.0.113.99'));
   assert.equal(outroIp.status, 201, 'cada IP tem o seu balde (20 celulares no mesmo Wi-Fi é outro problema, o do IP da Cloudflare)');
 });
 

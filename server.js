@@ -56,7 +56,8 @@ const { privatizarBuckets } = require('./utils/storage');
 const adsStore = require('./utils/adsStore');
 const plataformaStore = require('./utils/plataformaStore');
 const gabineteStore = require('./utils/gabineteStore');
-const { HttpError } = require('./utils/http');
+const { tratadorDeErros } = require('./middleware/erros');
+const { criarSaude } = require('./utils/saude');
 
 const authRoutes = require('./routes/auth');
 const teamsRoutes = require('./routes/teams');
@@ -176,9 +177,11 @@ app.set('trust proxy', 1);
 // estouravam o de produção e o app "morria" por 15 min.
 // A web fala com o motor por uma função na Cloudflare
 // (frontend/functions/api/[[path]].js), e visto daqui todos esses pedidos
-// chegam do mesmo IP, o do edge; ele reencaminha o IP real em CF-Connecting-IP.
-// /api/media tem o limiter próprio (routes/media.js).
-app.use('/api', ...criarLimitesDaApi({ tokenDoPedido: bearerToken, sessaoConhecida }));
+// chegam do mesmo IP, o do edge; ele reencaminha o IP real em CF-Connecting-IP, que só vale
+// quando o pedido veio de uma faixa da Cloudflare (utils/cloudflareIps.js).
+// /api/media tem o limiter próprio (routes/media.js). O /health, público e fora de /api, divide
+// os mesmos baldes: quem martela a URL do Cloud Run gasta o próprio teto.
+app.use(['/api', '/health'], ...criarLimitesDaApi({ tokenDoPedido: bearerToken, sessaoConhecida }));
 
 // Rate limiting restrito para endpoints caros/abusáveis. NB: não há rotas de
 // login/registo no backend (a auth é feita no frontend via Supabase Auth), por
@@ -206,25 +209,9 @@ app.use('/public/avatares', express.static(path.join(__dirname, 'public', 'avata
 // acima — avatares (V1 migrada) e uploads (fotos de campeão) — que é tudo o
 // que o frontend de facto usa da pasta public/.
 
-// Health check — confirma o servidor e a ligação ao Supabase.
-app.get('/health', async (req, res) => {
-  const health = {
-    status: 'ok',
-    service: 'futty-backend',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    supabase: 'unknown',
-  };
-  try {
-    const { error } = await supabase.from('users').select('id', { count: 'exact', head: true });
-    health.supabase = error ? 'error' : 'connected';
-    if (error) health.supabaseError = error.message;
-  } catch (err) {
-    health.supabase = 'error';
-    health.supabaseError = err.message;
-  }
-  res.json(health);
-});
+// Health check — confirma o servidor e a ligação ao Supabase. Público e fora de /api, por isso
+// passa pelos mesmos limiters da /api (acima) e só olha o banco de 30 em 30 s (utils/saude.js).
+app.get('/health', criarSaude({ supabase }));
 
 // Health check mínimo sob /api — o diagnóstico de rede (vaga do celular) bate
 // aqui primeiro; vale a pena existir sem depender do Supabase.
@@ -273,15 +260,9 @@ app.use((req, res) => {
 // handler central. API do @sentry/node v8+ (substitui Sentry.Handlers do v7).
 Sentry.setupExpressErrorHandler(app);
 
-// Error handler central — converte HttpError no status certo; resto é 500.
-// eslint-disable-next-line no-unused-vars
-app.use((err, req, res, next) => {
-  const status = err instanceof HttpError ? err.status : 500;
-  if (status >= 500) console.error('[Futty] Erro:', err.message);
-  const corpo = { error: err.message || 'Algo deu errado. Tente de novo em instantes.' };
-  if (err instanceof HttpError && err.code) corpo.code = err.code;
-  res.status(status).json(corpo);
-});
+// Error handler central — converte HttpError no status certo; resto é 500. Erro do servidor (5xx)
+// nunca leva o texto original ao cliente: ver middleware/erros.js.
+app.use(tratadorDeErros);
 
 // SEGURANCA-REVISAO-10SET.md secção 3: só arranca sozinho quando
 // corrido diretamente (`node server.js`, produção/dev normal) — não quando

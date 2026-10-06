@@ -22,6 +22,13 @@ para o processo completo: mockup-first, look do utilizador, selo só após aprov
 - Emails `@futtymock.com` = contas de teste (podem ser semeadas/limpas à vontade);
   contas reais nunca se tocam.
 - Comentário no código explica o PORQUÊ da regra, sem data nem número de rodada; a história vai para HISTORICO.md.
+- **Erro do servidor nunca leva texto do banco ao cliente**: o tratador central (`middleware/erros.js`)
+  troca todo 5xx pela frase da casa com `code: 'ERRO_INTERNO'` e manda o texto real ao log/Sentry. Só
+  502/503/504 levam a mensagem da rota, e ela é frase escrita por nós (nunca `error.message` — há teste que varre).
+- **`CF-Connecting-IP` só vale quando o pedido veio da Cloudflare** (`utils/cloudflareIps.js`, sem variável de
+  ambiente de propósito); a lista de faixas é regenerada à mão com `scripts/atualizar-cloudflare-ips.js`.
+- **Upload de imagem confere o formato real dos bytes** (`utils/imagemReal.js`), não só o Content-Type; o
+  sharp não lê SVG (loader bloqueado).
 
 ## Conector Supabase (ferramentas)
 - **ATIVO em READ-ONLY** (por desenho — segurança). Leituras SQL diretas: SIM.

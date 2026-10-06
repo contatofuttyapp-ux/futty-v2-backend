@@ -3,7 +3,7 @@
 // Incidente real: o celular do dono levou "Muitos pedidos" no onboarding porque o
 // IP da casa esgotou o balde geral (200/15 min), e no dia do time 20 celulares
 // numa quadra dividem um IP de Wi-Fi ou de operadora (CGNAT). Este teste tranca:
-//   1. o IP real (CF-Connecting-IP, senão req.ip) é a chave da rede grossa;
+//   1. o IP real (CF-Connecting-IP quando o pedido vem da Cloudflare, senão req.ip) é a chave da rede grossa;
 //   2. pedido de sessão conhecida NÃO conta no balde por IP, e cada sessão tem o seu;
 //   3. um Authorization falso não escapa do balde por IP (senão o teto por IP seria de enfeite);
 //   4. avatar conta por pessoa e mídia por IP real, fora dos baldes gerais;
@@ -28,6 +28,11 @@ const { app: appReal } = require('../server');
 
 // Tetos pequenos para o teste bater neles: 3 por IP, 2 por sessão, 2 no avatar, 3 na mídia.
 const LIM = { janelaMs: 60_000, apiPorIp: 3, apiPorSessao: 2, avatar: 2, midia: 3 };
+
+// O pedido que chega pela função da Cloudflare: o Google viu o endereço do edge (X-Forwarded-For, com trust proxy = 1) e o IP
+// de verdade vem em CF-Connecting-IP. Sem o edge, o cabeçalho é ignorado (tests/cloudflare-ips.test.js).
+const BORDA_DA_CLOUDFLARE = '173.245.48.5';
+const pelaCloudflare = (ip) => ({ 'x-forwarded-for': BORDA_DA_CLOUDFLARE, 'cf-connecting-ip': ip });
 
 const servidores = [];
 async function subir(app) {
@@ -58,7 +63,7 @@ async function montar(conhecidas = []) {
 
 async function bater(base, rota, { ip, token, metodo = 'GET' } = {}) {
   const headers = {};
-  if (ip) headers['cf-connecting-ip'] = ip;
+  if (ip) Object.assign(headers, pelaCloudflare(ip));
   if (token) headers.authorization = `Bearer ${token}`;
   const res = await fetch(`${base}${rota}`, { method: metodo, headers });
   await res.arrayBuffer();
@@ -124,7 +129,7 @@ test('um Authorization FALSO não escapa do balde por IP (cada token falso não 
   for (let i = 0; i < 5; i += 1) status.push((await bater(base, '/api/ping', { ip: '198.51.100.6', token: `falso-${i}` })).status);
   assert.deepEqual(status, [200, 200, 200, 429, 429], 'token desconhecido tem de contar no balde por IP');
   // Nem um Authorization de outro esquema (não é Bearer).
-  const res = await fetch(`${base}/api/ping`, { headers: { 'cf-connecting-ip': '198.51.100.6', authorization: 'Basic abc' } });
+  const res = await fetch(`${base}/api/ping`, { headers: { ...pelaCloudflare('198.51.100.6'), authorization: 'Basic abc' } });
   assert.equal(res.status, 429, 'Authorization que não é Bearer conta no balde por IP');
 });
 

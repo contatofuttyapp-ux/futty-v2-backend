@@ -11,6 +11,7 @@ const { supabase, ensureUserRow, getUserById } = require('../utils/db');
 const { obterMe, marcarFigurinhaStatus } = require('../services/inicio');
 const { aquecerDerivados } = require('../utils/derivadosMidia');
 const { orientarSePreciso } = require('../utils/orientarFoto');
+const { exigirFormatoReal } = require('../utils/imagemReal');
 const { avatarEhFigurinhaNossa, devePreservarAvatar } = require('../utils/figurinhaRegra');
 const { filtroNSFW } = require('../utils/nsfwFilter');
 const { olheiroEntrada } = require('../utils/olheiroEntrada');
@@ -49,6 +50,7 @@ const router = express.Router();
 // Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
 const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+const MIMES_DA_FOTO = Object.keys(AVATAR_MIME);
 // "Escolher outra foto" manda dois ficheiros no mesmo pedido: o
 // recorte 2:3 (campo "avatar", como sempre) e, opcional, a foto ORIGINAL
 // antes do recorte (campo "original", para "Ajustar enquadramento" mais
@@ -77,13 +79,21 @@ function receberAvatar(req, res, next) {
     }
     req.file = req.files?.avatar?.[0] || null;
     req.fileOriginal = req.files?.original?.[0] || null;
+    // O formato REAL dos bytes tem de ser um dos aceitos: o Content-Type é só o que o cliente diz, e um SVG
+    // com cara de PNG não pode chegar ao sharp (utils/imagemReal.js). Primeira coisa a tocar no buffer.
+    try {
+      if (req.file) await exigirFormatoReal(req.file.buffer, MIMES_DA_FOTO);
+      if (req.fileOriginal) await exigirFormatoReal(req.fileOriginal.buffer, MIMES_DA_FOTO);
+    } catch (e) {
+      return next(e);
+    }
     // EXIF (caso real: selfie do iPhone girada 180°). .rotate() sem
     // argumentos lê a tag Orientation, reescreve os pixels já em pé e apaga a
     // tag — ninguém depois (NSFW, Olheiro, Storage, IA) precisa de voltar a
     // interpretar orientação. O frontend já normaliza antes de subir
     // (utils/normalizarFoto.js) — isto é o cinto e suspensório: cobre
     // qualquer caminho que não passe por lá (API directa, cliente antigo).
-    // ANTES de qualquer outra operação: primeira coisa a tocar no buffer.
+    // Logo depois da conferência do formato, antes de qualquer outra operação.
     if (req.file) {
       try {
         req.file.buffer = await orientarSePreciso(req.file.buffer);
@@ -124,6 +134,11 @@ function receberRecorte(req, res, next) {
       return next(err);
     }
     if (req.file) {
+      try {
+        await exigirFormatoReal(req.file.buffer, MIMES_DA_FOTO); // o formato real, como no avatar
+      } catch (e) {
+        return next(e);
+      }
       try {
         req.file.buffer = await orientarSePreciso(req.file.buffer);
       } catch {

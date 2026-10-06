@@ -23,6 +23,7 @@ const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require
 const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time
 const { PALETA, CORES_ANTIGAS, lerEscudo, erroDeEscudoSemMigracao, escudoDoTime } = require('../utils/escudo'); // o escudo do time
 const { lerJogadoresPorTime, jogadoresPorTimeDoTime, erroDaColunaJogadoresPorTime } = require('../utils/jogadoresPorTime');
+const { recusaDoWaf } = require('../utils/recusaDoWaf');
 
 const router = express.Router();
 
@@ -279,14 +280,23 @@ router.get(
     let comBairro = true;
     let teamsRaw;
     let error;
+    let status;
     for (let tentativa = 0; tentativa < 3; tentativa += 1) {
-      ({ data: teamsRaw, error } = await lerComFuso((novas) => montar(comNormalizada, comBairro, novas)));
+      ({ data: teamsRaw, error, status } = await lerComFuso((novas) => montar(comNormalizada, comBairro, novas)));
       const mensagem = error?.message || '';
       if (comBairro && /bairro/i.test(mensagem)) comBairro = false;
       else if (comNormalizada && /cidade_normalizada/i.test(mensagem)) comNormalizada = false;
       else break;
     }
-    if (error) throw new HttpError(500, error.message);
+    if (error) {
+      // O WAF na frente do banco recusou o texto digitado (`a;cat /etc/passwd;`): para a pessoa, é uma busca
+      // sem resultado, não um erro do servidor. Só com texto digitado — sem ele, quem quebrou foi o banco.
+      if ((q || loc) && recusaDoWaf(error, status)) {
+        console.warn('[teams] explorar: o banco recusou o texto digitado, respondendo lista vazia (WAF).');
+        return res.json({ teams: [] });
+      }
+      throw new HttpError(500, error.message);
+    }
 
     // Equipa suspensa = invisível na descoberta.
     const { equipas: susEquipas } = await plataforma.conjuntos();

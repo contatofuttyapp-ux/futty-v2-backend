@@ -125,7 +125,7 @@ test('o ciclo: o 1º pedido da sessão conta no IP; validada, ela passa ao balde
   try {
     const base = `http://127.0.0.1:${server.address().port}`;
     const status = async (headers) => {
-      const res = await fetch(`${base}/api/ping`, { headers: { 'cf-connecting-ip': '198.51.100.50', ...headers } });
+      const res = await fetch(`${base}/api/ping`, { headers: { 'x-forwarded-for': '173.245.48.5', 'cf-connecting-ip': '198.51.100.50', ...headers } });
       await res.arrayBuffer();
       return res.status;
     };
