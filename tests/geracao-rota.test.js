@@ -12,7 +12,10 @@
 //      `figurinha_status = falhou`, nada de imagem, nada de push;
 //   5. o app que já está nas lojas (não manda `assincrono`) recebe a figurinha na resposta, como sempre recebeu;
 //   6. as validações continuam síncronas (sem direito → 403, sem criar job); slot reaproveitado responde na hora;
-//   7. só o dono enxerga o job.
+//   7. só o dono enxerga o job;
+//   8. (6-out) braço EXTREMO na lateral conta como defeito da foto: duas reprovações → FOTO_RECUSADA; o colado normal passa;
+//   9. (6-out) conta sem foto_hash (antes da 048): calcula o hash da foto guardada, grava na conta e segue a regra normal;
+//      se não conseguir ler a foto, não bloqueia.
 //
 // Uso: npm test  (ou: node --test tests/geracao-rota.test.js)
 const crypto = require('node:crypto');
@@ -54,20 +57,38 @@ async function recorteCortado() {
   return sharp(buf, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
 }
 
-let foto; let outraFoto; let bom; let cortado;
+/** A cabeça boa + um BRAÇO encostado na borda esquerda: uma faixa de `altura` px (de 600) colada na lateral, sem tocar o topo. */
+async function recorteComBraco(altura) {
+  const w = 400; const h = 600; const buf = Buffer.alloc(w * h * 4, 0);
+  const pinta = (x, y) => { const i = (y * w + x) * 4; buf[i] = 200; buf[i + 1] = 150; buf[i + 2] = 60; buf[i + 3] = 255; };
+  for (let y = 0; y < h; y += 1) for (let x = 0; x < w; x += 1) {
+    const dx = (x - w / 2) / 150; const dy = (y - h / 2) / 260;
+    if (dx * dx + dy * dy <= 1) pinta(x, y);
+  }
+  for (let y = 150; y < 150 + altura; y += 1) for (let x = 0; x < 3; x += 1) pinta(x, y);
+  return sharp(buf, { raw: { width: w, height: h, channels: 4 } }).png().toBuffer();
+}
+
+const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
+
+let foto; let outraFoto; let bom; let cortado; let extremo; let normal;
 before(async () => {
   foto = await sharp({ create: { width: 600, height: 800, channels: 3, background: { r: 90, g: 120, b: 160 } } }).jpeg().toBuffer();
   outraFoto = await sharp({ create: { width: 600, height: 800, channels: 3, background: { r: 200, g: 60, b: 40 } } }).jpeg().toBuffer();
   bom = await recorteBom();
   cortado = await recorteCortado();
+  extremo = await recorteComBraco(420); // 70% da altura colada na lateral: braço extremo (>60%) → reprova
+  normal = await recorteComBraco(120); // 20%: só aviso de enquadramento (>15%, <60%) → passa
 });
 
 /**
  * Monta o mundo de um teste. `fal` é o controle da fal simulada: `portao` (a pintura só termina quando o teste solta),
  * `chamadas`, `recortes` (o que cada chamada devolve), `erro` (a fal fora do ar) e `erroNaChamada` (só a fal da n-ésima
  * chamada cai — o retry que morre por outro motivo). `trocarFoto` põe outros bytes no bucket e o foto_hash da conta.
+ * `semHash` = conta anterior à migração 048 (foto_hash null). `falharLeitura` = o Storage não devolve a foto.
+ * `trocarFotoEnquantoBaixa(url)` = a foto da conta muda no meio da leitura (um upload concorrente).
  */
-function mundo(t, { creditos = 2, slot = null, hashDaFoto = null } = {}) {
+function mundo(t, { creditos = 2, slot = null, hashDaFoto = null, semHash = false } = {}) {
   process.env.FAL_KEY = 'teste-sem-rede';
   const fal = { portao: null, chamadas: 0, recortes: [], erro: null, erroNaChamada: null };
   const falso = {
@@ -88,7 +109,7 @@ function mundo(t, { creditos = 2, slot = null, hashDaFoto = null } = {}) {
   };
   const restaurar = [injetar('utils/geracaoFigurinha', falso), injetar('utils/antiAbusoIA', antiAbuso)];
 
-  const hash = hashDaFoto || antiAbuso.sha256Hex(foto);
+  const hash = semHash ? null : (hashDaFoto || antiAbuso.sha256Hex(foto));
   const { carregados, cliente, tabelas, notificacoes } = carregar({
     users: [{
       id: USUARIO, foto_url: `${SUPABASE}/avatars/public/${USUARIO}-111.jpg`, foto_hash: hash, is_super_admin: false,
@@ -102,12 +123,16 @@ function mundo(t, { creditos = 2, slot = null, hashDaFoto = null } = {}) {
   // O Storage falso: sobe, assina, baixa a foto de teste, apaga e devolve o endereço público como o Supabase faz.
   // `fotoNoBucket` é a foto ATUAL: trocarFoto põe outros bytes (e o foto_hash deles na conta), como o upload de uma foto nova.
   const enviados = [];
-  const fotoNoBucket = { bytes: foto };
+  const fotoNoBucket = { bytes: foto, falha: false, aoBaixar: null };
   cliente.storage = {
     from: () => ({
       upload: async (caminho) => { enviados.push(caminho); return { error: null }; },
       createSignedUrl: async (caminho) => ({ data: { signedUrl: `https://assinada.exemplo/${caminho}` }, error: null }),
-      download: async () => ({ data: new Blob([fotoNoBucket.bytes]), error: null }),
+      download: async () => {
+        const antes = fotoNoBucket.aoBaixar; fotoNoBucket.aoBaixar = null; antes?.(); // uma troca de foto no meio da leitura
+        if (fotoNoBucket.falha) return { data: null, error: { message: 'Storage fora do ar' } };
+        return { data: new Blob([fotoNoBucket.bytes]), error: null };
+      },
       remove: async () => ({ error: null }),
       getPublicUrl: (caminho) => ({ data: { publicUrl: `${SUPABASE}/avatars/${caminho}` } }),
     }),
@@ -119,7 +144,9 @@ function mundo(t, { creditos = 2, slot = null, hashDaFoto = null } = {}) {
     fotoNoBucket.bytes = bytes;
     usuario().foto_hash = crypto.createHash('sha256').update(bytes).digest('hex');
   };
-  return { fal, pedir, tabelas, notificacoes, enviados, usuario, trocarFoto, jobs: carregados['utils/geracaoJobs'] };
+  const falharLeitura = () => { fotoNoBucket.falha = true; };
+  const trocarFotoEnquantoBaixa = (url) => { fotoNoBucket.aoBaixar = () => { usuario().foto_url = url; }; };
+  return { fal, pedir, tabelas, notificacoes, enviados, usuario, trocarFoto, falharLeitura, trocarFotoEnquantoBaixa, jobs: carregados['utils/geracaoJobs'] };
 }
 
 const gerar = (m, corpo = {}, quem = USUARIO) => m.pedir('POST', '/api/me/avatar/ai', { kit: 'dark-gold', ...corpo }, quem);
@@ -402,6 +429,142 @@ test('só o dono enxerga o job; id inventado, de outra pessoa ou sem sessão nã
   assert.equal((await consultar(m, r.json.jobId)).status, 200);
   m.fal.portao.resolver();
   assert.equal(await ate(() => m.tabelas.geracoes_jobs[0]?.estado === 'pronta'), true);
+});
+
+// --- 6-out (2ª decisão): o BRAÇO EXTREMO na lateral (>60% da altura colada) é defeito da foto, como a cabeça cortada ---
+
+test('braço EXTREMO na lateral nas duas tentativas: a FOTO fica recusada (FOTO_RECUSADA), a fal roda 2x e NÃO cobra', async (t) => {
+  const m = mundo(t);
+  m.fal.recortes = [extremo, extremo];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'falhou'), true);
+  const { json } = await consultar(m, r.json.jobId);
+  assert.equal(json.code, 'FOTO_RECUSADA');
+  assert.equal(json.status, 422);
+  assert.match(json.erro, MSG_RECUSADA);
+  assert.equal(m.fal.chamadas, 2, 'a 1ª reprovada refaz UMA vez, como a cabeça cortada');
+  assert.equal(m.usuario().brilhante_creditos, 2, 'braço extremo não sai e não cobra');
+  assert.equal(m.tabelas.user_avatar_slots.length, 0);
+  assert.equal(m.tabelas.fotos_recusadas.length, 1, 'a foto ficou marcada');
+  assert.equal(m.tabelas.fotos_recusadas[0].foto_hash, m.usuario().foto_hash);
+});
+
+test('braço extremo recusado: o pedido seguinte com a mesma foto é barrado ANTES da fal', async (t) => {
+  const m = mundo(t);
+  m.fal.recortes = [extremo, extremo];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'falhou'), true);
+  const jobsAntes = m.tabelas.geracoes_jobs.length;
+
+  const de_novo = await gerar(m, { assincrono: true });
+  assert.equal(de_novo.status, 422);
+  assert.equal(de_novo.json.code, 'FOTO_RECUSADA');
+  assert.equal('jobId' in de_novo.json, false, 'nem job nasce');
+  assert.equal(m.fal.chamadas, 2, 'a fal não foi chamada de novo');
+  assert.equal(m.usuario().brilhante_creditos, 2, 'nada debitado');
+  assert.equal(m.tabelas.geracoes_jobs.length, jobsAntes, 'nenhuma linha de job nova');
+});
+
+test('cabeça cortada numa tentativa e braço extremo na outra: as duas reprovam por defeito da foto → recusada', async (t) => {
+  const m = mundo(t);
+  m.fal.recortes = [cortado, extremo];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'falhou'), true);
+  const { json } = await consultar(m, r.json.jobId);
+  assert.equal(json.code, 'FOTO_RECUSADA');
+  assert.equal(m.fal.chamadas, 2);
+  assert.equal(m.usuario().brilhante_creditos, 2);
+  assert.equal(m.tabelas.fotos_recusadas.length, 1);
+});
+
+test('braço extremo na 1ª e a 2ª caída por outro motivo: NÃO recusa a foto (a mesma regra da cabeça)', async (t) => {
+  const m = mundo(t);
+  m.fal.recortes = [extremo];
+  m.fal.erro = new Error('fal 500 ao submeter');
+  m.fal.erroNaChamada = 2;
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'falhou'), true);
+  const { json } = await consultar(m, r.json.jobId);
+  assert.equal(json.code, 'FIGURINHA_DEFEITUOSA', 'só UMA tentativa reprovou: não é a regra das duas');
+  assert.equal((m.tabelas.fotos_recusadas || []).length, 0, 'nada marcado');
+  assert.equal(m.usuario().brilhante_creditos, 2);
+
+  m.fal.erro = null;
+  m.fal.recortes = [];
+  const de_novo = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, de_novo.json.jobId)).json.estado === 'pronta'), true);
+  assert.equal(m.usuario().brilhante_creditos, 1);
+});
+
+test('braço colado NORMAL nas duas tentativas (só aviso, sem reprovar): entrega, cobra uma vez e NÃO recusa a foto', async (t) => {
+  const m = mundo(t);
+  m.fal.recortes = [normal, normal];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'pronta'), true);
+  assert.equal(m.fal.chamadas, 1, 'não reprovou: uma geração só');
+  assert.equal(m.usuario().brilhante_creditos, 1);
+  assert.equal((m.tabelas.fotos_recusadas || []).length, 0);
+});
+
+// --- conta SEM foto_hash (anterior à migração 048): o motor calcula o hash da foto guardada na hora em que precisa ---
+
+test('conta sem foto_hash: calcula o hash da foto guardada, grava na conta e pinta pela regra normal', async (t) => {
+  const m = mundo(t, { semHash: true });
+  assert.equal(m.usuario().foto_hash, null);
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(r.status, 202);
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'pronta'), true);
+  assert.equal(m.usuario().foto_hash, sha(foto), 'o hash gravado é o sha256 dos bytes da foto');
+  assert.equal(m.tabelas.user_avatar_slots[0].foto_fingerprint, sha(foto), 'o slot guarda a impressão, como nas contas novas');
+  assert.equal(m.usuario().brilhante_creditos, 1);
+  assert.equal(m.fal.chamadas, 1);
+});
+
+test('conta sem foto_hash cuja foto JÁ FOI RECUSADA por outra conta: barrada ANTES da fal, e o hash fica gravado', async (t) => {
+  const m = mundo(t, { semHash: true });
+  m.tabelas.fotos_recusadas = [{ foto_hash: sha(foto), user_id: OUTRO, criado_em: new Date().toISOString() }];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(r.status, 422);
+  assert.equal(r.json.code, 'FOTO_RECUSADA');
+  assert.equal(m.fal.chamadas, 0, 'a fal não é chamada');
+  assert.equal(m.usuario().brilhante_creditos, 2, 'nada debitado');
+  assert.equal(m.usuario().foto_hash, sha(foto));
+});
+
+test('conta sem foto_hash: duas cabeças cortadas recusam a foto, com o hash calculado na hora', async (t) => {
+  const m = mundo(t, { semHash: true });
+  m.fal.recortes = [cortado, cortado];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'falhou'), true);
+  const { json } = await consultar(m, r.json.jobId);
+  assert.equal(json.code, 'FOTO_RECUSADA');
+  assert.equal(m.fal.chamadas, 2);
+  assert.equal(m.usuario().brilhante_creditos, 2);
+  assert.equal(m.tabelas.fotos_recusadas.length, 1);
+  assert.equal(m.tabelas.fotos_recusadas[0].foto_hash, sha(foto), 'marcada pela identidade da foto');
+  assert.equal(m.usuario().foto_hash, sha(foto));
+});
+
+test('conta sem foto_hash e o Storage não devolve a foto: NÃO bloqueia — pinta como antes e não grava hash', async (t) => {
+  const m = mundo(t, { semHash: true });
+  m.falharLeitura();
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(r.status, 202);
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'pronta'), true);
+  assert.equal(m.fal.chamadas, 1, 'sem hash, nada bloqueia: a fal é chamada');
+  assert.equal(m.usuario().foto_hash, null, 'sem a foto lida, não há hash para gravar');
+  assert.equal(m.usuario().brilhante_creditos, 1);
+});
+
+test('conta sem foto_hash: se a foto foi trocada enquanto o hash era calculado, o da antiga NÃO entra na foto nova', async (t) => {
+  const m = mundo(t, { semHash: true });
+  const novaUrl = `${SUPABASE}/avatars/public/${USUARIO}-222.jpg`;
+  m.trocarFotoEnquantoBaixa(novaUrl);
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(r.status, 202);
+  assert.equal(await ate(async () => (await consultar(m, r.json.jobId)).json.estado === 'pronta'), true);
+  assert.equal(m.usuario().foto_url, novaUrl);
+  assert.equal(m.usuario().foto_hash, null, 'a escrita só entra se a foto ainda é a mesma');
 });
 
 after(() => { delete process.env.FAL_KEY; });
