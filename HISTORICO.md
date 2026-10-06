@@ -1,6 +1,6 @@
 # HISTORICO — a memória de quando e por que cada coisa foi feita
 
-Este arquivo guarda os comentários de história (rodadas, achados, datas, decisões, bancadas) que foram retirados do código do motor em 6-out-2026 (Arrumação 0, bloco 1-B).
+Este arquivo guarda os comentários de história (rodadas, achados, datas, decisões, bancadas) que foram retirados do código do motor em 6-out-2026 (Arrumação 0, blocos 1-B e 1-B2).
 O código guarda só as regras vivas — o PORQUÊ de cada regra, sem data nem número de rodada; a cronologia mora aqui.
 Cada item traz a linha aproximada do arquivo no momento da retirada, um trecho de 1 linha do código a que o comentário se referia e o texto original, sem corte;
 quando o comentário misturava história e regra, a regra ficou no código e o original completo está aqui.
@@ -1097,9 +1097,14 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin declarou.
 - (linha ~1161, `fuso: fusoDoTime(team),`) 29I (achado 83): o instante do próximo jogo se lê neste fuso (o do campo)
 - (linha ~1168, `router.post(`) POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o código curto (29H).
+- (linha ~1171, `router.post(`) POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o
+  código curto.
+  (Corrigido no 1-B2: o convite é reutilizável — o aceitar grava o uso em `convite_usos` e não consome o convite.)
 - (linha ~1185, `const teamResumo = { id: team.id, slug: team.slug, nome: team.nome, cor: team.c…`) `id` (29H): o Onboarding marca as boas-vindas do time como vistas (`futty_onboarding_<id>`) logo que a pessoa entra.
 - (linha ~1194, `if (new Date(convite.expires_at).getTime() < Date.now()) {`) Valida o estado do convite (apenas para novos membros). RODADA 20 — o
   link é reutilizável: só a validade importa, não se já foi usado antes.
+- (linha ~1195, `const existingRole = await getRole(team.id, req.user.id);`) Já é membro? -> idempotente, não consome o convite
+  (Corrigido no 1-B2: não "consome" convite nenhum; quem já é membro só não gera novo registro de uso.)
 - (linha ~1212, `const { error: usoError } = await supabase.from('convite_usos').insert({ convit…`) RODADA 20 — regista o uso em vez de marcar o convite como consumido
   (migração 058): o link continua válido para a próxima pessoa. Fail-safe
   de propósito: tabela ausente ou 23505 (mesma pessoa aceitando de novo,
@@ -1124,6 +1129,113 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   memória e esquece em 15 min). O que vai para a tabela é só o que utils/telemetria.js#montarLinha
   deixa passar — ver lá o porquê de cada campo. Responde 204 sempre que o corpo é válido: o app não
   espera nada disto e uma falha de gravação nunca vira erro na tela de ninguém.
+
+## services/inicio.js
+
+- (linha ~1, `const { supabase, getTeamBySlug, getRole, getUserById, ensureUserRow, requireTe…`) Futty v2.0 — Funções puras por trás dos GETs que a tela Início consumia em
+  paralelo (routes/inicio.js chama tudo de uma vez; cada rota antiga chama a
+  MESMA função daqui, para nunca divergir do JSON que outras telas dependem).
+
+  Motivo (11-set): motor em São Paulo, utilizador em Lisboa (~240ms/pedido) —
+  os ~13 pedidos do Início ao abrir davam 3-4s só de latência de rede, antes de
+  qualquer dado chegar. GET /api/inicio junta tudo num round-trip só.
+- (linha ~17, `const { pendenciasDoTime } = require('../utils/pendenciasAdmin');`) o card "Seu time" (29I, bloco 3)
+- (linha ~28, `` const PERFIL_COLS = `${PERFIL_COLS_FIGURINHA}, foto_original_url`; ``) foto_original_url (migração 057, Rodada 19) — "Ajustar enquadramento" (Figurinha.jsx)
+  precisa dela para saber se reabre o CropModal sobre a original ou (fail-safe,
+  sem ela) sobre o recorte atual. Camada própria de resiliência, igual à de cima.
+- (linha ~84, `const FIGURINHA_GERANDO_TIMEOUT_MS = 3 * 60 * 1000;`) Figurinha automática do cadastro (12-set): 'gerando' preso há mais de 3min
+  (POST /api/me/avatar/ai que nunca voltou a escrever — crash do processo,
+  timeout do fal, etc.) conta como 'falhou' na LEITURA — sem precisar de um
+  job à parte para limpar. Calculado a cada leitura, nunca persistido aqui.
+- (linha ~112, `supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(…`) RODADA 20 — tem_figurinha (abaixo): existência basta, .limit(1). r.data
+  vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
+  nenhum", nunca erro (mesmo padrão de slotRows acima).
+- (linha ~132, `const temFigurinha = temFigurinhaIA({ brilhanteRows, historicoRows, avatarUrl:…`) RODADA 20 — achado da Rodada 19: kit_ativo||'dark-gold' (linha abaixo,
+  antes desta correção) fazia toda conta nova parecer "já tem figurinha"
+  pro frontend (Figurinha.jsx usava !!kit_ativo). tem_figurinha agora é
+  calculado aqui, na fonte, e cobre os 3 sinais reais de "já gerou
+  alguma": um slot pago (brilhantes_time), uma no histórico
+  (user_avatar_historico, migração 057) ou o avatar ATUAL ser um arquivo
+  de figurinha nosso (cobre quem gerou antes da 057 existir e nunca tem
+  linha no histórico). HOTFIX 26 (25-set): o 3º sinal era `avatar_url ≠
+  foto_url` + status 'pronta', e a foto do Google copiada pelo trigger
+  handle_new_user contava como figurinha; agora olha o NOME do arquivo
+  (utils/figurinhaRegra.js), a mesma regra do upload de foto.
+- (linha ~168, `figurinha_ativa: avatarEhFigurinhaNossa(perfil?.avatar_url),`) RODADA 28 — o card mostra AGORA uma figurinha nossa (arquivo -ai- no bucket), pela regra única
+  (utils/figurinhaRegra.js). As telas decidiam isto por foto_url ≠ avatar_url — a regra que o
+  Hotfix 26 aposentou no motor: com a foto do Google em avatar_url, a foto da pessoa ia para o
+  card como se fosse figurinha (seletor de fundos, zoom abaixo da moldura, faixas vazias).
+- (linha ~183, `const VINCULOS_SELECT_SEM_FUSO = 'team_id, role, ausente_proximo, created_at, t…`) ─── Os vínculos da pessoa com os times — UMA consulta para todas as partes do Início ─────────────────────────────────
+  RODADA 29B (bloco 2, B — "conta pesada"). O /api/inicio perguntava ao banco quem é membro de quê ONZE vezes (times, convites,
+  votações, denúncias… cada parte com o seu select de team_members) e, pior, em fila: a parte seguinte só começava depois de
+  os times voltarem. Medido (local, conta com 2 times): 31 consultas em 4 idas seguidas ao banco, ~990 ms de motor — e a conta
+  de 1 time custava o mesmo, porque o que pesa é a fila de idas, não o volume. Agora a consulta sai uma vez, no instante zero, e
+  cada parte recebe o resultado pronto. As funções soltas (rotas antigas) continuam a fazer a sua própria consulta.
+
+  O select é a união do que cada parte lia (colunas que já existem em produção: eram lidas por elas).
+- (linha ~192, `const vinculosSelect = (novas) => VINCULOS_SELECT_SEM_FUSO.replace(' revotar_pe…`) 29I (achado 83): o fuso do time vai junto, na mesma consulta (sem ida nova). Sem a migração 076 a leitura repete sem ele.
+  29I bloco 3: com as outras colunas novas do time (escudo, jogadores por time) — mesma tolerância, coluna a coluna.
+- (linha ~229, `const JOGO_PENDENCIA_COLS = 'id, team_id, data, status, cancelado, resultado_ni…`) ─── O card "Seu time" do Início (Rodada 29I, bloco 3) ───────────────────────────────────────────────────────────────
+  Para cada time em que a pessoa é admin: as pendências (utils/pendenciasAdmin.js) — pedidos de entrada, o próximo jogo sem
+  presença aberta, o último sem resultado, denúncias à espera. Três leituras em paralelo (pedidos, jogos, denúncias), fora do
+  caminho crítico do Início. Sem time de admin, lista vazia (a tela não mostra o card).
+- (linha ~264, `const [vinculos, soOrganiza] = await Promise.all([obterVinculos(userId), timesE…`) Rodada 29B (E): em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
+  VELOCIDADE 9: as colunas do pacote de figurinhas entram no MESMO select (não há ida nova): é o que faltava para a Figurinha
+  se abrir a partir do que o /api/inicio já trouxe, em vez de pedir /api/brilhantes/estado só para saber se o time tem pacote.
+- (linha ~316, `const [memberships, soOrganiza] = vinculos`) Rodada 29B (E): `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
+  Rodada 29B (B): o /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
+- (linha ~373, `fuso: normalizarFuso(team.fuso),`) 29I (achado 83): a hora do jogo é a do campo — o fuso do time vai no próprio jogo (aqui o time não vem embutido).
+- (linha ~402, `async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {`) ─── GET /api/me/votacoes-pendentes ───────────────────────────────────────────
+  VELOCIDADE 6A (15-set): eram 4 idas EM SÉRIE — team_members → (teams, votes,
+  games) → as minhas presenças → as presenças dos colegas. Ficam 2:
+    · os dados das equipas vêm embutidos no team_members (mata a query `teams`);
+    · as presenças vêm embutidas nos jogos, e as minhas e as dos colegas saem
+      do mesmo conjunto (matam as duas idas a game_players).
+- (linha ~409, `const minhas = vinculos || (await supabase`) Rodada 29B (B): o /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
+- (linha ~482, `const porEquipa = await Promise.all(teamIds.map((tid) => casosDaEquipaComCache(…`) Velocidade 2 (12-set): era um `for` sequencial (1 download de Storage por
+  equipa, em série) — agora todas as equipas em paralelo (e quase sempre em cache).
+- (linha ~489, `async function obterVotacaoStatus(slug, userId, conhecido = null) {`) ─── GET /api/teams/:slug/votacao-status ──────────────────────────────────────
+  `conhecido` (Velocidade 6A, 15-set): quando o chamador já sabe o time e o
+  papel — o /api/inicio sabe, veio do obterTeams — salta o requireTeamMember,
+  que é mais uma ida ao banco para confirmar o que já se sabe. A rota solta
+  continua a chamar sem ele e a validar como sempre.
+- (linha ~497, `const [{ data: membros }, { data: meus }, { data: teamRow }] = await Promise.al…`) Independentes entre si depois de `team` resolvido (13-set, "Velocidade
+  3": eram 3 awaits em série).
+- (linha ~513, `async function obterCampeonato(slug, userId, conhecido = null) {`) ─── GET /api/equipas/:slug/campeonato ────────────────────────────────────────
+  `conhecido` (Velocidade 6A, 15-set): o /api/inicio já tem o time e o papel do
+  obterTeams — passá-los aqui poupa o getTeamBySlug E o getRole, duas idas ao
+  banco só para reconfirmar o que já veio. A rota solta continua a validar.
+- (linha ~522, `const [role, { data: campeonato }] = await Promise.all([`) role e campeonato só dependem de team.id, não um do outro (13-set,
+  "Velocidade 3": eram sequenciais). O acesso só é confirmado depois —
+  se `role` vier vazio o resultado de campeonato é descartado a seguir.
+- (linha ~541, `async function obterRsvp(gameId, userId, { teamId = null } = {}) {`) ─── GET /api/jogos/:gameId/rsvp ──────────────────────────────────────────────
+  `teamId` (Rodada 29B, B): o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
+  que só precisa do time e do jogo saem NA MESMA ida ao banco — eram duas em fila (loadGame, e só depois o resto). Se o jogo
+  disser outro time, volta ao caminho de sempre.
+- (linha ~551, `idsQueSoOrganizam(tid),`) Rodada 29B (E)
+- (linha ~564, `if (!resto) resto = await Promise.all(consultasDoTime(game.teams.id));`) role, membros, respostas e filaRows só dependem de game/team já
+  carregados — nenhum depende dos outros 3 (13-set, "Velocidade 3": eram 4
+  awaits em série). O acesso só é confirmado depois — se `role` vier vazio
+  o resto é descartado a seguir.
+- (linha ~572, `const users = (membros || []).map((m) => m.users).filter((u) => u && !organizam…`) Rodada 29B (E): quem só organiza o time não está na lista de presença (nem como pendente).
+- (linha ~592, `fuso: normalizarFuso(game.teams?.fuso),`) 29I (achado 83): o prazo de confirmação e a hora do jogo se leem no relógio do campo.
+- (linha ~622, `function metadeDasVezes(userId, hoje) {`) PUBLICIDADE EM TODOS OS PLANOS (15-set, decisão do dono): Pro/Elite deixam de
+  ficar isentos de anúncio — passam a ver METADE das oportunidades elegíveis,
+  nunca zero (o Free continua a ver todas). Hash simples e determinístico de
+  userId+dia: o MESMO utilizador recebe a MESMA decisão em qualquer tela nesse
+  dia (não pisca entre Início/sorteio), e muda sozinho no dia seguinte.
+- (linha ~634, `async function contextoDoAnuncio(userId) {`) O que não muda de página para página: o interruptor geral, as campanhas, a
+  idade e o plano de quem pede. Lido UMA vez (VELOCIDADE 9) — antes, servir as
+  cinco páginas de uma sessão fazia cinco leituras iguais à tabela `users`.
+- (linha ~677, `async function obterAdsSessao(userId) {`) TODOS os slots de uma sessão numa resposta (VELOCIDADE 9).
+
+  O relatório do build 28 mostrou 4 `GET /api/ads?pagina=…` (~500 ms cada, de
+  Lisboa) + 3 `POST /api/ads/evento` num percurso de 20 segundos: 7 dos 22
+  pedidos da sessão eram publicidade — mais do que qualquer tela. E o trabalho
+  de servidor era ~0 ms: o custo era só a distância, repetida por tela.
+
+  As campanhas não mudam no meio de uma sessão (a rotação é por minuto), por
+  isso vêm todas juntas e o app guarda-as por alguns minutos.
 
 ## utils/adsStore.js
 
@@ -2697,6 +2809,10 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   FUTTY-CUSTOS.md.
 
   NÃO TOCA EM PRODUÇÃO: só LÊ o prompt de auth.js e escreve no scratchpad.
+- (linha ~1, `const fs = require('fs');`) A) QUALIDADE — produção corre em `medium` ($0,051/retrato); o `low` custa
+     $0,013, 4× menos, e nunca foi testado. A copy do ENVELOPE já anuncia
+     R$4,90 por 10 figurinhas, logo esta medição decide se o preço dá lucro.
+  (Parágrafo A do cabeçalho, corrigido no 1-B2: a produção corre em `low` — qualidade é uma só, para todos.)
 
 ## scripts/_bench/renderizar-camadas.js
 

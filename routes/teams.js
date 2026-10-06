@@ -1169,8 +1169,10 @@ router.get(
 );
 
 /**
- * POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o
- * código curto.
+ * POST /api/convite/:token/aceitar — entra na equipa pelo convite. `:token` é o uuid ou o
+ * código curto. O link é reutilizável: o convite não é consumido — quem entra fica registrado em
+ * `convite_usos` (migração 058, best-effort) e o mesmo convite segue valendo para a próxima pessoa
+ * até `expires_at`. Quem já é membro recebe `jaMembro: true` sem novo registro.
  */
 router.post(
   '/api/convite/:token/aceitar',
@@ -1192,7 +1194,7 @@ router.post(
     // pessoa entra.
     const teamResumo = { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor };
 
-    // Já é membro? -> idempotente, não consome o convite
+    // Já é membro? -> idempotente, não registra novo uso do convite
     const existingRole = await getRole(team.id, req.user.id);
     if (existingRole) {
       return res.json({ jaMembro: true, team: teamResumo });

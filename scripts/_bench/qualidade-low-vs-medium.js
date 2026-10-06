@@ -16,9 +16,9 @@
 //
 // DUAS PERGUNTAS, UMA CORRIDA:
 //
-// A) QUALIDADE — produção corre em `medium` ($0,051/retrato); o `low` custa
-//    $0,013, 4× menos, e nunca foi testado. A copy do ENVELOPE já anuncia
-//    R$4,90 por 10 figurinhas, logo esta medição decide se o preço dá lucro.
+// A) QUALIDADE — a produção corre em `low` (qualidade é uma só, para todos:
+//    FAL_QUALITY em utils/geracaoFigurinha.js, padrão `low`, $0,013/retrato). O `medium`
+//    custa $0,051, 4× mais. A corrida mede os dois lado a lado.
 //
 // B) FUNDO — hipótese do dono, e o prompt dá-lhe razão: o fundo de
 //    geração é #050810 (quase preto), a camisa é #0d0d12 (quase preto) e o

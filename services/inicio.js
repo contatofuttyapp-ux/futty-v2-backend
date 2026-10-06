@@ -2,7 +2,7 @@
 // paralelo (routes/inicio.js chama tudo de uma vez; cada rota antiga chama a
 // MESMA função daqui, para nunca divergir do JSON que outras telas dependem).
 //
-// Motivo (11-set): motor em São Paulo, utilizador em Lisboa (~240ms/pedido) —
+// Motivo: motor em São Paulo, utilizador em Lisboa (~240ms/pedido) —
 // os ~13 pedidos do Início ao abrir davam 3-4s só de latência de rede, antes de
 // qualquer dado chegar. GET /api/inicio junta tudo num round-trip só.
 const { supabase, getTeamBySlug, getRole, getUserById, ensureUserRow, requireTeamMember, loadGame } = require('../utils/db');
@@ -14,7 +14,7 @@ const { temIdadeMinima } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const denunciaStore = require('../utils/denunciaStore');
-const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time" (29I, bloco 3)
+const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time"
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { normalizarFuso, lerComFuso } = require('../utils/fuso');
@@ -25,7 +25,7 @@ const PERFIL_COLS_BASE =
 // figurinha_status/_em (migração 051) — colunas novas; ver resiliência em
 // obterPerfilResiliente() abaixo (mesmo padrão de `historico` em games.js).
 const PERFIL_COLS_FIGURINHA = `${PERFIL_COLS_BASE}, figurinha_status, figurinha_status_em`;
-// foto_original_url (migração 057, Rodada 19) — "Ajustar enquadramento" (Figurinha.jsx)
+// foto_original_url (migração 057) — "Ajustar enquadramento" (Figurinha.jsx)
 // precisa dela para saber se reabre o CropModal sobre a original ou (fail-safe,
 // sem ela) sobre o recorte atual. Camada própria de resiliência, igual à de cima.
 const PERFIL_COLS = `${PERFIL_COLS_FIGURINHA}, foto_original_url`;
@@ -81,7 +81,7 @@ function calcIsAdult(birthdate) {
   return temIdadeMinima(birthdate);
 }
 
-// Figurinha automática do cadastro (12-set): 'gerando' preso há mais de 3min
+// Figurinha automática do cadastro: 'gerando' preso há mais de 3min
 // (POST /api/me/avatar/ai que nunca voltou a escrever — crash do processo,
 // timeout do fal, etc.) conta como 'falhou' na LEITURA — sem precisar de um
 // job à parte para limpar. Calculado a cada leitura, nunca persistido aqui.
@@ -109,7 +109,7 @@ async function obterMe(user) {
     golosDoJogador(userId),
     supabase.from('votes').select('nota').eq('para_user_id', userId).then((r) => r.data),
     supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
-    // RODADA 20 — tem_figurinha (abaixo): existência basta, .limit(1). r.data
+    // tem_figurinha (abaixo): existência basta, .limit(1). r.data
     // vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
     // nenhum", nunca erro (mesmo padrão de slotRows acima).
     supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(1).then((r) => r.data),
@@ -129,17 +129,16 @@ async function obterMe(user) {
 
   const slots = (slotRows || []).map((r) => r.kit_id);
 
-  // RODADA 20 — achado da Rodada 19: kit_ativo||'dark-gold' (linha abaixo,
-  // antes desta correção) fazia toda conta nova parecer "já tem figurinha"
-  // pro frontend (Figurinha.jsx usava !!kit_ativo). tem_figurinha agora é
-  // calculado aqui, na fonte, e cobre os 3 sinais reais de "já gerou
+  // tem_figurinha é calculado aqui, na fonte: kit_ativo||'dark-gold' (linha abaixo)
+  // faz toda conta nova parecer "já tem figurinha" pro frontend (Figurinha.jsx
+  // usava !!kit_ativo). Cobre os 3 sinais reais de "já gerou
   // alguma": um slot pago (brilhantes_time), uma no histórico
   // (user_avatar_historico, migração 057) ou o avatar ATUAL ser um arquivo
   // de figurinha nosso (cobre quem gerou antes da 057 existir e nunca tem
-  // linha no histórico). HOTFIX 26 (25-set): o 3º sinal era `avatar_url ≠
-  // foto_url` + status 'pronta', e a foto do Google copiada pelo trigger
-  // handle_new_user contava como figurinha; agora olha o NOME do arquivo
-  // (utils/figurinhaRegra.js), a mesma regra do upload de foto.
+  // linha no histórico). O 3º sinal olha o NOME do arquivo
+  // (utils/figurinhaRegra.js), a mesma regra do upload de foto — não `avatar_url ≠
+  // foto_url` + status 'pronta', porque a foto do Google copiada pelo trigger
+  // handle_new_user contava como figurinha.
   const temFigurinha = temFigurinhaIA({ brilhanteRows, historicoRows, avatarUrl: perfil?.avatar_url });
 
   return {
@@ -165,10 +164,10 @@ async function obterMe(user) {
       mostrar_rosto_publico: typeof perfil?.mostrar_rosto_publico === 'boolean' ? perfil.mostrar_rosto_publico : true,
       kit_ativo: perfil?.kit_ativo || null,
       tem_figurinha: temFigurinha,
-      // RODADA 28 — o card mostra AGORA uma figurinha nossa (arquivo -ai- no bucket), pela regra única
-      // (utils/figurinhaRegra.js). As telas decidiam isto por foto_url ≠ avatar_url — a regra que o
-      // Hotfix 26 aposentou no motor: com a foto do Google em avatar_url, a foto da pessoa ia para o
-      // card como se fosse figurinha (seletor de fundos, zoom abaixo da moldura, faixas vazias).
+      // O card mostra AGORA uma figurinha nossa (arquivo -ai- no bucket), pela regra única
+      // (utils/figurinhaRegra.js). As telas não decidem isto por foto_url ≠ avatar_url: com a foto do
+      // Google em avatar_url, a foto da pessoa iria para o card como se fosse figurinha (seletor de
+      // fundos, zoom abaixo da moldura, faixas vazias).
       figurinha_ativa: avatarEhFigurinhaNossa(perfil?.avatar_url),
       avatar_generico: AVATARES_GENERICOS.includes(perfil?.avatar_generico) ? perfil.avatar_generico : null,
       figurinha_status: calcFigurinhaStatus(perfil?.figurinha_status, perfil?.figurinha_status_em),
@@ -181,16 +180,16 @@ async function obterMe(user) {
 }
 
 // ─── Os vínculos da pessoa com os times — UMA consulta para todas as partes do Início ─────────────────────────────────
-// RODADA 29B (bloco 2, B — "conta pesada"). O /api/inicio perguntava ao banco quem é membro de quê ONZE vezes (times, convites,
-// votações, denúncias… cada parte com o seu select de team_members) e, pior, em fila: a parte seguinte só começava depois de
+// Sem isto o /api/inicio perguntaria ao banco quem é membro de quê ONZE vezes (times, convites,
+// votações, denúncias… cada parte com o seu select de team_members) e, pior, em fila: a parte seguinte só começaria depois de
 // os times voltarem. Medido (local, conta com 2 times): 31 consultas em 4 idas seguidas ao banco, ~990 ms de motor — e a conta
-// de 1 time custava o mesmo, porque o que pesa é a fila de idas, não o volume. Agora a consulta sai uma vez, no instante zero, e
+// de 1 time custava o mesmo, porque o que pesa é a fila de idas, não o volume. Por isso a consulta sai uma vez, no instante zero, e
 // cada parte recebe o resultado pronto. As funções soltas (rotas antigas) continuam a fazer a sua própria consulta.
 //
 // O select é a união do que cada parte lia (colunas que já existem em produção: eram lidas por elas).
 const VINCULOS_SELECT_SEM_FUSO = 'team_id, role, ausente_proximo, created_at, teams ( id, nome, slug, cor, cidade, criado_por, created_at, logo_url, cor_fundo, modo_visibilidade, brilhante_ativo, brilhante_kit, brilhante_limite, manto_proprio, revotar_pedido_em )';
-// 29I (achado 83): o fuso do time vai junto, na mesma consulta (sem ida nova). Sem a migração 076 a leitura repete sem ele.
-// 29I bloco 3: com as outras colunas novas do time (escudo, jogadores por time) — mesma tolerância, coluna a coluna.
+// O fuso do time vai junto, na mesma consulta (sem ida nova). Sem a migração 076 a leitura repete sem ele.
+// Com as outras colunas novas do time (escudo, jogadores por time) — mesma tolerância, coluna a coluna.
 const vinculosSelect = (novas) => VINCULOS_SELECT_SEM_FUSO.replace(' revotar_pedido_em )', ` revotar_pedido_em, ${novas} )`);
 
 async function obterVinculos(userId) {
@@ -226,7 +225,7 @@ async function contarPedidosPendentes(teams) {
   return teams;
 }
 
-// ─── O card "Seu time" do Início (Rodada 29I, bloco 3) ───────────────────────────────────────────────────────────────
+// ─── O card "Seu time" do Início ─────────────────────────────────────────────────────────────────────────────────────
 // Para cada time em que a pessoa é admin: as pendências (utils/pendenciasAdmin.js) — pedidos de entrada, o próximo jogo sem
 // presença aberta, o último sem resultado, denúncias à espera. Três leituras em paralelo (pedidos, jogos, denúncias), fora do
 // caminho crítico do Início. Sem time de admin, lista vazia (a tela não mostra o card).
@@ -261,9 +260,9 @@ async function obterSeuTime(teams) {
 }
 
 async function obterTeams(userId) {
-  // Rodada 29B (E): em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
-  // VELOCIDADE 9: as colunas do pacote de figurinhas entram no MESMO select (não há ida nova): é o que faltava para a Figurinha
-  // se abrir a partir do que o /api/inicio já trouxe, em vez de pedir /api/brilhantes/estado só para saber se o time tem pacote.
+  // Em paralelo, os times em que a pessoa só organiza (`joga: false` nos dela; ela administra, não joga).
+  // As colunas do pacote de figurinhas entram no MESMO select (não há ida nova): é o que deixa a Figurinha
+  // abrir a partir do que o /api/inicio já trouxe, em vez de pedir /api/brilhantes/estado só para saber se o time tem pacote.
   const [vinculos, soOrganiza] = await Promise.all([obterVinculos(userId), timesEmQueSoOrganiza(userId)]);
   const teams = montarTeams(vinculos, soOrganiza);
   await contarPedidosPendentes(teams);
@@ -313,8 +312,8 @@ function aparar(listaFormatada) {
 }
 
 async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false } = {}) {
-  // Rodada 29B (E): `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
-  // Rodada 29B (B): o /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
+  // `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
+  // O /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
   const [memberships, soOrganiza] = vinculos
     ? [vinculos, soOrganizaDado || new Set()]
     : await Promise.all([
@@ -370,7 +369,7 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
       team_id: g.team_id,
       team_name: team.nome || null,
       team_slug: team.slug || null,
-      // 29I (achado 83): a hora do jogo é a do campo — o fuso do time vai no próprio jogo (aqui o time não vem embutido).
+      // A hora do jogo é a do campo — o fuso do time vai no próprio jogo (aqui o time não vem embutido).
       fuso: normalizarFuso(team.fuso),
       ausente_proximo: ausenteByTeam[g.team_id] || false,
       eu_jogo: !soOrganiza.has(g.team_id),
@@ -400,13 +399,13 @@ async function obterPedidos(userId) {
 }
 
 // ─── GET /api/me/votacoes-pendentes ───────────────────────────────────────────
-// VELOCIDADE 6A (15-set): eram 4 idas EM SÉRIE — team_members → (teams, votes,
-// games) → as minhas presenças → as presenças dos colegas. Ficam 2:
+// São 2 idas ao banco, em vez de 4 em série (team_members → (teams, votes,
+// games) → as minhas presenças → as presenças dos colegas):
 //   · os dados das equipas vêm embutidos no team_members (mata a query `teams`);
 //   · as presenças vêm embutidas nos jogos, e as minhas e as dos colegas saem
 //     do mesmo conjunto (matam as duas idas a game_players).
 async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
-  // Rodada 29B (B): o /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
+  // O /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
   const minhas = vinculos || (await supabase
     .from('team_members')
     .select('team_id, teams ( id, slug, nome, revotar_pedido_em )')
@@ -479,23 +478,22 @@ function casosDaEquipaComCache(teamId) {
 async function obterDesfechosDenuncias(userId, { vinculos = null } = {}) {
   const membros = vinculos || (await supabase.from('team_members').select('team_id').eq('user_id', userId)).data;
   const teamIds = (membros || []).map((m) => m.team_id);
-  // Velocidade 2 (12-set): era um `for` sequencial (1 download de Storage por
-  // equipa, em série) — agora todas as equipas em paralelo (e quase sempre em cache).
+  // Todas as equipas em paralelo (e quase sempre em cache), em vez de um `for` sequencial
+  // com 1 download de Storage por equipa.
   const porEquipa = await Promise.all(teamIds.map((tid) => casosDaEquipaComCache(tid)));
   const n = porEquipa.reduce((total, casos) => total + casos.filter((c) => c.reporter_id === userId && c.resolvido_em).length, 0);
   return { total: n }; // só a contagem — nunca o veredicto
 }
 
-// ─── GET /api/teams/:slug/votacao-status ──────────────────────────────────────
-// `conhecido` (Velocidade 6A, 15-set): quando o chamador já sabe o time e o
+// ─── GET /api/teams/:slug/votacao-status ──────────────────────────────────
+// `conhecido`: quando o chamador já sabe o time e o
 // papel — o /api/inicio sabe, veio do obterTeams — salta o requireTeamMember,
 // que é mais uma ida ao banco para confirmar o que já se sabe. A rota solta
 // continua a chamar sem ele e a validar como sempre.
 async function obterVotacaoStatus(slug, userId, conhecido = null) {
   const team = conhecido?.id && conhecido?.role ? conhecido : (await requireTeamMember(slug, userId)).team;
 
-  // Independentes entre si depois de `team` resolvido (13-set, "Velocidade
-  // 3": eram 3 awaits em série).
+  // Independentes entre si depois de `team` resolvido: saem em paralelo, não em 3 awaits em série.
   const [{ data: membros }, { data: meus }, { data: teamRow }] = await Promise.all([
     supabase.from('team_members').select('user_id').eq('team_id', team.id),
     supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId),
@@ -510,8 +508,8 @@ async function obterVotacaoStatus(slug, userId, conhecido = null) {
   return { total, votados, faltam: Math.max(0, total - votados), pedido_revotacao };
 }
 
-// ─── GET /api/equipas/:slug/campeonato ────────────────────────────────────────
-// `conhecido` (Velocidade 6A, 15-set): o /api/inicio já tem o time e o papel do
+// ─── GET /api/equipas/:slug/campeonato ────────────────────────────────────
+// `conhecido`: o /api/inicio já tem o time e o papel do
 // obterTeams — passá-los aqui poupa o getTeamBySlug E o getRole, duas idas ao
 // banco só para reconfirmar o que já veio. A rota solta continua a validar.
 async function obterCampeonato(slug, userId, conhecido = null) {
@@ -519,8 +517,8 @@ async function obterCampeonato(slug, userId, conhecido = null) {
   const team = jaSabido || (await getTeamBySlug(slug, 'id, slug'));
   if (!team) throw new HttpError(404, 'Time não encontrado.');
 
-  // role e campeonato só dependem de team.id, não um do outro (13-set,
-  // "Velocidade 3": eram sequenciais). O acesso só é confirmado depois —
+  // role e campeonato só dependem de team.id, não um do outro (saem em paralelo, não
+  // sequenciais). O acesso só é confirmado depois —
   // se `role` vier vazio o resultado de campeonato é descartado a seguir.
   const [role, { data: campeonato }] = await Promise.all([
     jaSabido ? jaSabido.role : getRole(team.id, userId),
@@ -539,8 +537,8 @@ async function obterCampeonato(slug, userId, conhecido = null) {
 }
 
 // ─── GET /api/jogos/:gameId/rsvp ──────────────────────────────────────────────
-// `teamId` (Rodada 29B, B): o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
-// que só precisa do time e do jogo saem NA MESMA ida ao banco — eram duas em fila (loadGame, e só depois o resto). Se o jogo
+// `teamId`: o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
+// que só precisa do time e do jogo saem NA MESMA ida ao banco — em fila seriam duas (loadGame, e só depois o resto). Se o jogo
 // disser outro time, volta ao caminho de sempre.
 async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const consultasDoTime = (tid) => [
@@ -548,7 +546,7 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
     supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', tid),
     supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', gameId),
     supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', gameId).order('posicao', { ascending: true }),
-    idsQueSoOrganizam(tid), // Rodada 29B (E)
+    idsQueSoOrganizam(tid),
   ];
   let game;
   let resto;
@@ -562,14 +560,14 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
 
   // role, membros, respostas e filaRows só dependem de game/team já
-  // carregados — nenhum depende dos outros 3 (13-set, "Velocidade 3": eram 4
+  // carregados — nenhum depende dos outros 3 (saem em paralelo, não em 4
   // awaits em série). O acesso só é confirmado depois — se `role` vier vazio
   // o resto é descartado a seguir.
   if (!resto) resto = await Promise.all(consultasDoTime(game.teams.id));
   const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = resto;
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-  // Rodada 29B (E): quem só organiza o time não está na lista de presença (nem como pendente).
+  // Quem só organiza o time não está na lista de presença (nem como pendente).
   const users = (membros || []).map((m) => m.users).filter((u) => u && !organizam.has(u.id));
   const statusPorUser = {};
   (respostas || []).forEach((r) => {
@@ -589,7 +587,7 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const minhaEspera = (filaRows || []).find((r) => r.user_id === userId);
 
   return {
-    // 29I (achado 83): o prazo de confirmação e a hora do jogo se leem no relógio do campo.
+    // O prazo de confirmação e a hora do jogo se leem no relógio do campo.
     fuso: normalizarFuso(game.teams?.fuso),
     rsvp_aberto: game.rsvp_aberto || false,
     rsvp_prazo: game.rsvp_prazo || null,
@@ -619,9 +617,9 @@ function podeVerCampanha(c, adulto) {
   return (c.cls || '18+') === 'livre' ? true : adulto === true;
 }
 
-// PUBLICIDADE EM TODOS OS PLANOS (15-set, decisão do dono): Pro/Elite deixam de
-// ficar isentos de anúncio — passam a ver METADE das oportunidades elegíveis,
-// nunca zero (o Free continua a ver todas). Hash simples e determinístico de
+// PUBLICIDADE EM TODOS OS PLANOS (decisão do dono): Pro/Elite não ficam isentos de
+// anúncio — veem METADE das oportunidades elegíveis, nunca zero (o Free continua
+// a ver todas). Hash simples e determinístico de
 // userId+dia: o MESMO utilizador recebe a MESMA decisão em qualquer tela nesse
 // dia (não pisca entre Início/sorteio), e muda sozinho no dia seguinte.
 function metadeDasVezes(userId, hoje) {
@@ -633,8 +631,8 @@ function metadeDasVezes(userId, hoje) {
 
 /**
  * O que não muda de página para página: o interruptor geral, as campanhas, a
- * idade e o plano de quem pede. Lido UMA vez (VELOCIDADE 9) — antes, servir as
- * cinco páginas de uma sessão fazia cinco leituras iguais à tabela `users`.
+ * idade e o plano de quem pede. Lido UMA vez (em vez de cinco leituras iguais à
+ * tabela `users`, uma por página servida numa sessão).
  */
 async function contextoDoAnuncio(userId) {
   const store = await gabineteStore.ler();
@@ -675,12 +673,12 @@ async function obterAd(pagina, userId) {
 const PAGINAS_COM_AD = ['inicio', 'resenha', 'ranking', 'figurinha', 'sorteio', 'p'];
 
 /**
- * TODOS os slots de uma sessão numa resposta (VELOCIDADE 9).
+ * TODOS os slots de uma sessão numa resposta.
  *
- * O relatório do build 28 mostrou 4 `GET /api/ads?pagina=…` (~500 ms cada, de
- * Lisboa) + 3 `POST /api/ads/evento` num percurso de 20 segundos: 7 dos 22
- * pedidos da sessão eram publicidade — mais do que qualquer tela. E o trabalho
- * de servidor era ~0 ms: o custo era só a distância, repetida por tela.
+ * Medido num percurso de 20 segundos: 4 `GET /api/ads?pagina=…` (~500 ms cada, de
+ * Lisboa) + 3 `POST /api/ads/evento`, 7 dos 22 pedidos da sessão — mais do que
+ * qualquer tela. E o trabalho de servidor era ~0 ms: o custo era só a distância,
+ * repetida por tela.
  *
  * As campanhas não mudam no meio de uma sessão (a rotação é por minuto), por
  * isso vêm todas juntas e o app guarda-as por alguns minutos.
