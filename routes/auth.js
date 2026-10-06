@@ -823,7 +823,7 @@ async function baixarFotoConferida(caminho, hashEsperado) {
 // 6-out (decisão do dono): cabeça cortada (ou braço extremo na lateral) nas DUAS tentativas → a FOTO fica recusada. Um pedido novo com a
 // mesma foto é barrado ANTES da fal (FOTO_RECUSADA), sem débito. A identidade é o foto_hash (sha256 dos bytes
 // da foto guardada), não o nome do arquivo nem a conta: foto nova = hash novo = libera. Migração 080 (fotos_recusadas).
-const MSG_FOTO_RECUSADA = 'Essa foto não deu certo. Escolha outra: de frente, com a cabeça inteira aparecendo e sem nada cortando o topo.';
+const MSG_FOTO_RECUSADA = 'Essa foto não deu certo. Escolha outra: de frente, com a cabeça e os ombros inteiros aparecendo, sem nada cortado nas bordas.';
 
 async function fotoEstaRecusada(fotoHash) {
   if (!fotoHash) return false;

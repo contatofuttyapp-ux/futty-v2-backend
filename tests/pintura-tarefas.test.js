@@ -390,7 +390,7 @@ test('cabeça cortada nas duas tentativas: o pedido da tarefa responde 200 (não
   const visto = await consultar(m, r.json.jobId);
   assert.equal(visto.json.estado, 'falhou');
   assert.equal(visto.json.code, 'FOTO_RECUSADA');
-  assert.match(visto.json.erro, /Escolha outra: de frente, com a cabeça inteira/);
+  assert.match(visto.json.erro, /Escolha outra: de frente, com a cabeça e os ombros/);
   assert.equal(m.usuario().brilhante_creditos, 2);
   assert.equal(m.usuario().figurinha_status, 'falhou');
   assert.equal(m.tabelas.user_avatar_slots.length, 0);

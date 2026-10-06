@@ -256,7 +256,7 @@ test('falhou (fal fora do ar): erro em linguagem de gente, direito intacto, stat
   assert.notEqual(de_novo.json.jobId, r.json.jobId);
 });
 
-const MSG_RECUSADA = /^Essa foto não deu certo\. Escolha outra: de frente, com a cabeça inteira aparecendo e sem nada cortando o topo\.$/;
+const MSG_RECUSADA = /^Essa foto não deu certo\. Escolha outra: de frente, com a cabeça e os ombros inteiros aparecendo, sem nada cortado nas bordas\.$/;
 
 test('cabeça cortada nas duas tentativas: a FOTO fica recusada (FOTO_RECUSADA), a fal roda 2x e NÃO cobra', async (t) => {
   const m = mundo(t);
