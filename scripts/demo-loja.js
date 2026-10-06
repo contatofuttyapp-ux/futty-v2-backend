@@ -1,4 +1,4 @@
-// Futty — Dados de demonstração para o material da Google Play (13-set).
+// Futty — Dados de demonstração para o material da Google Play.
 //
 //   node scripts/demo-loja.js              cria tudo (aborta se já existir)
 //   node scripts/demo-loja.js --sortear    sorteia o próximo jogo (algoritmo real)
@@ -133,11 +133,10 @@ const POSTS = [
 // ---------------------------------------------------------------------------
 
 async function jaExiste() {
-  // LIMPEZA TOTAL (23-set) — o sinal certo passou a ser o TIME, não a conta
-  // do Bruninho: desde a decisão do dono de manter demo-loja@futtymock.com
-  // como conta MANTER de scripts/limpar-usuarios-teste.js, ela sobrevive a
-  // uma limpeza (--times-tambem) que zera o time dela mas não a conta. "Já
-  // existe" agora quer dizer "o demo já está montado", não "a conta existe"
+  // O sinal de "já existe" é o TIME, não a conta do Bruninho: por decisão do dono,
+  // demo-loja@futtymock.com é conta MANTER de scripts/limpar-usuarios-teste.js e
+  // sobrevive a uma limpeza (--times-tambem) que zera o time dela mas não a conta.
+  // "Já existe" quer dizer "o demo já está montado", não "a conta existe"
   // — ver criarUsuarios() abaixo, que reaproveita a conta em vez de abortar.
   const { data } = await supabase.from('teams').select('id').eq('slug', SLUG_TIME).maybeSingle();
   return !!data;
@@ -535,9 +534,9 @@ async function sortear() {
 // Devolve a vitrine ao estado da loja, sem criar nem apagar nada: o próximo jogo
 // num domingo à frente e sem sorteio, e as contas fictícias com a silhueta do bucket
 // kits em avatar_url. Sem essa silhueta o sorteio e o ranking mostram o boneco
-// cinza com "?" no lugar do jogador de camisa preta e dourada: aconteceu em 25-set,
-// quando um reparo de avatar_url "de fora do bucket avatars" (a foto do Google, Hotfix
-// 26) também levou o bucket kits.
+// cinza com "?" no lugar do jogador de camisa preta e dourada: já aconteceu, quando
+// um reparo de avatar_url "de fora do bucket avatars" (a foto do Google) também
+// levou o bucket kits.
 async function reagendar() {
   if (!fs.existsSync(ARQ_ESTADO)) throw new Error('LOJA/demo-estado.json não existe: corra o script sem opções primeiro.');
   const estado = JSON.parse(fs.readFileSync(ARQ_ESTADO, 'utf8'));

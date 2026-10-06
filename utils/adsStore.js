@@ -17,10 +17,9 @@ async function gravar(m) {
   await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(m)), { contentType: 'application/json', upsert: true });
 }
 
-// VELOCIDADE 6A (15-set): registar() era um read-modify-write do JSON inteiro a
-// CADA impressão — 2 idas ao Storage por anúncio visto, com o POST /api/ads/evento
-// à espera das duas. Agora o evento só toca num contador em memória e o POST
-// responde na hora; o ficheiro é escrito de 30 em 30 segundos (e no SIGTERM).
+// registar() só toca num contador em memória e o POST /api/ads/evento responde na hora; o ficheiro é
+// escrito de 30 em 30 segundos (e no SIGTERM). (Um read-modify-write do JSON inteiro a CADA impressão
+// eram 2 idas ao Storage por anúncio visto, com o POST à espera das duas.)
 //
 // O que se perde: até 30 s de contagens se o processo morrer de morte súbita.
 // São números de publicidade agregados por dia, não dinheiro nem conteúdo — o

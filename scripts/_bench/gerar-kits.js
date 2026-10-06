@@ -1,4 +1,4 @@
-// BANCADA — ASSETS DOS KITS 3 e 4 (White Gold · Elite Gold), 31-jul.
+// BANCADA — ASSETS DOS KITS 3 e 4 (White Gold · Elite Gold).
 // O dono decidiu: 4 uniformes no lançamento, mesmo design, só a cor muda.
 // Este script RECOLORE o asset oficial kit1-dark-gold.png (Image 1 = verdade)
 // e gera N candidatos por cor para o olho do dono escolher.
@@ -8,7 +8,7 @@
 //   node scripts/_bench/gerar-kits.js --n 2               (2 por kit)
 //   node scripts/_bench/gerar-kits.js --publicar white-gold saida-kits/white-gold-c2.png
 //     → sobe o escolhido ao bucket 'kits' com o nome DEFINITIVO (kit3/kit4) e
-//       imprime a URL pública. (Ligar ativo:true no auth.js é passo meu, a seguir.)
+//       imprime a URL pública. (Ligar ativo:true no auth.js é um passo à parte.)
 //
 // Custo: ~$0,05/candidato (medium) → 6 candidatos ≈ $0,32. Tecto $0,60.
 
@@ -25,8 +25,8 @@ const REF_URL = 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/publ
 
 // As cores vêm da MESMA régua do catálogo de produção (KITS_IA em auth.js).
 const NOVOS = {
-  // Royal Purple (pedido do dono, 31-jul): o INVERTIDO do roxo — par do Elite Gold.
-  // Candidato a 5º kit pago; decisão de entrar no lançamento só depois do olho.
+  // Royal Purple (pedido do dono): o INVERTIDO do roxo — par do Elite Gold.
+  // Candidato a 5º kit pago; entrar no lançamento só depois do olho do dono.
   'royal-purple': {
     ficheiroFinal: 'kit5-royal-purple.png',
     brief: `Recreate THE EXACT SAME jersey with ONLY the colours changed — INVERTED scheme:

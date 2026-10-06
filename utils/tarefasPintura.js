@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A PINTURA POR PEDIDO, NÃO POR CPU OCIOSA (Rodada 29B, bloco 2-A2 — 1-out).
+// A PINTURA POR PEDIDO, NÃO POR CPU OCIOSA.
 //
-// No Cloud Run a CPU só existe enquanto um pedido está aberto. A pintura em segundo plano da
-// parte A roda DEPOIS de responder, então sem "CPU sempre alocada" (~R$250/mês, recusada em
-// 25-set) ela só andava enquanto o app consultava. O padrão certo do Cloud Run: o trabalho roda
+// No Cloud Run a CPU só existe enquanto um pedido está aberto. A pintura em segundo plano
+// roda DEPOIS de responder, então sem "CPU sempre alocada" (~R$250/mês, recusada)
+// ela só anda enquanto o app consulta. O padrão certo do Cloud Run: o trabalho roda
 // DENTRO de um pedido, e quem faz esse pedido é o Cloud Tasks. Custo ≈ zero (1 milhão de
 // operações grátis por mês) e, se o processo reiniciar no meio, a tarefa é repetida sozinha.
 //

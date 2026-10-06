@@ -1,17 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // A RECEITA DA FIGURINHA BRILHANTE — num sítio só. Duas, na verdade:
 //
-//   'v6'            (PADRÃO desde 22-set, SPEC-FIGURINHA-3) — UMA chamada ao
+//   'v6'            (PADRÃO, SPEC-FIGURINHA-3) — UMA chamada ao
 //                   gpt-image-1.5/edit em low com `input_fidelity: high`, foto
 //                   quadrada + imagem do kit, saída 1024×1536, birefnet no fim.
-//                   US$0,112. É a que o dono avaliou em 4,1/5 na bancada cega
-//                   de 17-set, a melhor de todas as testadas. A Brilhante é
+//                   US$0,112. É a que o dono avaliou em 4,1/5 na bancada cega,
+//                   a melhor de todas as testadas. A Brilhante é
 //                   PAGA — quem paga leva a melhor, não a mais barata.
 //   'duas-passadas' US$0,05, descrita em detalhe abaixo. Continua inteira e
 //                   disponível por `FIGURINHA_RECEITA=duas-passadas`: se um dia
 //                   o custo apertar, a troca é uma variável de ambiente.
 //
-// O QUE SEGUE descreve a receita das duas passadas (18/22-set).
+// O QUE SEGUE descreve a receita das duas passadas.
 //
 // Porque duas: nenhum motor sozinho dava as duas coisas que a figurinha precisa.
 // O gpt-image-2.5 acerta a CARA mas entrega um retoque de foto; o gpt-image-1.5
@@ -30,7 +30,7 @@
 //               certa — não há nada para "ler com atenção". US$0,020.
 //   birefnet    o recorte final que a composição do app usa. US$0,002.
 //
-// O QUE ESTA BANCADA REPROVOU (não reabrir sem motivo, ver CLAUDE.md):
+// O QUE A BANCADA REPROVOU (não reabrir sem motivo, ver CLAUDE.md):
 // encolher as imagens de entrada (a fal tokeniza num tamanho canónico — o preço
 // não muda), repintar com flux-2 klein (troca a pessoa), difusão direto da foto
 // (cartoon) e kit só por texto (perde o emblema em 7 de 7).
@@ -49,7 +49,7 @@ const PASSADA1_ENDPOINT = process.env.FAL_PASSADA1_ENDPOINT || 'openai/gpt-image
 const PASSADA2_ENDPOINT = process.env.FAL_PASSADA2_ENDPOINT || 'fal-ai/gpt-image-1.5/edit';
 const BIREFNET_ENDPOINT = process.env.FAL_BIREFNET_ENDPOINT || 'fal-ai/birefnet';
 const QUALIDADE = process.env.FAL_QUALITY || 'low';
-// A RECEITA (SPEC-FIGURINHA-3, 22-set): a Brilhante é paga, por isso leva a
+// A RECEITA (SPEC-FIGURINHA-3): a Brilhante é paga, por isso leva a
 // MELHOR — a V6, que o dono avaliou em 4,1/5 contra as duas passadas. As duas
 // passadas ficam disponíveis por env (`FIGURINHA_RECEITA=duas-passadas`):
 // custam US$0,05 contra US$0,112 e servem se um dia o custo apertar.
@@ -62,7 +62,7 @@ const FIDELIDADE_V6 = process.env.FAL_INPUT_FIDELITY || 'high';
 // onde está a economia; alta aqui devolveria o custo da V6 sem melhorar nada.
 const FIDELIDADE_PASSADA2 = process.env.FAL_INPUT_FIDELITY_PASSADA2 || 'low';
 // A saída fica em retrato: é o que dá altura para cabeça + busto sem cortar a
-// coroa (receita de 30-jul; em quadrado o achatamento ia a 0,72). Os dois
+// coroa (em quadrado o achatamento ia a 0,72). Os dois
 // motores querem o tamanho em formatos DIFERENTES e trocá-los dá 422: o
 // gpt-image-1.5 só aceita o enum em string, o 2.5 aceita {width,height}.
 const TAMANHO_2_5 = { width: 1024, height: 1536 };
@@ -100,8 +100,8 @@ async function gerarFigurinha({ fotoUrl, kitUrl, kitId, publicar, etiqueta = 'fi
   };
 
   // ── V6: uma chamada só, fidelidade ALTA, foto quadrada + kit ──
-  // A receita que o dono escolheu em 17-set (4,1/5 na avaliação cega das 7
-  // fotos) e que desde 22-set é a da Brilhante, porque a Brilhante é paga.
+  // A receita que o dono escolheu (4,1/5 na avaliação cega das 7
+  // fotos) e que é a da Brilhante, porque a Brilhante é paga.
   if (receita === 'v6') {
     const g = await chamarFal(V6_ENDPOINT, {
       prompt: montarPrompt(kitId),

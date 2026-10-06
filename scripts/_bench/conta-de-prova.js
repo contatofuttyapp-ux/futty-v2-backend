@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONTA DESCARTÁVEL PARA AS PROVAS DE TELA (22-set, Figurinha 3).
+// CONTA DESCARTÁVEL PARA AS PROVAS DE TELA.
 //
 // A conta demo-loja tem a Brilhante das lojas e NÃO pode ser desfeita para
 // provar a figurinha comum. Este script cria (ou refaz) uma conta @futtymock

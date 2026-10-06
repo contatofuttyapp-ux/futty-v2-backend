@@ -1,4 +1,4 @@
-// Futty v2.0 — Anti-abuso de custo da geração de avatar IA (11-ago, ordem do
+// Futty v2.0 — Anti-abuso de custo da geração de avatar IA (ordem do
 // dono). Filosofia: PARAQUEDAS COM ALERTA, nunca teto de vidro — viral legítimo
 // nunca é travado. Três camadas:
 //   1. contador diário + teto suave (pausa só ao bater 100%, volta sozinho à
@@ -18,12 +18,12 @@ const crypto = require('crypto');
 const { supabase } = require('./db');
 const { enviarNotificacao } = require('../routes/push');
 
-// 17-set: não há mais custo constante. O valor de cada geração vem dos headers
+// Não há custo constante: o valor de cada geração vem dos headers
 // da fal (`x-fal-billable-units`, ver utils/falFila.js) e chega aqui em
-// `registrarGeracao({ custoCents })`. A constante antiga dizia 1,7 cêntimos; o
-// real medido na bancada de 49 figurinhas é ~11,2 — a casa andou a subestimar o
-// gasto diário em 6,6×, e era esse número que alimentava os alertas e o teto.
-// Isto é a última linha de defesa quando a fal não manda header nenhum.
+// `registrarGeracao({ custoCents })`. Este valor (11,2 cêntimos) é o custo real
+// medido na bancada de 49 figurinhas e é a última linha de defesa quando a fal não manda
+// header nenhum. (Um custo fixo de 1,7 cêntimos subestimava o gasto diário em 6,6×,
+// e era esse número que alimentava os alertas e o teto.)
 const CUSTO_FALLBACK_CENTS = 11.2;
 const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000; // $50/dia ≈ 446 figurinhas
 const DEGRAUS = [20, 50, 75, 90];
@@ -77,9 +77,9 @@ async function diagnosticar() {
     const total = idsNovos.length;
     if (!total) return 'INCONCLUSIVO — sem contas novas nas últimas 24h.';
 
-    // RODADA 20 — convite virou reutilizável (migração 058): quem entrou por
-    // convite agora está em convite_usos, não em convites.usado_por (que só
-    // guarda o legado, de antes da mudança). A pergunta é "entrou por
+    // Convite reutilizável (migração 058): quem entrou por
+    // convite está em convite_usos, não em convites.usado_por (que só
+    // guarda o legado). A pergunta é "entrou por
     // qualquer um dos dois caminhos" — união dos ids, sem contar duas vezes.
     // Isolado num try próprio: um tropeço aqui não pode derrubar o resto do
     // diagnóstico (ataque por IP/hash), que não depende de convite nenhum.
@@ -212,7 +212,7 @@ async function registrarGeracao({ userId, ip, custoCents = null, teamId = null }
     const geracoes = geracoesAntes + 1;
     const custo_cents = custoAntes + Math.round(desta);
     await supabase.from('gasto_ia_diario').upsert({ dia, geracoes, custo_cents }, { onConflict: 'dia' });
-    // RODADA 28 — o log passa a guardar também o time que pagou (pacote) e o custo REAL desta geração
+    // O log guarda também o time que pagou (pacote) e o custo REAL desta geração
     // (null se a fal não mandou o header): é daqui que o Gabinete tira o custo por time POR MÊS.
     const { error: erroLog } = await supabase.from('geracao_ia_log').insert({
       user_id: userId, ip: ip || null, team_id: teamId || null, custo_cents: custoCents == null ? null : Math.round(custoCents),

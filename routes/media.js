@@ -1,14 +1,11 @@
 // Proxy de imagem — GET /api/media/:token[?w=128|256|512|1024][&sq=1[&rc=x,y,escala]]
 //
-// VELOCIDADE 6A (15-set) — era um 302 para um signed URL do Supabase. Custava
-// caro no celular: o redirect abria uma SEGUNDA ligação TLS (Cloud Run → CDN do
-// Supabase) e devolvia o PNG original, 390 KB, medido a 1,4-1,6 s por imagem de
-// Lisboa. Agora o proxy serve os BYTES ele próprio, já redimensionados e em
-// WebP, e guarda o derivado em memória: a segunda pessoa a ver a mesma foto
-// paga só a rede.
+// O proxy serve os BYTES ele próprio, já redimensionados e em WebP, e guarda o derivado em
+// memória: a segunda pessoa a ver a mesma foto paga só a rede. (Um 302 para um signed URL do
+// Supabase custava caro no celular: o redirect abria uma SEGUNDA ligação TLS (Cloud Run → CDN do
+// Supabase) e devolvia o PNG original, 390 KB, medido a 1,4-1,6 s por imagem de Lisboa.)
 //
-// RODADA 27 (25-set) — o LRU e a receita moraram até aqui; agora vivem em
-// utils/derivadosMidia.js, porque o upload da foto também os usa: quem grava a foto
+// O LRU e a receita vivem em utils/derivadosMidia.js, porque o upload da foto também os usa: quem grava a foto
 // deixa os derivados que as telas vão pedir prontos, e o primeiro pedido da própria
 // pessoa deixa de pagar a ida ao Storage e o sharp. Dois pedidos do mesmo derivado ao
 // mesmo tempo esperam a mesma geração.
@@ -34,11 +31,11 @@ const UM_ANO_S = 31536000;
 
 class ArquivoAusente extends Error {}
 
-// SEGURANCA-REVISAO-10SET.md secção 3 (10-set): isento do limiter geral da
+// SEGURANCA-REVISAO-10SET.md secção 3: isento do limiter geral da
 // /api (server.js) porque um feed com muitas fotos dispara uma chamada por
 // <img>, de uma vez. Sem sessão (o token HMAC é a própria autorização), por isso
 // conta por IP, o real (CF-Connecting-IP quando vem, senão req.ip). Teto e chave
-// em middleware/limiters.js (hotfix 25).
+// em middleware/limiters.js.
 const mediaLimiter = criarLimiteDeMidia();
 
 router.get('/api/media/:token', mediaLimiter, async (req, res) => {
@@ -53,7 +50,7 @@ router.get('/api/media/:token', mediaLimiter, async (req, res) => {
   // cada tela. É OPT-IN de propósito — o mesmo proxy serve os escudos de time,
   // e um escudo largo cortado ao meio seria um defeito.
   const quadrado = req.query.sq === '1';
-  // `rc=x,y,escala` — a janela que a pessoa escolheu para a miniatura (Rodada 29B, E). Só conta
+  // `rc=x,y,escala` — a janela que a pessoa escolheu para a miniatura. Só conta
   // junto de `sq=1`: o card, o cromo e as fotos grandes pedem sem ele e a ignoram. Lixo → sem recorte.
   const recorte = quadrado ? deParametro(req.query.rc) : null;
   const chave = chaveDoDerivado({ bucket: alvo.bucket, path: alvo.path, v: alvo.v, largura, quadrado, recorte });

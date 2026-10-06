@@ -1,4 +1,4 @@
-// Futty v2.0 — Custo real das figurinhas por time e por mês (Rodada 28, bloco H). Puro: quem busca
+// Futty v2.0 — Custo real das figurinhas por time e por mês. Puro: quem busca
 // as linhas é routes/gabinete.js; aqui só se agrupa (e o teste prova a conta).
 
 /** "AAAA-MM" no horário de Brasília — o mês do dono, não o do servidor (uma geração às 23h30 do dia 31 é do mês 31). */

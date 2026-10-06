@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MEDIR A CONTA PESADA (1-out, Rodada 29B, bloco 2, parte B) — tempo, tamanho e idas ao banco por rota.
+// MEDIR A CONTA PESADA — tempo, tamanho e idas ao banco por rota.
 //
 // Sobe o motor (server.js) DENTRO deste processo, numa porta livre, e conta tudo o que ele pede ao Supabase: cada
 // `supabase.from()` (uma consulta), cada `supabase.rpc()` e cada chamada ao Storage. Em cada rota, para a conta pesada
@@ -7,8 +7,8 @@
 // QUENTES, e escreve a mediana dos quentes. A conta de prova vem de scripts/_bench/prova-conta-pesada.js.
 //
 // Só LEITURA (GET). As rotas são as do arranque: Início, /api/me, Resenha, Figurinha (selos), ranking, times.
-// Os milissegundos são DESTA máquina até o Supabase de São Paulo — o que não muda de máquina para máquina é o número de
-// idas ao banco e o tamanho da resposta; é nesses dois que a parte B mexe.
+// Os milissegundos são DESTA máquina até o Supabase de São Paulo — o que não muda de máquina para máquina é o
+// número de idas ao banco e o tamanho da resposta.
 //
 //   node scripts/_bench/medir-conta-pesada.js --etiqueta antes
 //   node scripts/_bench/medir-conta-pesada.js --etiqueta depois

@@ -13,8 +13,8 @@ const CAMINHO = '_plataforma/suspensoes.json';
 const TTL_MS = 15000; // 15s — coerência "quase-imediata" sem download por pedido
 
 const VAZIO = { users: [], equipas: [] };
-// Velocidade 7A (15-set): no arranque frio, os 3 pedidos simultâneos do app
-// baixavam este arquivo 3 vezes. Agora quem chega junto espera o mesmo download.
+// No arranque frio, os 3 pedidos simultâneos do app
+// esperam o mesmo download deste arquivo (em vez de o baixar 3 vezes).
 // E passados os 15 s ninguém mais espera: sai a lista conhecida e o download
 // novo corre por trás. Numa instância parada há horas, uma suspensão feita por
 // OUTRA instância vale a partir do segundo pedido, não do primeiro.
@@ -30,9 +30,9 @@ function normalizar(o) {
 
 // Lê SEMPRE do Storage (sem cache) — usado antes de gravar para não perder
 // escritas concorrentes. Fail-open: erro → estado vazio (não bloqueia ninguém).
-// Rodada 8B: prazo de 3 s (comPrazo) — sem ele, uma ida sem resposta prendia
+// Prazo de 3 s (comPrazo) — sem ele, uma ida sem resposta prende
 // esta função (e quem a chama, como a gate de CADA pedido autenticado) para
-// sempre; o catch já existia, mas não protege contra uma promessa pendurada.
+// sempre; o catch não protege contra uma promessa pendurada.
 async function lerRaw() {
   try {
     const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO), 3000, 'plataforma/suspensoes');

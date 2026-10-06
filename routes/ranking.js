@@ -33,8 +33,8 @@ function notaValida(n) {
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
 async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
-  // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado
-  // dos outros (13-set, "Velocidade 3": eram 3 awaits em série).
+  // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado dos outros, então saem
+  // juntos em vez de awaits em série.
   const [{ data: membros }, { data: votos }, { data: jogos }, organizam] = await Promise.all([
     // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
     // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
@@ -47,12 +47,12 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     // Votos do time (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
     jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
-    idsQueSoOrganizam(teamId), // Rodada 29B (E): quem só organiza o time não aparece no ranking
+    idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
   ]);
   const gameIds = (jogos || []).map((g) => g.id);
 
-  // FLUIDEZ 2 (16-set): os golos (dentro dos agregados) e os jogos por jogador só
-  // precisam dos gameIds — eram duas idas em série, agora saem juntas.
+  // Os golos (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
+  // vez de em série.
   const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap }, { data: gps }] = await Promise.all([
     // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
     agregadosDaEquipa(teamId, { jogos: jogos || [] }),
@@ -124,7 +124,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
       avatar_url: u.avatar_url || null,
       foto_url: u.foto_url || null,
       // Sem foto nem figurinha, a linha mostra o genérico que a pessoa ESCOLHEU (o mesmo da Presença e do
-      // Início), não uma silhueta "?": Rodada 27.
+      // Início), não uma silhueta "?".
       avatar_generico: u.avatar_generico || null,
       cor_frame: u.cor_frame || 'dourado',
       categoria: p.ehGR ? 'GR' : 'linha',
@@ -158,11 +158,12 @@ function noTimeCampeao(g, userId) {
 }
 
 /**
- * RODADA 29I (achado 97): a pessoa sempre vê a PRÓPRIA vitrine. O ranking só leva quem tem 3 jogos, é visível, está ativo e joga
- * (quem só organiza o time sai dele) — quem ficava de fora dava 404 e a tela dizia "Perfil só entre companheiros", como se a regra
- * de dividir time valesse contra o dono do perfil. Aqui monta-se a linha do próprio jogador com os números DELE (os que a vitrine
- * já mostra: jogos, vitórias, gols, destaques, nota), no mesmo formato do ranking, sem posição e sem pontos (`score: null`) — e sem
- * mexer na lista nem nas posições dos outros.
+ * A pessoa sempre vê a PRÓPRIA vitrine. O ranking só leva quem tem 3 jogos, é visível, está ativo e joga
+ * (quem só organiza o time sai dele) — quem ficasse de fora daria 404 e a tela diria
+ * "Perfil só entre companheiros", como se a regra de dividir time valesse contra o dono do perfil.
+ * Aqui monta-se a linha do próprio jogador com os números DELE (os que a vitrine já mostra: jogos,
+ * vitórias, gols, destaques, nota), no mesmo formato do ranking, sem posição e sem pontos
+ * (`score: null`) — e sem mexer na lista nem nas posições dos outros.
  */
 async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosRecebidos }) {
   const [{ data: u }, { data: m }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap }] = await Promise.all([
@@ -216,12 +217,12 @@ router.get(
   })
 );
 
-/** GET /api/teams/:slug/jogador/:userId — perfil completo do jogador.
+/**
+ * GET /api/teams/:slug/jogador/:userId — perfil completo do jogador.
  *
- * FLUIDEZ 2 (16-set): eram 18 consultas em 16 ondas EM SÉRIE — 1216 ms no iPhone,
- * 644 ms só de motor. Ficam 16 consultas em 4 ondas, e cada onda tem a sua fase no
- * Server-Timing (a rota não marcava fase nenhuma: o tempo do motor era opaco).
- * O corpo do JSON é o MESMO byte a byte — provado em scripts/bench-jogador-identico.js. */
+ * São 16 consultas em 4 ondas, e cada onda tem a sua fase no Server-Timing.
+ * O corpo do JSON é o MESMO byte a byte — provado em scripts/bench-jogador-identico.js.
+ */
 router.get(
   '/api/teams/:slug/jogador/:userId',
   requireAuth,
@@ -274,7 +275,7 @@ router.get(
       supabase.from('team_members').select('team_id').eq('user_id', userId),
       jogosP,
     ]);
-    // 29I (achado 97): o próprio id passa SEMPRE — antes de qualquer verificação de time em comum.
+    // O próprio id passa SEMPRE — antes de qualquer verificação de time em comum.
     const ehOProprio = userId === req.user.id;
     if (!role && !ehOProprio) throw new HttpError(403, 'Você não é membro deste time.');
     marcarFase(res, 'onda2');
@@ -343,7 +344,7 @@ router.get(
     let jogosConfirmados = 0;
     for (const p of parts || []) {
       partSet.add(p.game_id);
-      // Achado 10: só conta jogos já ENCERRADOS — presença num jogo futuro não
+      // Só conta jogos já ENCERRADOS — presença num jogo futuro não
       // infla a estatística "jogos".
       const g = gameById[p.game_id];
       const cancelado = !!g?.cancelado || g?.status === 'cancelado';
@@ -421,7 +422,7 @@ router.get(
 
     res.json({
       team: { ...team, role },
-      // figurinha_ativa (Rodada 28, Manutenção 26-set): mesma regra única de services/inicio.js —
+      // figurinha_ativa: mesma regra única de services/inicio.js —
       // o card mostra AGORA uma figurinha nossa? As telas não devem voltar a comparar foto_url/avatar_url.
       jogador: { ...jogador, posicao, total_com_nota: comNota.length, figurinha_ativa: avatarEhFigurinhaNossa(jogador.avatar_url) },
       radar,
@@ -512,8 +513,8 @@ router.post(
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem pedir revotação.');
 
-    // 29I, bloco 3 (dono): em Ajustes → AÇÕES DEFINITIVAS, "Pedir para votar de novo" ZERA as notas do time antes de pedir — todo mundo
-    // vota do zero. O app pede a confirmação; sem `zerar` (app antigo) segue só o pedido, como era.
+    // Em Ajustes → AÇÕES DEFINITIVAS, "Pedir para votar de novo" ZERA as notas do time antes de pedir —
+    // todo mundo vota do zero. O app pede a confirmação; sem `zerar` (app antigo) segue só o pedido.
     if (req.body?.zerar === true) {
       const { error: erroZerar } = await supabase.from('votes').delete().eq('team_id', team.id);
       if (erroZerar) throw new HttpError(500, erroZerar.message);

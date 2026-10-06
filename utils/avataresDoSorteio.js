@@ -1,4 +1,4 @@
-// Futty v2.0 — O avatar de HOJE nos jogadores de um sorteio (Rodada 27, 25-set).
+// Futty v2.0 — O avatar de HOJE nos jogadores de um sorteio.
 //
 // O sorteio guarda uma CÓPIA do avatar_url de cada jogador no instante em que foi feito:
 // `times_resultado` é um snapshot, e precisa ser (o replay da cerimônia sai igual pela seed).

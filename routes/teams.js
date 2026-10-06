@@ -17,19 +17,20 @@ const selosCache = require('../utils/selosCache');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
-const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido (Rodada 29D)
-const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código> (29H)
-const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols (29I, achado 78)
-const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time (29I, achado 83)
-const { PALETA, CORES_ANTIGAS, lerEscudo, erroDeEscudoSemMigracao, escudoDoTime } = require('../utils/escudo'); // o escudo do time (29I, bloco 3)
-const { lerJogadoresPorTime, jogadoresPorTimeDoTime, erroDaColunaJogadoresPorTime } = require('../utils/jogadoresPorTime'); // item 68 (29I, bloco 3)
+const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido
+const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código>
+const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols
+const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso, lerComFuso } = require('../utils/fuso'); // o fuso do time
+const { PALETA, CORES_ANTIGAS, lerEscudo, erroDeEscudoSemMigracao, escudoDoTime } = require('../utils/escudo'); // o escudo do time
+const { lerJogadoresPorTime, jogadoresPorTimeDoTime, erroDaColunaJogadoresPorTime } = require('../utils/jogadoresPorTime');
 
 const router = express.Router();
 
 /**
- * 29I (achado 83): no time recém-criado, grava o fuso derivado do ponto da cidade geocodificada. Melhor esforço: sem ponto, sem
- * fuso derivável ou sem a migração 076, não grava nada e o time fica no padrão (America/Sao_Paulo, o que a coluna nasce valendo —
- * por isso o padrão nem precisa de escrita). Devolve o fuso que o time passou a ter.
+ * No time recém-criado, grava o fuso derivado do ponto da cidade geocodificada. Melhor esforço: sem ponto,
+ * sem fuso derivável ou sem a migração 076, não grava nada e o time fica no padrão (America/Sao_Paulo, o
+ * que a coluna nasce valendo — por isso o padrão nem precisa de escrita). Devolve o fuso que o time
+ * passou a ter.
  */
 async function gravarFusoDoTimeNovo(team, geo) {
   const derivado = fusoDaCoordenada(geo?.lat, geo?.lng);
@@ -42,12 +43,11 @@ async function gravarFusoDoTimeNovo(team, geo) {
   return derivado;
 }
 
-// 29I, bloco 3: a cor principal do escudo vem da paleta de 12 (utils/escudo.js); as 4 chaves antigas continuam valendo.
+// A cor principal do escudo vem da paleta de 12 (utils/escudo.js); as 4 chaves antigas continuam valendo.
 const CORES_VALIDAS = [...new Set([...PALETA, ...CORES_ANTIGAS])];
 const MODOS_VISIBILIDADE = ['privado', 'publico_aprovacao', 'publico_aberto'];
-// RODADA 20 (23-set, decisão do dono): o link vira "de grupo" — o MESMO link
-// serve pra todo mundo, vale 30 dias (era 7, uso único), e o admin revoga
-// quando quiser (DELETE /api/teams/:slug/convites/:id, já existia).
+// Decisão do dono: o link é "de grupo" — o MESMO link serve pra todo mundo, vale 30 dias e o admin
+// cancela quando quiser (DELETE /api/teams/:slug/convites/:id).
 const CONVITE_DIAS = 30;
 
 // Escapa um valor para uso dentro da string de filtro do .or() do PostgREST.
@@ -87,20 +87,20 @@ router.post(
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
-    // 29I (achado 78): o artilheiro depende dos gols — gols desligados com artilheiro ligado é combinação incoerente e o motor recusa.
-    // `mostrar_gols` agora também vem no POST (antes ia num PATCH logo depois): o time nasce já com os dois prêmios coerentes.
+    // O artilheiro depende dos gols — gols desligados com artilheiro ligado é combinação incoerente e o
+    // motor recusa. `mostrar_gols` vem também no POST, para o time nascer já com os dois prêmios coerentes.
     const golsLigados = req.body?.mostrar_gols !== false;
     if (!combinacaoDePremiosCoerente({ mostrar_gols: req.body?.mostrar_gols, mostrar_artilheiro: req.body?.mostrar_artilheiro })) {
       throw new HttpError(400, MSG_ARTILHEIRO_PRECISA_DOS_GOLS);
     }
 
-    // GEO (14-set, mesma regra do PATCH /api/teams/:slug): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO
-    // (a morada exacta nunca entra). RODADA 29B (D), regra completa em utils/cidade.js: cidade DA LISTA do app →
-    // a coordenada vem da lista (sem Nominatim); fora dela → Nominatim; se nada achar, guarda só o texto (normalizado
-    // em `cidade_normalizada`, para o Explorar casar por texto) e segue — nunca bloqueia a criação do time.
+    // GEO: guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra), mesma regra do
+    // PATCH /api/teams/:slug. Regra completa em utils/cidade.js: cidade DA LISTA do app → a coordenada vem
+    // da lista (sem Nominatim); fora dela → Nominatim; se nada achar, guarda só o texto (normalizado em
+    // `cidade_normalizada`, para o Explorar casar por texto) e segue — nunca bloqueia a criação do time.
     const cid = await resolverCidade(req.body || {});
     const cidadeFinal = cid.cidade;
-    // RODADA 29H (item 12): o bairro opcional. Achou perto da cidade → o ponto do time é o do bairro; senão fica o da cidade.
+    // O bairro opcional. Achou perto da cidade → o ponto do time é o do bairro; senão fica o da cidade.
     const bar = await resolverBairro(req.body || {}, cid);
     const geoLat = bar.geo?.lat ?? cid.geo?.lat ?? null;
     const geoLng = bar.geo?.lng ?? cid.geo?.lng ?? null;
@@ -183,9 +183,10 @@ router.post(
     }
     if (!team) throw new HttpError(500, lastError?.message || 'Não foi possível criar o time.');
 
-    // Adiciona o criador como admin (rollback se falhar). RODADA 29B (E): "Só organizo o time" (`joga: false` no corpo)
-    // grava `team_members.joga = false` — ele administra tudo, mas fica fora da presença, do sorteio, do ranking e do
-    // pacote. Sem a migração 067 a coluna não existe: o time nasce com o criador jogando (a resposta diz `joga: true`).
+    // Adiciona o criador como admin (rollback se falhar). "Só organizo o time" (`joga: false` no corpo)
+    // grava `team_members.joga = false` — ele administra tudo, mas fica fora da presença, do sorteio,
+    // do ranking e do pacote. Sem a migração 067 a coluna não existe: o time nasce com o criador jogando
+    // (a resposta diz `joga: true`).
     const soOrganizo = req.body?.joga === false;
     let { error: memberError } = await supabase
       .from('team_members')
@@ -201,12 +202,14 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    // 29I (achado 83): o fuso nasce da cidade geocodificada (da lista do app ou do Nominatim); sem cidade ou sem ponto, o padrão.
+    // O fuso nasce da cidade geocodificada (da lista do app ou do Nominatim); sem cidade ou sem ponto,
+    // o padrão.
     team.fuso = await gravarFusoDoTimeNovo(team, cid.geo);
 
-    // `geo` (29B, D): o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
-    // `bairro` (29H): o mesmo para o bairro — { encontrado, nomeOficial } ou { encontrado: false }; `salvo: false` quando a
-    // migração 073 ainda não existe. `premios_salvos: false`: o pedido de desligar artilheiro/destaque não pôde ser gravado.
+    // `geo`: o que a tela diz da cidade — { encontrada: true, nomeOficial } ou { encontrada: false }.
+    // `bairro`: o mesmo para o bairro — { encontrado, nomeOficial } ou { encontrado: false }; `salvo: false`
+    // quando a migração 073 ainda não existe. `premios_salvos: false`: o pedido de desligar
+    // artilheiro/destaque não pôde ser gravado.
     const bairroResposta = bar.info ? (extrasGravados ? bar.info : { ...bar.info, salvo: false }) : null;
     const premiosPedidos = req.body?.mostrar_artilheiro === false || req.body?.mostrar_destaque === false;
     res.status(201).json({
@@ -244,8 +247,9 @@ router.get(
     // geo_lat/geo_lng (arredondados) vão no payload → o cliente calcula a distância
     // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
     const COLUNAS = 'id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
-    // 29I, bloco 3: o escudo (segunda cor e padrão, migração 077) vai junto — sem a migração a leitura repete sem ele (lerComFuso).
-    // 29T-C: o bairro (coluna da migração 073) vai junto; sem ela a leitura repete sem o bairro e os times valem sem bairro.
+    // O escudo (segunda cor e padrão, migração 077) vai junto — sem a migração a leitura repete sem ele
+    // (lerComFuso). O bairro (coluna da migração 073) vai junto; sem ela a leitura repete sem o bairro e
+    // os times valem sem bairro.
     const montar = (comNormalizada, comBairro, novas) => {
       const escudo = (novas || '').split(', ').filter((c) => c.startsWith('escudo_')).join(', ');
       let query = supabase
@@ -253,7 +257,7 @@ router.get(
         .select([COLUNAS, comNormalizada ? 'cidade_normalizada' : '', comBairro ? 'bairro' : '', escudo].filter(Boolean).join(', '))
         .in('modo_visibilidade', ['publico_aprovacao', 'publico_aberto']);
       // q pesquisa em nome OU localização (a barra única diz "nome ou cidade").
-      // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): q ia direto para dentro da
+      // SEGURANCA-REVISAO-10SET.md secção 3: q ia direto para dentro da
       // string de filtro do .or() — vírgula separa condições, parênteses
       // agrupam, ponto separa coluna.operador.valor no PostgREST; um q com esses
       // caracteres conseguia adicionar/alterar condições do filtro. O PostgREST
@@ -261,8 +265,8 @@ router.get(
       // duplas — é o que valorFiltroOr faz quando encontra algum deles.
       if (q) {
         const padrao = valorFiltroOr(`%${q}%`);
-        // RODADA 29B (D): time SEM coordenada (cidade que o Nominatim não achou) casa pelo texto da cidade,
-        // normalizado — igual à busca normalizada. Com coordenada, quem manda é a distância (app).
+        // Time SEM coordenada (cidade que o Nominatim não achou) casa pelo texto da cidade, normalizado — igual à
+        // busca normalizada. Com coordenada, quem manda é a distância (app).
         const porCidade = comNormalizada ? condicaoPorCidade(q, valorFiltroOr) : '';
         query = query.or(`nome.ilike.${padrao},localizacao.ilike.${padrao}${porCidade}`);
       }
@@ -314,14 +318,14 @@ router.get(
         id: t.id,
         nome: t.nome,
         slug: t.slug,
-        ...escudoDoTime(t), // cor + escudo_cor2 + escudo_padrao (29I, bloco 3)
+        ...escudoDoTime(t), // cor + escudo_cor2 + escudo_padrao
         logo_url: t.logo_url || null,
         cor_fundo: t.cor_fundo || null,
         modo_visibilidade: t.modo_visibilidade,
         localizacao: t.localizacao,
         cidade: t.cidade || null,
-        cidade_normalizada: t.cidade_normalizada || null, // 29B (D): o app casa por texto quando não há ponto
-        bairro: t.bairro || null, // 29T-C: o card do Radar mostra "Bairro · Cidade"
+        cidade_normalizada: t.cidade_normalizada || null, // o app casa por texto quando não há ponto
+        bairro: t.bairro || null, // o card do Radar mostra "Bairro · Cidade"
         descricao: t.descricao,
         geo_lat: t.geo_lat ?? null, // arredondado ~1km; só entra na busca por distância se não-nulo
         geo_lng: t.geo_lng ?? null,
@@ -345,7 +349,7 @@ router.get(
   '/api/teams/publicas',
   requireAuth,
   asyncHandler(async (req, res) => {
-    // 29I, bloco 3: a cor e o escudo vão junto (o card desenha o escudo do time sem logo); sem a 077, só a cor.
+    // A cor e o escudo vão junto (o card desenha o escudo do time sem logo); sem a 077, só a cor.
     const { data: teamsRaw, error } = await lerComFuso((novas) => {
       const escudo = (novas || '').split(', ').filter((c) => c.startsWith('escudo_')).join(', ');
       return supabase
@@ -409,13 +413,13 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const COLUNAS = 'id, nome, slug, cor, criado_por, created_at, publica, mostrar_gols, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
-    // RODADA 29H: bairro e os dois prêmios do time (migração 073). Sem a migração a leitura com elas volta vazia (coluna
+    // Bairro e os dois prêmios do time (migração 073). Sem a migração a leitura com elas volta vazia (coluna
     // inexistente) e a página do time NÃO pode cair: repete só com as colunas de sempre.
     const team = (await getTeamBySlug(req.params.slug, `${COLUNAS}, bairro, mostrar_artilheiro, mostrar_destaque`))
       || (await getTeamBySlug(req.params.slug, COLUNAS));
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
-    // Achado 3/23: role e membros só dependem do team.id, não um do outro — em
+    // Role e membros só dependem do team.id, não um do outro — em
     // paralelo em vez de dois round-trips seguidos ao Supabase.
     const [role, { data: rawMembers, error }, organizam] = await Promise.all([
       getRole(team.id, req.user.id),
@@ -424,7 +428,7 @@ router.get(
         .select('role, created_at, categoria, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
         .eq('team_id', team.id)
         .order('created_at', { ascending: true }),
-      idsQueSoOrganizam(team.id), // Rodada 29B (E): em consulta à parte (a coluna `joga` é da migração 067)
+      idsQueSoOrganizam(team.id), // em consulta à parte (a coluna `joga` é da migração 067)
     ]);
     if (!role) throw new HttpError(403, 'Você não é membro deste time.');
     if (error) throw new HttpError(500, error.message);
@@ -438,13 +442,11 @@ router.get(
       avatar_url: m.users?.avatar_url,
       avatar_generico: m.users?.avatar_generico || null,
       role: m.role,
-      joga: !organizam.has(m.users?.id), // 29B (E): false = só organiza o time
-      // Rodada 10B: a FONTE é só categoria — a coluna `posicao` (Rodada 9) e a
-      // `categoria` (que já mandava no ranking) eram a mesma decisão guardada
-      // duas vezes; o dono escolheu ficar só com esta. `goleiro` é o campo novo
-      // (booleano); `posicao` continua saindo por compatibilidade com o app já
-      // instalado (Rodada 9) — os dois nunca podem discordar porque vêm da
-      // MESMA leitura.
+      joga: !organizam.has(m.users?.id), // false = só organiza o time
+      // A FONTE é só categoria — a coluna `posicao` e a `categoria` (que já mandava no ranking) eram a mesma
+      // decisão guardada duas vezes; o dono escolheu ficar só com esta. `goleiro` é o campo (booleano);
+      // `posicao` continua saindo por compatibilidade com o app já instalado — os dois nunca podem discordar
+      // porque vêm da MESMA leitura.
       goleiro: m.categoria === 'GR',
       posicao: m.categoria === 'GR' ? 'GL' : null,
       created_at: m.created_at,
@@ -453,10 +455,10 @@ router.get(
     res.json({
       team: {
         ...team,
-        fuso: fusoDoTime(team), // 29I (achado 83): sem a migração 076 a coluna não vem — vale o padrão
-        ...escudoDoTime(team), // 29I, bloco 3: sem a 077 o escudo vale sólido, uma cor
+        fuso: fusoDoTime(team), // sem a migração 076 a coluna não vem — vale o padrão
+        ...escudoDoTime(team), // sem a 077 o escudo vale sólido, uma cor
         jogadores_por_time: jogadoresPorTimeDoTime(team), // item 68: sem a 079 vale 5
-        // 29H: sem a migração 073 as colunas não vêm — valem os padrões (tudo ligado, sem bairro).
+        // Sem a migração 073 as colunas não vêm — valem os padrões (tudo ligado, sem bairro).
         bairro: team.bairro || null,
         mostrar_artilheiro: team.mostrar_artilheiro !== false,
         mostrar_destaque: team.mostrar_destaque !== false,
@@ -487,7 +489,7 @@ router.patch(
       if (v.length > 60) throw new HttpError(400, 'Nome: máximo 60 caracteres.');
       patch.nome = v;
     }
-    // 29I, bloco 3 (achado 102): UM controle, "Escudo do time" — cor principal (teams.cor) + segunda cor + padrão, da paleta fixa.
+    // UM controle, "Escudo do time" — cor principal (teams.cor) + segunda cor + padrão, da paleta fixa.
     const escudo = lerEscudo(b);
     if (escudo.erro) throw new HttpError(400, escudo.erro);
     Object.assign(patch, escudo.patch);
@@ -499,11 +501,12 @@ router.patch(
     }
     if ('publica' in b) patch.publica = !!b.publica;
     if ('mostrar_gols' in b) patch.mostrar_gols = !!b.mostrar_gols;
-    // RODADA 29H (item 44): "Artilheiro do dia" e "Destaque do dia" — o editor de resultado só oferece a seção quando ligado.
+    // "Artilheiro do dia" e "Destaque do dia" — o editor de resultado só oferece a seção quando ligado.
     if ('mostrar_artilheiro' in b) patch.mostrar_artilheiro = !!b.mostrar_artilheiro;
     if ('mostrar_destaque' in b) patch.mostrar_destaque = !!b.mostrar_destaque;
-    // RODADA 29I (achado 78): o artilheiro depende dos gols. A combinação que o time vai TER depois desta gravação (o do pedido, ou o que
-    // já estava) não pode ser "gols desligados e artilheiro ligado": o motor recusa. Religar os gols não religa o artilheiro sozinho.
+    // O artilheiro depende dos gols. A combinação que o time vai TER depois desta gravação (o do pedido, ou
+    // o que já estava) não pode ser "gols desligados e artilheiro ligado": o motor recusa. Religar os gols
+    // não religa o artilheiro sozinho.
     if ('mostrar_gols' in patch || 'mostrar_artilheiro' in patch) {
       let { data: atual, error: erroAtual } = await supabase.from('teams').select('mostrar_gols, mostrar_artilheiro').eq('id', team.id).maybeSingle();
       // Sem a migração 073 a coluna do artilheiro não existe: só os gols contam (o artilheiro nem pode ser gravado) — vale como desligado,
@@ -520,11 +523,11 @@ router.patch(
     }
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
-    // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra). Limpar a
-    // cidade tira a equipa da busca por distância. RODADA 29B (D), regra em utils/cidade.js: cidade DA LISTA → o ponto
-    // vem da lista; fora dela → Nominatim; nada achou → guarda o texto e LIMPA o ponto (o de antes era de outra cidade;
-    // sem ponto o Explorar casa por texto). Cidade igual à de antes (o painel reenvia o campo a cada "Salvar") não
-    // geocodifica de novo nem mexe no ponto.
+    // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra).
+    // Limpar a cidade tira a equipa da busca por distância. Regra em utils/cidade.js: cidade DA LISTA →
+    // o ponto vem da lista; fora dela → Nominatim; nada achou → guarda o texto e LIMPA o ponto (o de antes
+    // era de outra cidade; sem ponto o Explorar casa por texto). Cidade igual à de antes (o painel reenvia
+    // o campo a cada "Salvar") não geocodifica de novo nem mexe no ponto.
     let geoInfo = null;
     let cidResolvida = null; // o resultado da cidade quando ela foi (re)resolvida agora — o bairro, abaixo, parte dele
     if ('cidade' in b) {
@@ -543,15 +546,15 @@ router.patch(
           patch.geo_lat = cid.geo?.lat ?? null;
           patch.geo_lng = cid.geo?.lng ?? null;
           geoInfo = cid.info;
-          // 29I (achado 83): a cidade mudou, o fuso acompanha — derivado do ponto da cidade; sem ponto, fica o que o time tinha.
+          // A cidade mudou, o fuso acompanha — derivado do ponto da cidade; sem ponto, fica o que o time tinha.
           const fusoDaCidade = fusoDaCoordenada(cid.geo?.lat, cid.geo?.lng);
           if (fusoDaCidade) patch.fuso = fusoDaCidade;
         }
       }
     }
-    // RODADA 29H (item 12): o bairro. O ponto do time passa a ser o do bairro quando o motor o acha perto da cidade; sem
-    // bairro (ou sem cidade onde pôr um) volta a ser o da cidade. O painel reenvia cidade e bairro a cada "Salvar": bairro
-    // igual ao de antes, com a cidade igual, não geocodifica de novo nem mexe no ponto.
+    // O bairro. O ponto do time é o do bairro quando o motor o acha perto da cidade; sem
+    // bairro (ou sem cidade onde pôr um) volta a ser o da cidade. O painel reenvia cidade e bairro a cada
+    // "Salvar": bairro igual ao de antes, com a cidade igual, não geocodifica de novo nem mexe no ponto.
     let bairroInfo = null;
     if ('bairro' in b) {
       const novoBairro = lerBairro(b);
@@ -629,7 +632,7 @@ router.patch(
 );
 
 /**
- * PUT /api/teams/:slug/brilhante-kit { kitId } — Pagamentos P2: o dono escolhe o uniforme das
+ * PUT /api/teams/:slug/brilhante-kit { kitId } — o dono escolhe o uniforme das
  * figurinhas do time (o pacote comprado na loja chega sem uniforme). Só admin, só com o pacote
  * ativo; trocar só antes da primeira geração. Regras em utils/uniformeDoPacote.js.
  */
@@ -657,9 +660,8 @@ router.post(
   '/api/teams/:slug/logo',
   requireAuth,
   logoMiddleware,
-  // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): antes só checava o
-  // mimetype declarado pelo multer; agora confirma que decodifica como
-  // imagem de verdade (mesmo princípio do avatar, utils/olheiroEntrada.js).
+  // SEGURANCA-REVISAO-10SET.md secção 3: além do mimetype declarado pelo multer,
+  // confirma que decodifica como imagem de verdade (mesmo princípio do avatar, utils/olheiroEntrada.js).
   verificarImagemReal,
   // Fail-CLOSED aqui (diferente do avatar): o logo é visível a qualquer
   // visitante do time sem sessão, então um erro técnico na análise bloqueia
@@ -690,7 +692,7 @@ router.post(
 );
 
 /**
- * DELETE /api/teams/:slug/logo — remove o logo da equipa (só admin; achado 118, Rodada 29J).
+ * DELETE /api/teams/:slug/logo — remove o logo da equipa (só admin).
  * Sem logo, EscudoEquipa volta a desenhar o escudo (editor de escudo, Ajustes). O ficheiro
  * sai do bucket nas 3 extensões possíveis (o upload grava em path fixo "logos/{teamId}.{ext}";
  * sem saber qual foi a última, tenta as 3 — a que não existir simplesmente não apaga nada).
@@ -730,9 +732,8 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os membros em detalhe.');
 
-    // Achado 3/23: estas 4 leituras só dependem de team.id, nenhuma do resultado
-    // das outras — corriam em série. Em paralelo; só a busca de presenças (que
-    // precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
+    // Estas 4 leituras só dependem de team.id, nenhuma do resultado das outras — em paralelo; só a busca
+    // de presenças (que precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
     const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam, { data: todosOsJogos }] = await Promise.all([
       supabase
         .from('team_members')
@@ -746,8 +747,8 @@ router.get(
       supabase.from('games').select('id, data, created_at').eq('team_id', team.id).order('created_at', { ascending: false }).limit(5),
       // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
       agregadosDaEquipa(team.id),
-      idsQueSoOrganizam(team.id), // Rodada 29B (E)
-      // 29I (achado 104): todos os jogos, para contar as PRESENÇAS de cada um (a aba Estatísticas do admin).
+      idsQueSoOrganizam(team.id),
+      // Todos os jogos, para contar as PRESENÇAS de cada um (a aba Estatísticas do admin).
       supabase.from('games').select('id, data, status, cancelado').eq('team_id', team.id),
     ]);
     if (error) throw new HttpError(500, error.message);
@@ -802,14 +803,13 @@ router.get(
         role: m.role,
         pode_postar: !!m.pode_postar,
         categoria: m.categoria || 'linha',
-        // Rodada 10B: uma só flag — categoria manda. `goleiro` é o campo novo;
-        // `posicao` sai calculado dela, só por compatibilidade com o app já
-        // instalado (nunca mais é lido da coluna `posicao`).
+        // Uma só flag — categoria manda. `goleiro` é o campo; `posicao` sai calculado dela, só por
+        // compatibilidade com o app já instalado (nunca é lido da coluna `posicao`).
         goleiro: m.categoria === 'GR',
         posicao: m.categoria === 'GR' ? 'GL' : null,
         ausente_proximo: !!m.ausente_proximo,
         ativo: m.ativo !== false,
-        joga: !organizam.has(uid), // 29B (E): false = só organiza o time
+        joga: !organizam.has(uid), // false = só organiza o time
         visivel_ranking: m.visivel_ranking !== false,
         nota_interna: m.nota_interna || null,
         nome: m.users?.nome || null,
@@ -825,10 +825,9 @@ router.get(
         presencas_recentes: presencas,
         taxa_presenca: presencas.length ? `${presentes}/${presencas.length}` : null,
         nota_media: notaMedia,
-        // 22-set (SPEC-FIGURINHA-3): `plan` deixou de significar algo pago —
-        // o selo do admin agora é ter a Brilhante: o avatar ser uma figurinha NOSSA
-        // (utils/figurinhaRegra.js, a regra única; a desigualdade avatar_url ≠ foto_url
-        // que valia até o Hotfix 26 contava a foto do Google como figurinha).
+        // SPEC-FIGURINHA-3: `plan` não significa algo pago — o selo do admin é ter a Brilhante:
+        // o avatar ser uma figurinha NOSSA (utils/figurinhaRegra.js, a regra única; a desigualdade
+        // avatar_url ≠ foto_url não serve: contava a foto do Google como figurinha).
         tem_brilhante: avatarEhFigurinhaNossa(m.users?.avatar_url),
       };
     });
@@ -844,14 +843,13 @@ router.get(
  * PATCH /api/equipas/:slug/membros/posicao — marca (ou desmarca) o jogador como
  * goleiro do time. Qualquer membro define a sua; admin pode definir a de outro
  * (body.user_id). Body: { goleiro: true|false } (ou, por compatibilidade com o
- * app já instalado antes da Rodada 10B: { posicao: 'GL'|null }).
+ * app já instalado: { posicao: 'GL'|null }).
  *
- * Rodada 9 (decisão do dono, 16-set): só existe goleiro ou jogador de linha.
- * Rodada 10B (16-set): esta rota GRAVA `categoria` (não mais `posicao`) — era a
- * mesma decisão em duas colunas (esta e a que já mandava no ranking); o dono
- * escolheu ficar só com `categoria`. A rota/campo antigo do admin
- * (PATCH /api/teams/:slug/membros/:userId com `categoria`) continua igual e
- * grava a mesma coluna — as duas nunca mais podem discordar.
+ * Decisão do dono: só existe goleiro ou jogador de linha.
+ * Esta rota GRAVA `categoria` (não `posicao`) — era a mesma decisão em duas colunas (esta e a que já
+ * mandava no ranking); o dono escolheu ficar só com `categoria`. A rota/campo do admin
+ * (PATCH /api/teams/:slug/membros/:userId com `categoria`) grava a mesma coluna — as duas nunca
+ * podem discordar.
  */
 router.patch(
   '/api/equipas/:slug/membros/posicao',
@@ -883,9 +881,10 @@ router.patch(
 );
 
 /**
- * PATCH /api/equipas/:slug/membros/joga — "Eu jogo" / "Só organizo o time" (Rodada 29B, E; migração 067). A pessoa muda o
- * SEU papel (nunca o de outra). Só quem administra o time pode ficar só organizando (`joga: false`); voltar a jogar é de
- * qualquer um. Quem só organiza administra tudo, mas não entra na presença, no sorteio, no ranking nem no pacote.
+ * PATCH /api/equipas/:slug/membros/joga — "Eu jogo" / "Só organizo o time" (migração 067). A pessoa muda o
+ * SEU papel (nunca o de outra). Só quem administra o time pode ficar só organizando (`joga: false`);
+ * voltar a jogar é de qualquer um. Quem só organiza administra tudo, mas não entra na presença, no
+ * sorteio, no ranking nem no pacote.
  * Body: { joga: true|false }.
  */
 router.patch(
@@ -1064,7 +1063,10 @@ router.patch(
   })
 );
 
-/** POST /api/teams/:slug/convite — gera um token de convite (qualquer membro) e, junto, o código do link curto /c/<código> (29H). */
+/**
+ * POST /api/teams/:slug/convite — gera um token de convite (qualquer membro) e, junto, o código do link
+ * curto /c/<código>.
+ */
 router.post(
   '/api/teams/:slug/convite',
   requireAuth,
@@ -1082,7 +1084,7 @@ router.post(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    // Rodada 29H (item 7): o link curto. `codigo` é null quando a migração 072 ainda não foi aplicada — o convite vale pelo
+    // O link curto. `codigo` é null quando a migração 072 ainda não foi aplicada — o convite vale pelo
     // link longo, como sempre.
     const codigo = await criarCodigo(supabase, convite.id);
 
@@ -1091,8 +1093,8 @@ router.post(
 );
 
 /**
- * GET /api/convite/:token — valida um convite (público; auth opcional). O parâmetro é o token longo (uuid) OU o código
- * curto de /c/<código> (29H). Devolve sempre 200 com { valido, motivo, ... }.
+ * GET /api/convite/:token — valida um convite (público; auth opcional). O parâmetro é o token longo
+ * (uuid) OU o código curto de /c/<código>. Devolve sempre 200 com { valido, motivo, ... }.
  */
 router.get(
   '/api/convite/:token',
@@ -1104,15 +1106,15 @@ router.get(
       return res.json({ valido: false, motivo: 'nao_encontrado', team: null });
     }
 
-    // RODADA 29A (item 11, "o link demora a abrir"): o time, quem convidou, os usos e o papel de quem abre só
-    // dependem do CONVITE, que já foi lido — iam em fila, uma ida a São Paulo atrás da outra (de Lisboa, ~300 ms
-    // cada). Agora saem juntos: 2 idas no total (o convite, depois estas ao mesmo tempo). O select do
-    // time leva também logo_url e cor_fundo, para a página do convite mostrar o escudo de verdade.
-    // RODADA 29B (A): a página nova mostra 3 fatos para dar vontade de entrar — quantos já estão no time, quando é o
-    // próximo jogo e de que cidade. Entram na MESMA leva (a cidade vem no select do time; a contagem e o próximo
-    // jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
+    // O time, quem convidou, os usos e o papel de quem abre só dependem do CONVITE, que já foi lido — saem
+    // juntos: 2 idas no total (o convite, depois estas ao mesmo tempo; de Lisboa, cada ida a São Paulo custa
+    // ~300 ms). O select do time leva também logo_url e cor_fundo, para a página do convite mostrar o escudo
+    // de verdade.
+    // A página mostra 3 fatos para dar vontade de entrar — quantos já estão no time, quando é o
+    // próximo jogo e de que cidade. Entram na MESMA leva (a cidade vem no select do time; a contagem e o
+    // próximo jogo são duas consultas a mais, em paralelo): continuam 2 idas no total.
     const [{ data: team }, { data: inviter }, { data: usosRows }, role, { count: membrosTotal }, { data: proximo }, organizam] = await Promise.all([
-      // 29I (achado 83): o fuso do time vai junto — o "próximo jogo" da página do convite é lido no relógio do campo.
+      // O fuso do time vai junto — o "próximo jogo" da página do convite é lido no relógio do campo.
       lerComFuso((novas) => supabase
         .from('teams')
         .select(novas ? `id, nome, slug, cor, logo_url, cor_fundo, cidade, ${novas}` : 'id, nome, slug, cor, logo_url, cor_fundo, cidade')
@@ -1123,7 +1125,7 @@ router.get(
         .select('nome, nome_jogador')
         .eq('id', convite.criado_por)
         .maybeSingle(),
-      // RODADA 20 — 'usado' deixou de existir: o link é reutilizável, só 'expirado' (ou 'nao_encontrado',
+      // O link é reutilizável: não há motivo 'usado', só 'expirado' (ou 'nao_encontrado',
       // acima) barra. `usos` é best-effort (migração 058); sem ela, 0 — nunca derruba a validação do convite.
       supabase.from('convite_usos').select('user_id').eq('convite_id', convite.id),
       req.user ? getRole(convite.team_id, req.user.id) : null,
@@ -1139,7 +1141,7 @@ router.get(
         .order('data', { ascending: true })
         .limit(1)
         .maybeSingle(),
-      idsQueSoOrganizam(convite.team_id), // 29B (E): o fato é "N jogadores" — quem só organiza não conta
+      idsQueSoOrganizam(convite.team_id), // o fato é "N jogadores" — quem só organiza não conta
     ]);
 
     const motivo = new Date(convite.expires_at).getTime() < Date.now() ? 'expirado' : null;
@@ -1154,18 +1156,22 @@ router.get(
       convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
       expires_at: convite.expires_at,
       usos,
-      // Os fatos da página (29B, A): `membros` é a contagem, `proximoJogo` o instante do próximo jogo agendado
-      // (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin declarou.
+      // Os fatos da página: `membros` é a contagem, `proximoJogo` o instante do próximo jogo agendado
+      // (ISO; o app o escreve como data curta no fuso de quem olha) ou null, `cidade` o texto que o admin
+      // declarou.
       membros: Math.max(0, (membrosTotal ?? 0) - organizam.size),
       proximoJogo: proximo?.data || null,
-      fuso: fusoDoTime(team), // 29I (achado 83): o instante do próximo jogo se lê neste fuso (o do campo)
+      fuso: fusoDoTime(team), // o instante do próximo jogo se lê neste fuso (o do campo)
       cidade: team?.cidade || null,
       team: team ? { nome: team.nome, slug: team.slug, ...escudoDoTime(team), logo_url: team.logo_url || null, cor_fundo: team.cor_fundo || null, fuso: fusoDoTime(team) } : null,
     });
   })
 );
 
-/** POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o código curto (29H). */
+/**
+ * POST /api/convite/:token/aceitar — entra na equipa e consome o convite. `:token` é o uuid ou o
+ * código curto.
+ */
 router.post(
   '/api/convite/:token/aceitar',
   requireAuth,
@@ -1182,7 +1188,8 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    // `id` (29H): o Onboarding marca as boas-vindas do time como vistas (`futty_onboarding_<id>`) logo que a pessoa entra.
+    // `id`: o Onboarding marca as boas-vindas do time como vistas (`futty_onboarding_<id>`) logo que a
+    // pessoa entra.
     const teamResumo = { id: team.id, slug: team.slug, nome: team.nome, cor: team.cor };
 
     // Já é membro? -> idempotente, não consome o convite
@@ -1191,7 +1198,7 @@ router.post(
       return res.json({ jaMembro: true, team: teamResumo });
     }
 
-    // Valida o estado do convite (apenas para novos membros). RODADA 20 — o
+    // Valida o estado do convite (apenas para novos membros). O
     // link é reutilizável: só a validade importa, não se já foi usado antes.
     if (new Date(convite.expires_at).getTime() < Date.now()) {
       throw new HttpError(400, 'Este convite expirou.');
@@ -1209,10 +1216,9 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    // RODADA 20 — regista o uso em vez de marcar o convite como consumido
-    // (migração 058): o link continua válido para a próxima pessoa. Fail-safe
-    // de propósito: tabela ausente ou 23505 (mesma pessoa aceitando de novo,
-    // corrida) nunca podem derrubar uma entrada que já valeu (o INSERT em
+    // Regista o uso (migração 058) em vez de marcar o convite como consumido: o link continua
+    // válido para a próxima pessoa. Fail-safe de propósito: tabela ausente ou 23505 (mesma pessoa
+    // aceitando de novo, corrida) nunca podem derrubar uma entrada que já valeu (o INSERT em
     // team_members acima já commitou).
     const { error: usoError } = await supabase.from('convite_usos').insert({ convite_id: convite.id, user_id: req.user.id });
     if (usoError && usoError.code !== '23505') {
@@ -1224,7 +1230,7 @@ router.post(
 );
 
 /**
- * 29I, bloco 3 (dono): chegou pedido de entrada → push para os admins do time ("Fulano quer entrar no <time>"), que leva à aba
+ * Chegou pedido de entrada → push para os admins do time ("Fulano quer entrar no <time>"), que leva à aba
  * Elenco, onde se aceita. Tipo "pedidos" em Perfil → Notificações: quem desligou não recebe. Nunca lança.
  */
 function avisarAdminsDoPedido(team, userId) {
@@ -1426,10 +1432,10 @@ router.patch(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    // Rodada 29D: quem foi aceito recebe o push e abre o time já com as boas-vindas (`?entrou=1` → Equipa.jsx). Só na 1ª
-    // aprovação (um 2º toque do admin não avisa de novo), com o aceite já gravado e ANTES de responder (no Cloud Run a CPU
-    // fica estrangulada depois da resposta). O push nunca derruba o aceite — falha vira log — e não segura o admin: espera
-    // no máximo 4 s.
+    // Quem foi aceito recebe o push e abre o time já com as boas-vindas (`?entrou=1` → Equipa.jsx). Só na 1ª
+    // aprovação (um 2º toque do admin não avisa de novo), com o aceite já gravado e ANTES de responder (no
+    // Cloud Run a CPU fica estrangulada depois da resposta). O push nunca derruba o aceite — falha vira
+    // log — e não segura o admin: espera no máximo 4 s.
     if (status === 'approved' && pedido.status !== 'approved') {
       let teto;
       try {
@@ -1462,7 +1468,7 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver os convites.');
 
-    // RODADA 20 — sem o .is('usado_por', null): o link reutilizável continua
+    // Sem o .is('usado_por', null): o link reutilizável continua
     // "ativo" mesmo depois de usado; só a validade (expires_at) tira da lista.
     const nowIso = new Date().toISOString();
     const { data: convites, error } = await supabase
@@ -1490,7 +1496,7 @@ router.get(
       for (const u of usos || []) usosMap[u.convite_id] = (usosMap[u.convite_id] || 0) + 1;
     }
 
-    // O código do link curto (29H, migração 072): best-effort — sem a tabela, o admin segue com o link longo.
+    // O código do link curto (migração 072): best-effort — sem a tabela, o admin segue com o link longo.
     const codigosMap = await codigosDosConvites(supabase, conviteIds);
 
     const lista = (convites || []).map((c) => ({
@@ -1606,7 +1612,7 @@ router.get(
       proximo_jogo = {
         id: g.id,
         date: g.data,
-        time: horaNoFuso(g.data, fusoDoTime(team)), // 29I (achado 83): HH:MM no relógio do campo (era o do servidor)
+        time: horaNoFuso(g.data, fusoDoTime(team)), // HH:MM no relógio do campo (não o do servidor)
         fuso: fusoDoTime(team),
         location: g.local,
         confirmados: confByGame[g.id] || 0,

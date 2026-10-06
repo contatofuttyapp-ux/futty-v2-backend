@@ -1,8 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// O QUE TODA BANCADA DE FIGURINHA USA (17-set).
+// O QUE TODA BANCADA DE FIGURINHA USA.
 //
-// Saiu de dentro do testar-prompt.js quando a bancada de MODELOS precisou das
-// mesmas peças: medir a coroa, recortar o fundo, vestir a moldura e montar a
+// As peças em comum: medir a coroa, recortar o fundo, vestir a moldura e montar a
 // folha de contacto. Duas bancadas a medir a mesma coisa com código diferente
 // mediriam coisas diferentes — daí o módulo.
 //

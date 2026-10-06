@@ -1,4 +1,4 @@
-// Futty v2.0 — Compras na loja (Pagamentos P1, 26-set). Ver docs/COMPRAS.md.
+// Futty v2.0 — Compras na loja. Ver docs/COMPRAS.md.
 //
 // O app compra pela App Store / Play Store através do SDK do RevenueCat; o RevenueCat
 // avisa este motor pelo webhook, e é o webhook que credita (utils/compras.js). O app nunca

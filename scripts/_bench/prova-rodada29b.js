@@ -1,19 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONTAS DESCARTÁVEIS DA RODADA 29B (30-set) — para as cenas `rodada29b-*` do scripts/ver-iphone.mjs.
+// CONTAS DESCARTÁVEIS PARA AS CENAS `rodada29b-*` do scripts/ver-iphone.mjs.
 //
-// Parte B (grade de uniformes): a MESMA grade para os três direitos, e o estado de cada tile sai do direito.
+// Grade de uniformes: a MESMA grade para os três direitos, e o estado de cada tile sai do direito.
 //   gratis     card com a FOTO, sem direito de gerar               → os 5 uniformes com cadeado
 //   pacote     card com a FOTO, dono de time com pacote (Dark Purple) → o do time aberto, os outros com cadeado
 //   pacoteFig  figurinha do time vestida (Dark Purple), 1 geração gasta → vestido ✓, "Refazer" pequeno embaixo
 //   minha      card com a FOTO, 3 créditos (Minha Figurinha)       → os 5 abertos, com o selo "pintar · 1 geração · ~45 s"
 //   minhaFig   figurinha Dark Gold vestida + White Gold pintado, 3 créditos → vestido, pintado, 3 abertos, "Refazer"
-// Parte C (boas-vindas do time): dois MEMBROS (não-admin) do time "gratis":
+// Boas-vindas do time: dois MEMBROS (não-admin) do time "gratis":
 //   novato     sem foto nenhuma (avatar_url nulo)  → a 1ª visita à página do time abre as boas-vindas
 //   membroFoto com foto                            → só abre logo depois de aceitar um convite (state.primeiraEntrada)
-// Parte F ("Avise-me"): `super` — super-admin de prova para a aba do Gabinete.
-// Parte E ("só organizo"): o time "gratis" tem um jogo futuro (id em sessao-rodada29b.json → jogo) para as telas de presença.
+// "Avise-me": `super` — super-admin de prova para a aba do Gabinete.
+// "Só organizo": o time "gratis" tem um jogo futuro (id em sessao-rodada29b.json → jogo) para as telas de presença.
 // Nada gera figurinha (custo de IA zero): as "figurinhas" são PNGs desenhados aqui, com `-ai-` no nome como as de verdade.
-// Tudo @futtymock; os times são só desta rodada. Só servidor LOCAL (CLAUDE.md, 25-set).
+// Tudo @futtymock; os times são só desta cena. Só servidor LOCAL (CLAUDE.md).
 //
 //   node scripts/_bench/prova-rodada29b.js            cria/refaz tudo e grava as sessões
 //   node scripts/_bench/prova-rodada29b.js --apagar   apaga times e contas

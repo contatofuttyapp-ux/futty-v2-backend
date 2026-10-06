@@ -1,4 +1,4 @@
-// Futty v2.0 — Auto-orientar a foto pelo EXIF, SÓ quando há o que corrigir (Rodada 27, 25-set).
+// Futty v2.0 — Auto-orientar a foto pelo EXIF, SÓ quando há o que corrigir.
 //
 // O recorte e a original que o app manda saem de um canvas (utils/normalizarFoto.js e o CropModal,
 // no frontend): já em pé e sem EXIF. Recodificar isso a cada upload custava CPU (a original de

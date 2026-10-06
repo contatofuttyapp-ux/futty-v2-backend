@@ -1,13 +1,13 @@
 // Futty v2.0 — Backend (Express + Supabase)
 // Setup do servidor: middleware, ficheiros estáticos, rotas e tratamento de erros.
-// { quiet: true } (23-set): sem isto o dotenv imprime um "tip" promocional
+// { quiet: true }: sem isto o dotenv imprime um "tip" promocional
 // próprio a cada arranque (ex.: "auth for agents [vestauth.com]") — propaganda
 // do pacote, não do nosso código. Não muda o carregamento das variáveis.
 require('dotenv').config({ quiet: true });
 
-// SEGURANCA-REVISAO-10SET.md secção 3 (10-set): o token do proxy de imagem
-// (utils/mediaToken.js) caía para a SUPABASE_SERVICE_KEY como segredo de
-// assinatura quando MEDIA_TOKEN_SECRET faltava — reaproveitar um segredo que
+// SEGURANCA-REVISAO-10SET.md secção 3: em produção o token do proxy de imagem
+// (utils/mediaToken.js) não pode cair para a SUPABASE_SERVICE_KEY como segredo de
+// assinatura quando MEDIA_TOKEN_SECRET falta — seria reaproveitar um segredo que
 // já abre o banco inteiro para outra coisa. Falha alto e cedo em produção em
 // vez de arrancar silenciosamente inseguro.
 if (process.env.NODE_ENV === 'production' && !process.env.MEDIA_TOKEN_SECRET) {
@@ -18,7 +18,7 @@ if (process.env.NODE_ENV === 'production' && !process.env.MEDIA_TOKEN_SECRET) {
   );
 }
 
-// Pagamentos P1 (26-set): o webhook do RevenueCat (routes/compras.js) credita figurinhas
+// O webhook do RevenueCat (routes/compras.js) credita figurinhas
 // pagas. Sem o segredo, ninguém (nem o RevenueCat) passa na porta — em produção isso
 // é dinheiro cobrado e não creditado. Mesmo padrão do MEDIA_TOKEN_SECRET: falha cedo.
 if (process.env.NODE_ENV === 'production' && !process.env.RC_WEBHOOK_SECRET) {
@@ -98,10 +98,10 @@ const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   /\.app\.github\.dev$/, // Codespaces
-  // VELOCIDADE 4 — as origens do app nativo são NOSSAS e fixas (Capacitor: iOS
-  // serve em capacitor://localhost, Android em https://localhost). Estavam a
-  // depender de alguém lembrar-se de as pôr em CORS_ORIGINS; uma variável mal
-  // preenchida no Cloud Run tirava o app do ar inteiro. Ficam aqui, no código.
+  // As origens do app nativo são NOSSAS e fixas (Capacitor: iOS
+  // serve em capacitor://localhost, Android em https://localhost). Ficam aqui,
+  // no código, em vez de depender de alguém lembrar-se de as pôr em CORS_ORIGINS:
+  // uma variável mal preenchida no Cloud Run tirava o app do ar inteiro.
   'capacitor://localhost',
   'https://localhost',
   ...envOrigins,
@@ -120,19 +120,19 @@ const corsOptions = {
     const permitido = allowedOrigins.some((o) => (o instanceof RegExp ? o.test(origin) : o === origin));
     return callback(null, permitido);
   },
-  // Server-Timing (13-set, "Velocidade 3", middleware/tempo.js): por omissão
-  // o browser só lê headers "seguros" de um pedido cross-origin — sem isto o
-  // header ia na resposta mas o DevTools/fetch do frontend não o enxergava.
-  // X-Futty-Cache (15-set, "Velocidade 6A"): diz se a imagem veio do LRU do
+  // Server-Timing (middleware/tempo.js): por omissão
+  // o browser só lê headers "seguros" de um pedido cross-origin — sem isto
+  // o header ia na resposta mas o DevTools/fetch do frontend não o enxergava.
+  // X-Futty-Cache: diz se a imagem veio do LRU do
   // proxy (hit) ou do Storage (miss) — é como se mede, do lado de cá, se o
   // cache está a trabalhar.
   exposedHeaders: ['Server-Timing', 'X-Futty-Cache'],
-  // VELOCIDADE 4 (o app nativo "surreal de devagar" em Lisboa): sem maxAge o
+  // Sem maxAge o
   // browser/WebView repete o preflight a CADA pedido. De Lisboa para São Paulo
   // isso é ~250 ms de ida e volta desperdiçados antes de cada chamada — numa
   // tela com 3 pedidos, quase um segundo só a pedir licença. 86400 = 24 h, o
   // tecto que o Chromium aceita (o Safari corta em 600 s, e tudo bem: 10 min
-  // já cobre uma sessão inteira). O preflight passa a acontecer uma vez.
+  // já cobre uma sessão inteira). Assim o preflight acontece uma vez.
   maxAge: 86400,
   // 204 em vez do 200 default: resposta sem corpo é o que o preflight é.
   optionsSuccessStatus: 204,
@@ -155,7 +155,7 @@ app.use(
   })
 );
 
-// VELOCIDADE 6A (15-set): não havia compressão nenhuma. O /api/feed e o
+// Compressão: o /api/feed e o
 // /api/inicio são JSON com muito texto repetido — é onde o gzip ganha mais, e
 // de Lisboa cada KB poupado conta. `threshold: 1024` deixa passar as respostas
 // pequenas (comprimir 200 bytes custa mais CPU do que poupa rede).
@@ -170,11 +170,11 @@ app.set('trust proxy', 1);
 // Rate limiting geral: protege todas as rotas /api de abuso. Em DOIS baldes, e
 // cada pedido cai em um só: por IP (rede grossa, anti-tráfego anônimo) e por
 // sessão (rede fina, para quem o motor já validou). Os tetos, o critério e o
-// porquê estão em middleware/limiters.js (hotfix 25: o IP da casa do dono e o
-// Wi-Fi da quadra esgotavam o balde de todo mundo). DEV (31-jul): fora de
+// porquê estão em middleware/limiters.js (o IP da casa do dono e o
+// Wi-Fi da quadra esgotavam o balde de todo mundo). DEV: fora de
 // produção os tetos sobem; numa tarde de teste o dono + o Claude + o hot-reload
 // estouravam o de produção e o app "morria" por 15 min.
-// VELOCIDADE 4: a web fala com o motor por uma função na Cloudflare
+// A web fala com o motor por uma função na Cloudflare
 // (frontend/functions/api/[[path]].js), e visto daqui todos esses pedidos
 // chegam do mesmo IP, o do edge; ele reencaminha o IP real em CF-Connecting-IP.
 // /api/media tem o limiter próprio (routes/media.js).
@@ -196,11 +196,11 @@ app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 // Avatares migrados da V1 (avatar_url relativo, ex.: /public/avatares/verde/gui.png)
 app.use('/public/avatares', express.static(path.join(__dirname, 'public', 'avatares')));
 
-// SEGURANCA-REVISAO-10SET.md secção 2/3 (10-set): removido o mount genérico
-// `app.use('/public', express.static(...))` que servia a pasta public/ inteira
+// SEGURANCA-REVISAO-10SET.md secção 2/3: não há mount genérico
+// `app.use('/public', express.static(...))`: servia a pasta public/ inteira
 // sem login — era isso que expunha fotos-teste/fotos-teste-4/fotos-treino/
 // fotos-jogos (fotos reais de pessoas, algumas de menores) a qualquer um com
-// o URL. Removido também `/public/logos`: os logos de equipa já vão para o
+// o URL. Também não há `/public/logos`: os logos de equipa já vão para o
 // Storage privado do Supabase (routes/teams.js, POST /:slug/logo), a pasta
 // public/logos nunca chegou a existir em disco. Só sobem os dois mounts
 // acima — avatares (V1 migrada) e uploads (fotos de campeão) — que é tudo o
@@ -235,7 +235,7 @@ app.get('/', (req, res) => {
   res.json({ name: 'Futty v2.0 API', status: 'running' });
 });
 
-// Tijolo 1C — assina/despublica URLs de média (buckets privados) na fronteira,
+// Assina/despublica URLs de média (buckets privados) na fronteira,
 // ANTES das rotas (embrulha res.json). Autenticadas → assinado; /api/p/ → silhueta.
 app.use(mediaUrls);
 
@@ -253,15 +253,15 @@ app.use(campeonatosRoutes);
 app.use(superadminRoutes);
 app.use(gabineteRoutes); // /api/super/gabinete — Gabinete do Dono (super-admin)
 app.use(adsRoutes); // /api/ads — serving + medição de publicidade
-app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem (Tijolo 2)
-app.use(denunciasRoutes); // Denúncias + triagem IA (Tijolo 3)
+app.use(mediaProxyRoutes); // GET /api/media/:token — proxy de imagem
+app.use(denunciasRoutes); // Denúncias + triagem IA
 app.use(blocksRoutes); // /api/blocks — bloqueio entre jogadores (Apple UGC 1.2)
 app.use(inicioRoutes); // GET /api/inicio — agregado da tela Início (1 pedido só)
 app.use(brilhantesRoutes); // /api/brilhantes — direito, créditos e pedidos (SPEC-FIGURINHA-3)
-app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app (VELOCIDADE 4)
-app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima (Rodada 28), sem sessão
+app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app
+app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima, sem sessão
 app.use(aviseMeRoutes); // POST /api/avise-me — lista de quem quer ser avisado do lançamento (pública, limiter por IP)
-app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano (29B)
+app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano
 app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
 
 // 404 para rotas /api não encontradas
@@ -283,7 +283,7 @@ app.use((err, req, res, next) => {
   res.status(status).json(corpo);
 });
 
-// SEGURANCA-REVISAO-10SET.md secção 3 (10-set): só arranca sozinho quando
+// SEGURANCA-REVISAO-10SET.md secção 3: só arranca sozinho quando
 // corrido diretamente (`node server.js`, produção/dev normal) — não quando
 // outro módulo faz require('./server') (backend/tests/permissoes.test.js,
 // que sobe o app na sua própria porta livre via app.listen(0)). Sem isto os
@@ -292,14 +292,14 @@ if (require.main === module) {
   const port = process.env.PORT || 3001;
   let servidor = null; // só existe depois do listen() lá em baixo
 
-  // VELOCIDADE 6A (15-set): as impressões de publicidade ficam num acumulador em
+  // As impressões de publicidade ficam num acumulador em
   // memória e só descem ao Storage de 30 em 30 s. O Cloud Run manda SIGTERM antes
   // de apagar a instância — é a última oportunidade de gravar o que está pendente.
   // Registados JÁ (antes do modelo NSFW carregar): um SIGTERM a meio do arranque
   // ainda encontra o handler — sem servidor para fechar, só sai.
   const encerrar = async (sinal) => {
     console.log(`[Futty] ${sinal} recebido — a gravar o que está pendente.`);
-    // Rodada 29B (bloco 2, A): o que está pintando aqui não termina — marca 'falhou' (sem cobrar) já, para quem
+    // O que está pintando aqui não termina — marca 'falhou' (sem cobrar) já, para quem
     // consulta ver a mensagem em segundos e não esperar o prazo do batimento.
     try {
       const n = await geracaoJobs.interromperTodas({ aoMarcar: (id) => marcarFigurinhaStatus(id, 'falhou') });
@@ -314,9 +314,8 @@ if (require.main === module) {
   process.on('SIGTERM', () => encerrar('SIGTERM'));
   process.on('SIGINT', () => encerrar('SIGINT'));
 
-  // RODADA 8B (15-set): o modelo NSFW (Tijolo 1) carrega ANTES de abrir a porta —
-  // antes disto, o listen() já aceitava pedidos com o modelo (TensorFlow.js +
-  // MobileNetV2) ainda a carregar em fundo. Não era incorreto (classificar() em
+  // O modelo NSFW carrega ANTES de abrir a porta: abrir o listen() com o modelo (TensorFlow.js +
+  // MobileNetV2) ainda a carregar em fundo não é incorreto (classificar() em
   // utils/nsfwFilter.js espera a MESMA promessa de carga), só lento: quem
   // disparasse o primeiro upload numa instância nova pagava essa espera. Com
   // minScale 1 no Cloud Run (a instância nunca dorme), isso só acontece mesmo no
@@ -329,7 +328,7 @@ if (require.main === module) {
     servidor = app.listen(port, () => {
       console.log(`[Futty] Servidor a correr em http://localhost:${port}`);
       console.log(`[Futty] Health check: http://localhost:${port}/health`);
-      // Rodada 28: qual chave do Supabase o motor pegou (nome e formato, nunca o valor) — é
+      // Qual chave do Supabase o motor pegou (nome e formato, nunca o valor) — é
       // pelo log da revisão nova que se confere a troca para a chave secreta sb_secret_….
       const chaves = require('./utils/chavesSupabase').origemDasChaves();
       console.log(`[Futty] Supabase: chave secreta de ${chaves.secreta} (formato ${chaves.secretaFormato})`);
@@ -345,13 +344,13 @@ if (require.main === module) {
       Promise.all([plataformaStore.ler(), gabineteStore.ler()])
         .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
         .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
-      // Rodada 29B (bloco 3, E): quem tem recorte de miniatura (users.avatar_recorte) — carrega agora e relê a cada 2 min.
+      // Quem tem recorte de miniatura (users.avatar_recorte) — carrega agora e relê a cada 2 min.
       require('./utils/recortesAvatar').iniciar(supabase);
-      // Rodada 29B (bloco 2-A2): a pintura por Cloud Tasks só liga com as três variáveis — diz no log em que modo subiu.
+      // A pintura por Cloud Tasks só liga com as três variáveis — diz no log em que modo subiu.
       const tarefasIncompletas = tarefasPintura.configuracaoIncompleta();
       if (tarefasIncompletas) console.error(`[Futty] Cloud Tasks da pintura incompleto (${tarefasIncompletas}) — a pintura roda na fila em memória.`);
       else console.log(`[Futty] Pintura da figurinha: ${tarefasPintura.ativas() ? 'por Cloud Tasks (pedido interno)' : 'na fila em memória (Cloud Tasks desligado)'}`);
-      // Rodada 29B (bloco 2, A): pintura "em andamento" sem batimento há mais de 60 s é de um processo que morreu
+      // Pintura "em andamento" sem batimento há mais de 60 s é de um processo que morreu
       // (reinício, deploy): vira 'falhou' com a mensagem "interrompida, nada foi cobrado". A de outra instância
       // viva tem batimento fresco e não é tocada.
       geracaoJobs.varrerInterrompidas({ aoMarcar: (id) => marcarFigurinhaStatus(id, 'falhou') })
@@ -360,7 +359,7 @@ if (require.main === module) {
       ensureAvatarsBucket().catch((e) => console.error('[Futty] ensureAvatarsBucket:', e.message));
       ensureCampeonatosBucket().catch((e) => console.error('[Futty] ensureCampeonatosBucket:', e.message));
       ensureDenunciasBucket().catch((e) => console.error('[Futty] ensureDenunciasBucket:', e.message));
-      // Tijolo 1C: garante os buckets de avatares/resenha privados (idempotente).
+      // Garante os buckets de avatares/resenha privados (idempotente).
       privatizarBuckets().catch((e) => console.error('[Futty] privatizarBuckets:', e.message));
     });
   });

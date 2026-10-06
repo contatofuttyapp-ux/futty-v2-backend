@@ -1,10 +1,9 @@
 // Filtro de conteúdo — NSFWJS no caminho dos uploads de imagem.
-// Tijolo 1 da fase Segurança: bloqueia explícito ANTES de a imagem ser guardada.
+// Bloqueia explícito ANTES de a imagem ser guardada.
 //
 // Decisões (SPEC-SEGURANCA v2):
 // - modelo carrega UMA vez (singleton) — ideal: no arranque do servidor;
-// - só bloqueia em ALTA confiança (Porn/Hentai > LIMIAR); "Sexy" médio NÃO bloqueia
-//   (a calibração fina é o tijolo 2 — Fable);
+// - só bloqueia em ALTA confiança (Porn/Hentai > LIMIAR); "Sexy" médio NÃO bloqueia;
 // - falso-positivo custa mais que falso-negativo numa rede de amigos → limiar alto;
 // - FALHA ABERTA em erro de infra (modelo não carrega / decode falha): regista e
 //   deixa passar, para um problema técnico não derrubar TODOS os uploads. A recusa
@@ -14,7 +13,7 @@ const sharp = require('sharp');
 const { HttpError } = require('./http');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LIMIAR — CALIBRADO (Tijolo 2). LEI, não palpite. Medido por scripts/calibrar-nsfw.js
+// LIMIAR — CALIBRADO. LEI, não palpite. Medido por scripts/calibrar-nsfw.js
 // contra uma bateria LIMPA de 15 imagens (11 fotos reais da casa + 4 proxies dos
 // extremos do futebol amador). Resultado (max na bateria legítima):
 //   max PORN   = 0.016 · max HENTAI = 0.025 · max explícito = 0.025
@@ -27,7 +26,7 @@ const { HttpError } = require('./http');
 // 0 falsos positivos na bateria a QUALQUER limiar entre 0.6 e 0.9.
 // Se surgir falso positivo real, SOBE este número (não desças abaixo de 0.6).
 const LIMIAR = 0.75; // max(Porn,Hentai) acima disto = recusa. NUNCA se usa Sexy.
-// MENSAGEM ÚNICA (decisão Tijolo 2): variar por categoria vazaria o motivo
+// MENSAGEM ÚNICA: variar por categoria vazaria o motivo
 // (= detalhe técnico proibido) e podia envergonhar. Uma frase neutra e digna serve
 // todos os casos e não dá pista para "afinar" um upload malicioso.
 const MSG = 'Esta imagem não pode entrar no Futty. Escolha outra e siga em frente.';
@@ -39,10 +38,10 @@ let _tf = null;
 let _modeloPromise = null;
 
 /**
- * RODADA 27 (25-set) — o classificador roda no backend WASM do tfjs, não no CPU em JS puro.
- * O motor não tem o tfjs-node, e o backend padrão em JS puro levava ~1 040 ms para classificar UMA
+ * O classificador roda no backend WASM do tfjs, não no CPU em JS puro.
+ * O motor não tem o tfjs-node, e o backend padrão em JS puro leva ~1 040 ms para classificar UMA
  * foto de 224×224 (medido na bancada); no WASM são ~76 ms, com as MESMAS probabilidades (Neutral
- * 0,699 · Drawing 0,279 · Hentai 0,014 · Porn 0,007 · Sexy 0,002 numa imagem de prova). Era a
+ * 0,699 · Drawing 0,279 · Hentai 0,014 · Porn 0,007 · Sexy 0,002 numa imagem de prova). Sem isto seria a
  * maior fatia do POST /api/me/avatar (a rede do Supabase, de São Paulo a São Paulo, é barata).
  * Se o WASM não subir (binário, CPU, versão do Node), fica no CPU e regista: uma avaria de
  * desempenho nunca pode derrubar o upload nem o filtro.

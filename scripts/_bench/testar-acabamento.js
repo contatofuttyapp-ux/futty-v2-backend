@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA DO ACABAMENTO (17-set) — a cara do 2.5 com o acabamento da V6.
+// BANCADA DO ACABAMENTO — a cara do 2.5 com o acabamento da V6.
 //
-// De onde vem: na bancada de modelos (commit 8628fd3) o dono viu as 7 folhas e
+// De onde vem: na bancada de modelos o dono viu as 7 folhas e
 // disse que a CARA dos candidatos 1 e 2 (openai/gpt-image-2.5/flare/edit) está
 // boa, mas o ACABAMENTO que ele quer é o da célula 8 — a V6, que é pintura
 // semi-realista de figurinha. O 2.5 devolve algo mais perto de um retoque de

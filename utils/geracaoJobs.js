@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A PINTURA DA FIGURINHA EM SEGUNDO PLANO (Rodada 29B, bloco 2, parte A — 1-out).
+// A PINTURA DA FIGURINHA EM SEGUNDO PLANO.
 //
-// Por quê: a geração segurava o pedido HTTP por ~45 s (~90 s com o retry da
-// cabeça cortada) e a Cloudflare corta um pedido aos 100 s. Agora o POST de gerar
+// Por quê: a geração segura o pedido HTTP por ~45 s (~90 s com o retry da
+// cabeça cortada) e a Cloudflare corta um pedido aos 100 s. Por isso o POST de gerar
 // devolve na hora `{ jobId, estimativaSegundos }`, a pintura roda aqui — numa fila
 // em memória do PRÓPRIO processo, uma por vez por usuário — e o app consulta
 // GET /api/figurinha/job/:id. O trabalho em si (as chamadas à fal pela
-// utils/falFila.js, o auditor da coroa, o débito do direito) continua sendo o de
-// sempre, na função `pintarFigurinha` de routes/auth.js; este módulo só cuida de
+// utils/falFila.js, o auditor da coroa, o débito do direito) é o da
+// função `pintarFigurinha` de routes/auth.js; este módulo só cuida de
 // QUEM está pintando, EM QUE PÉ, e do que fazer quando acaba ou quando o processo
 // morre no meio.
 //
@@ -21,10 +21,10 @@
 //
 // O QUE ESTE MÓDULO NÃO FAZ: não escolhe kit, não checa direito, não fala com a fal.
 //
-// BLOCO 2-A2 (1-out): com o Cloud Tasks ligado (utils/tarefasPintura.js) o POST só REGISTRA o job e
+// COM O CLOUD TASKS LIGADO (utils/tarefasPintura.js) o POST só REGISTRA o job e
 // enfileira uma tarefa; quem pinta é POST /api/interno/pintar/:jobId, DENTRO de um pedido (o Cloud
 // Run só dá CPU enquanto há pedido). `reivindicar` é a porta de entrada desse pedido — atômica e
-// idempotente — e `adotar` põe o job na memória DESTE processo para ele pintar como sempre pintou.
+// idempotente — e `adotar` põe o job na memória DESTE processo para ele pintar.
 // ═══════════════════════════════════════════════════════════════════════════════
 const crypto = require('node:crypto');
 const { supabase } = require('./db');

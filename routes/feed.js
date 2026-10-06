@@ -28,24 +28,21 @@ const COMENTARIO_MEDIA = ['image', 'gif'];
 // Motivos de denúncia (igual ao CHECK da migração 009).
 const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo', 'outro'];
 
-// VELOCIDADE 6A (15-set): o feed vinha SEM limite — uma equipa antiga puxava
-// todos os jogos e todos os posts desde sempre, em cada abertura da tela. 60 de
-// cada lado dá mais de um mês de Resenha para uma equipa que joga por semana.
-// A paginação "ver mais antigos" chegou na Rodada 29B (ver PAGINA_FEED, abaixo).
+// O feed tem limite: sem ele uma equipa antiga puxaria todos os jogos e todos os posts desde sempre, em
+// cada abertura da tela. 60 de cada lado dá mais de um mês de Resenha para uma equipa que joga por
+// semana. A paginação "ver mais antigos" está em PAGINA_FEED, abaixo.
 const LIMITE_FEED = 60;
-// RODADA 29B (bloco 2, B — conta pesada): o app novo pede o feed em PÁGINAS (`?limite=20`, e `?antes=<created_at do último>` para a
-// seguinte). Sem `limite` a resposta é a de sempre (até 60 jogos + 60 posts de uma vez): os apps já publicados não conhecem
-// `proximo` e ficariam sem como ver o resto.
+// O app novo pede o feed em PÁGINAS (`?limite=20`, e `?antes=<created_at do último>` para a seguinte).
+// Sem `limite` a resposta é a de sempre (até 60 jogos + 60 posts de uma vez): os apps já publicados
+// não conhecem `proximo` e ficariam sem como ver o resto.
 const PAGINA_FEED = 20;
 const PAGINA_FEED_MAX = 50;
 
 // Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
 //
-// RODADA 15 (16-set): o teto geral desceu de 50MB para 12MB — fotos JPG/PNG/
-// WebP passam por compressão (ver comprimirImagem) antes de gravar, então
-// chegam bem abaixo disto; GIF tem o seu PRÓPRIO teto, mais apertado
-// (GIF_MAX_BYTES), porque não é comprimido (perderia a animação). Vídeo
-// segue sem transcodificação — 12MB é o teto dele também agora (era 50MB).
+// O teto geral é 12MB: fotos JPG/PNG/WebP passam por compressão (ver comprimirImagem) antes de gravar,
+// então chegam bem abaixo disto; GIF tem o seu PRÓPRIO teto, mais apertado (GIF_MAX_BYTES), porque não
+// é comprimido (perderia a animação). Vídeo segue sem transcodificação — 12MB é o teto dele também.
 const UPLOAD_MAX_BYTES = 12 * 1024 * 1024;
 const GIF_MAX_BYTES = 8 * 1024 * 1024;
 // Lado maior de uma foto comprimida (px) e qualidade do WebP de saída.
@@ -146,11 +143,9 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
   for (const id of parentIds) map[id] = { recentes: [], total: 0 };
   if (!parentIds.length) return map;
 
-  // VELOCIDADE 6A (15-set): o autor vem EMBUTIDO. Antes, os ids dos autores dos
-  // comentários só se sabiam depois desta query, o que obrigava a query de
-  // `users` a esperar por ela — uma ida em série a mais. Com o autor embutido,
-  // a query de users cobre só os jogos e os posts, que já se conhecem, e as
-  // duas correm na mesma onda.
+  // O autor vem EMBUTIDO: assim a query de `users` cobre só os jogos e os posts, que já se conhecem, e as
+  // duas correm na mesma onda. Se os ids dos autores dos comentários só se soubessem depois desta query,
+  // a de `users` teria de esperar por ela — uma ida em série a mais.
   const { data } = await supabase
     .from('comentarios')
     .select('parent_id, author_id, body, created_at, users ( id, nome, nome_jogador, avatar_url )')
@@ -172,11 +167,10 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
 }
 
 /**
- * Comprime uma foto estática antes de gravar (Rodada 15): respeita a
- * orientação EXIF, reduz o lado maior a COMPRESSAO_LADO_MAX (nunca amplia) e
- * converte para WebP. Fail-open: se o sharp falhar (arquivo corrompido de um
- * jeito que passou pelo NSFW mas não pelo decode aqui), grava o ORIGINAL em
- * vez de derrubar o upload — melhor uma foto grande que nenhuma foto.
+ * Comprime uma foto estática antes de gravar: respeita a orientação EXIF, reduz o lado maior a
+ * COMPRESSAO_LADO_MAX (nunca amplia) e converte para WebP. Fail-open: se o sharp falhar (arquivo
+ * corrompido de um jeito que passou pelo NSFW mas não pelo decode aqui), grava o ORIGINAL em vez de
+ * derrubar o upload — melhor uma foto grande que nenhuma foto.
  * Devolve { buffer, mimetype, ext }.
  */
 async function comprimirImagem(buffer, mimetypeOriginal, extOriginal) {
@@ -217,7 +211,7 @@ router.get(
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
     // Equipas do utilizador
-    // 29I (achado 83): o fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
+    // O fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
     const { data: memberships } = await lerComFuso((novas) => supabase
       .from('team_members')
       .select(/fuso/.test(novas) ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
@@ -236,9 +230,10 @@ router.get(
     }
     if (!teamIds.length) return res.json({ items: [] });
 
-    // VELOCIDADE 6A (15-set): eram 10 idas ao banco EM SÉRIE. Agora são 3 ondas.
+    // As idas ao banco saem em 3 ondas, não EM SÉRIE.
     //
-    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (created_at).
+    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais;
+    // `antes` é o cursor (created_at).
     const paginado = req.query.limite != null;
     const limite = paginado ? Math.min(PAGINA_FEED_MAX, Math.max(1, parseInt(req.query.limite, 10) || PAGINA_FEED)) : LIMITE_FEED;
     const antesBruto = paginado && req.query.antes ? Date.parse(String(req.query.antes)) : NaN;
@@ -361,7 +356,7 @@ router.get(
         created_at: g.created_at,
         date: g.data,
         time: g.data ? horaNoFuso(g.data, fuso) : null, // HH:MM no relógio do campo (era UTC)
-        fuso, // 29I (achado 83): a data e a hora do jogo se leem neste fuso
+        fuso, // a data e a hora do jogo se leem neste fuso
         location: g.local,
         team_id: g.team_id,
         team_name: team.nome || null,
@@ -434,7 +429,7 @@ router.post(
     if (!texto && mediaList.length === 0) throw new HttpError(400, 'O post precisa de texto ou média.');
     if (texto.length > 2000) throw new HttpError(400, 'Máximo 2000 caracteres.');
     if (mediaList.length > 4) throw new HttpError(400, 'Máximo 4 anexos por post.');
-    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): só aceita URLs https do
+    // SEGURANCA-REVISAO-10SET.md secção 3: só aceita URLs https do
     // Storage do Supabase ou do proxy do próprio backend (/api/media/) —
     // impede que o campo vire um redirect/SSRF para qualquer host.
     if (mediaList.some((m) => !urlDeMidiaValida(m.url, req))) {
@@ -590,8 +585,8 @@ router.delete(
       throw new HttpError(403, 'Só o autor ou um admin pode excluir.');
     }
 
-    // Peça 2 (Tijolo 1B): antes do cascade na BD, junta as URLs da média para
-    // apagar os OBJETOS no Storage — senão ficam órfãos, públicos e para sempre.
+    // Antes do cascade na BD, junta as URLs da média para apagar os OBJETOS no Storage —
+    // senão ficam órfãos, públicos e para sempre.
     const { data: media } = await supabase
       .from('feed_post_media')
       .select('url')
@@ -694,7 +689,7 @@ router.patch(
     res.json({
       game: {
         ...updated,
-        fuso: fusoDoTime(game.teams), // 29I (achado 83)
+        fuso: fusoDoTime(game.teams),
         artilheiro_nome: updated.artilheiro_user_id ? nomes[updated.artilheiro_user_id] || null : null,
         destaque_nome: updated.destaque_user_id ? nomes[updated.destaque_user_id] || null : null,
         rodada_nome: updated.rodada_user_id ? nomes[updated.rodada_user_id] || null : null,
@@ -711,7 +706,7 @@ router.patch(
           title: '🏆 Resultado registrado!',
           body: `Veja quem foi o destaque em ${game.local || 'Jogo'}`,
           url: '/feed',
-        }, { categoria: 'resenha' }) // 29I, bloco 3: o tipo "Resenha" do Perfil → Notificações
+        }, { categoria: 'resenha' }) // o tipo "Resenha" do Perfil → Notificações
       );
   })
 );
@@ -728,7 +723,7 @@ router.post(
   '/api/feed/upload',
   requireAuth,
   receberFicheiro,
-  filtroNSFW, // Tijolo 1: bloqueia imagem explícita da resenha antes de guardar
+  filtroNSFW, // bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum arquivo enviado.');
     const mimetypeOriginal = req.file.mimetype;

@@ -9,7 +9,7 @@ const { pushAdminLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, ensureUserRow, getTeamBySlug, getRole } = require('../utils/db');
 const { endpointPushValido } = require('../utils/validarUrl');
-const { CATEGORIAS, preferenciasCompletas, mesclarPreferencias, erroDaColunaNotificacoes, quemQuer } = require('../utils/notificacoes'); // 29I, bloco 3
+const { CATEGORIAS, preferenciasCompletas, mesclarPreferencias, erroDaColunaNotificacoes, quemQuer } = require('../utils/notificacoes');
 
 const router = express.Router();
 
@@ -21,10 +21,10 @@ if (pushConfigurado) {
   console.warn('[Futty] Push desativado: faltam VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY no .env.');
 }
 
-// COFRE 25-set — o par VAPID foi trocado. Toda subscrição feita com a chave ANTIGA passa a ser recusada pelo push
+// O par VAPID foi trocado: toda subscrição feita com a chave ANTIGA é recusada pelo push
 // service com 403 (FCM: "SenderId mismatch"; os outros: JWT que não bate com a inscrição): ela nunca mais serve, então
 // sai do banco — e o cliente se inscreve de novo sozinho na próxima abertura do app (usePushNotifications).
-// 404/410 = expirada/removida pelo próprio browser, como sempre. Qualquer outro código (429, 5xx, rede) é passageiro:
+// 404/410 = expirada/removida pelo próprio browser. Qualquer outro código (429, 5xx, rede) é passageiro:
 // a linha fica.
 const CODIGOS_DE_SUBSCRICAO_MORTA = [403, 404, 410];
 
@@ -51,7 +51,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { endpoint, keys } = req.body || {};
     if (!endpoint || !keys?.p256dh || !keys?.auth) throw new HttpError(400, 'Subscrição inválida.');
-    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): sem isto o servidor fazia
+    // SEGURANCA-REVISAO-10SET.md secção 3: sem isto o servidor fazia
     // POST (webpush.sendNotification) para qualquer endpoint que mandassem —
     // só aceita hosts de serviços de push conhecidos.
     if (!endpointPushValido(endpoint)) throw new HttpError(400, 'Endpoint de subscrição não reconhecido.');
@@ -216,7 +216,7 @@ router.post(
 );
 
 /**
- * GET /api/push/preferencias — as notificações que EU quero receber (Perfil → Notificações, Rodada 29I bloco 3).
+ * GET /api/push/preferencias — as notificações que EU quero receber (Perfil → Notificações).
  * { preferencias: { jogos, pedidos, figurinha, resenha } (true = ligada), categorias (a ordem da tela),
  *   admin (administra algum time: só então a tela mostra "Pedidos de entrada"), salvavel (false sem a migração 079) }.
  */
@@ -261,7 +261,7 @@ router.patch(
  * Nunca lança: erros são engolidos; subscrições mortas (403/404/410) são apagadas.
  * @param {string[]} userIds destinatários
  * @param {{title:string, body?:string, url?:string}} payload
- * @param {{categoria?: 'jogos'|'pedidos'|'figurinha'|'resenha'}} [opcoes] o tipo do aviso (29I, bloco 3): quem desligou esse tipo
+ * @param {{categoria?: 'jogos'|'pedidos'|'figurinha'|'resenha'}} [opcoes] o tipo do aviso: quem desligou esse tipo
  *   em Perfil → Notificações fica de fora. Sem categoria = aviso que não se desliga (o "Avisar o time" do admin, o Gabinete).
  */
 async function enviarNotificacao(userIds, payload, opcoes = {}) {

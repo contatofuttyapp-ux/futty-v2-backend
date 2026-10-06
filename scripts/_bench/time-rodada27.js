@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TIME DESCARTÁVEL DA RODADA 27 — "check-up da foto de verdade" (25-set).
+// TIME DESCARTÁVEL DA CENA `rodada27` — "check-up da foto de verdade".
 //
 // A cena `rodada27` do scripts/ver-iphone.mjs (frontend) mede, em servidor LOCAL, o que
 // o dono relatou pelo celular: "Trocar visual" que não troca, foto que demora a aparecer,
@@ -9,7 +9,7 @@
 //   · um time onde as duas jogam, com Ranking (≥ 3 jogos), Presença e Sorteio de verdade
 //     — as telas onde a foto aparece pequena, em quadrado e em cartão 3:4.
 // Nada disto gera figurinha (custo de IA zero). Tudo é @futtymock e descartável; o time
-// é SÓ desta rodada (nunca a domingueira-fc-demo, que é a conta dos revisores das lojas).
+// é SÓ desta cena (nunca a domingueira-fc-demo, que é a conta dos revisores das lojas).
 //
 //   node scripts/_bench/time-rodada27.js            cria/refaz e grava as sessões
 //   node scripts/_bench/time-rodada27.js --apagar   apaga o time e as contas

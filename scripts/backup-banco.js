@@ -18,15 +18,9 @@ const fs = require('fs');
 const path = require('path');
 const { supabase } = require('../utils/db'); // cliente service_role já configurado (ignora RLS)
 
-// NB: campeonatos_v2/campeonato_times/campeonato_confrontos (migração 039,
-// modelo de campeonato N-times) ficam DE FORA — testado ao vivo (10-set) e
-// confirmado que ainda não existem (PGRST205), a v1 do campeonato guarda tudo
-// como JSON no Storage. Junta-as aqui no dia em que a 039 for de facto
-// aplicada.
-// LIMPEZA TOTAL (23-set) — achado ao preparar o backup pré-limpeza: a lista
-// abaixo é anterior à migração 054 (Figurinha Brilhante, 22-set) e nunca foi
-// atualizada. pedidos_ativacao e brilhantes_time ficavam de fora em silêncio
-// — exatamente o aviso que o comentário do topo do arquivo pede para evitar.
+// NB: campeonatos_v2/campeonato_times/campeonato_confrontos (migração 039, modelo de campeonato N-times)
+// ficam DE FORA — confirmado ao vivo que ainda não existem (PGRST205), a v1 do campeonato guarda tudo
+// como JSON no Storage. Junta-as aqui no dia em que a 039 for de facto aplicada.
 const TABELAS = [
   'users', 'teams', 'team_members', 'games', 'votes',
   'comentarios', 'comentario_anexos', 'feed_posts', 'feed_post_media', 'reacoes',
@@ -35,11 +29,9 @@ const TABELAS = [
   'gasto_ia_diario', 'gols_jogadores', 'geracao_ia_log', 'app_config', 'user_blocks',
   'share_declarations', 'rsvp_respostas', 'user_avatar_slots',
   'pedidos_ativacao', 'brilhantes_time',
-  // Manutenção 26-set: ficaram para trás quando entraram (057/058/061).
   'user_avatar_historico', 'convite_usos', 'telemetria_velocidade',
-  // Pagamentos P1 (064).
   'compras',
-  // Rodada 29B (068): quem quer ser avisado do lançamento.
+  // Quem quer ser avisado do lançamento (068).
   'avisos_lancamento',
 ];
 
@@ -131,7 +123,7 @@ async function main() {
     return; // corrida com falhas — não regista como "último backup" bem-sucedido
   }
 
-  // Gabinete 2.0 (11-set): o semáforo "último backup" da aba Segurança lê daqui.
+  // O semáforo "último backup" da aba Segurança lê daqui.
   // Só grava quando a corrida foi 100% OK (return acima corta o caminho de falha).
   try {
     await supabase.from('app_config').upsert({

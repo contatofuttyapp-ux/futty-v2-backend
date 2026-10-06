@@ -3,7 +3,7 @@
 // tiver IDADE_MINIMA anos (18, utils/idade.js; birthdate preenchida) E tiver o consentimento
 // ligado (mostrar_rosto_publico, default TRUE). Sem 18 confirmados · sem birthdate · sem
 // consentimento · convidado sem conta → SILHUETA, sempre. A idade manda mesmo com a flag ligada.
-// Desde a Rodada 29G o app é 18+: esta é a 2ª linha, para nunca depender só do cadastro.
+// O app é 18+: esta é a 2ª linha, para nunca depender só do cadastro.
 //
 // Mecânica: o times_resultado é um snapshot congelado com avatar_url = URL público
 // do bucket privado. Para quem PODE revelar, reescrevemos para um URL do PROXY

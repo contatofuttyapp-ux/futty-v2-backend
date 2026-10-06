@@ -1,4 +1,4 @@
-// Futty v2.0 — Relatórios de diagnóstico do app (VELOCIDADE 4).
+// Futty v2.0 — Relatórios de diagnóstico do app.
 //
 // O app mede-se a si próprio (frontend/src/lib/diagnostico.js) e a pessoa pode
 // enviar o que mediu. Isto guarda esse JSON. À boleia do padrão do

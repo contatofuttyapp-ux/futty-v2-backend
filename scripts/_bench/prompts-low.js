@@ -77,11 +77,10 @@ const ENQUADRAMENTO = `FRAMING — SQUARE:
 - At least 12% of the image height must be EMPTY space above the crown
 - If in doubt, draw the figure SMALLER and leave MORE space above the head`;
 
-// RONDA 2 (30-jul). A ronda 1 provou: o estilo do L2 funciona no low, mas TODAS
-// as variantes quadradas cortaram a coroa (achatamento 0,66–0,96) enquanto o M0
-// em retrato saiu limpo (0,02). A culpa é da GEOMETRIA, não da qualidade: num
-// quadrado, "busto + cabeça grande" não deixa altura para o ar acima da cabeça.
-// Dois consertos a testar:
+// O estilo do L2 funciona no low, mas TODAS as variantes quadradas cortaram a coroa
+// (achatamento 0,66–0,96) enquanto o M0 em retrato saiu limpo (0,02). A culpa é da
+// GEOMETRIA, não da qualidade: num quadrado, "busto + cabeça grande" não deixa altura
+// para o ar acima da cabeça. Dois consertos a testar:
 const ENQ_RETRATO = `FRAMING — PORTRAIT:
 - Portrait 2:3 composition (taller than wide)
 - Bust only: head down to mid-chest. No legs. No hands below chest level.
@@ -124,7 +123,7 @@ const NUNCA = `NEVER: photographic realism, anime, chibi, cartoon mascot, any te
 lettering, watermark, extra logos, more than one person, white or blank kit,
 legs, cropped head.`;
 
-// RONDA 3 (30-jul). A prova de produção mostrou braço em falta (Renato) e braço
+// A prova de produção mostrou braço em falta (Renato) e braço
 // cortado na borda (Kim2). Guarda explícita:
 const BRACOS = `ARMS — COMPLETE FIGURE:
 - BOTH arms fully drawn and complete — shoulder, elbow, forearm and hand
@@ -165,9 +164,11 @@ function kitSemEscudo(kitTxt) {
   return kitTxt.replace(LINHA_BADGE_RE, '- Chest: LEFT CLEAN — no badge, no logo, no lettering of any kind\n');
 }
 
-/** L2: escudo como forma sólida simples em vez de "duas F espelhadas".
- *  Idempotente: desde 30-jul a produção JÁ traz o escudo simplificado —
- *  nesse caso devolve o texto como está. */
+/**
+ * L2: escudo como forma sólida simples em vez de "duas F espelhadas".
+ * Idempotente: a produção já traz o escudo simplificado — nesse caso
+ * devolve o texto como está.
+ */
 function kitEscudoSimples(kitTxt, acento = 'the accent colour') {
   if (/SOLID emblem/i.test(kitTxt)) return kitTxt; // já simplificado (produção pós-L2P)
   if (!LINHA_BADGE_RE.test(kitTxt)) throw new Error('Não encontrei a linha do Badge na secção KIT — o catálogo mudou de forma.');
@@ -178,8 +179,8 @@ function kitEscudoSimples(kitTxt, acento = 'the accent colour') {
 
 const fundoDe = (f) => (f === 'transparente' ? FUNDO_TRANSPARENTE : FUNDO_CINZA);
 
-// Ronda 3: no low os detalhes pequenos do kit somem (o friso da manga foi o
-// primeiro — visto na prova de produção de 30-jul). Checklist explícito:
+// No low os detalhes pequenos do kit somem (o friso da manga foi o
+// primeiro, visto na prova de produção). Checklist explícito:
 const kitChecklist = (acento) => `KIT CHECKLIST — before finishing, verify ALL FIVE elements are present:
 1. base colour of the jersey exactly as Image 2
 2. the large diagonal panel in ${acento}
@@ -387,7 +388,7 @@ const VARIANTES = {
 
   // --- RONDA 3: guarda de braços e estilo mais gráfico ---
   L2PB: { nome: 'L2P + guarda braços',  qualidade: 'low', tamanho: '1024x1536', fundo: 'cinza', enq: ENQ_RETRATO, montar: L2B },
-  // --- RONDA 4 (1-ago): TRANSPARENTE em retrato — mata o birefnet e o cabelo
+  // --- TRANSPARENTE em retrato — mata o birefnet e o cabelo
   //     comido por construção. Comparar com os L2PB já no disco. ---
   L2PT: { nome: 'L2P transp s/ birefnet', qualidade: 'low', tamanho: '1024x1536', fundo: 'transparente', enq: ENQ_RETRATO, montar: L2B },
   L2G:  { nome: 'L2G 15% mais gráfico', qualidade: 'low', tamanho: '1024x1536', fundo: 'cinza', enq: ENQ_RETRATO, montar: L2Gf },

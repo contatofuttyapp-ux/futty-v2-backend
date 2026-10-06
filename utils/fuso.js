@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29I (achado 83): o fuso horário do time.
+// Futty v2.0 — O fuso horário do time.
 //
 // A hora de um jogo é a hora do CAMPO, sempre: quem viaja continua vendo "quinta, 20h". O jogo fica gravado como instante
 // (UTC, timestamptz); o que diz "que horas são no campo" é o fuso do time (teams.fuso, migração 076, padrão
@@ -124,7 +124,7 @@ const faltaAte = new Map(); // coluna → até quando se dá por ausente
 
 const erroDaColunaFuso = (erro) => !!erro && /\bfuso\b/i.test(erro.message || '');
 
-// Rodada 29I, bloco 3: o mesmo jeito vale para TODAS as colunas novas do time — o fuso (076), o escudo de duas cores e padrão (077)
+// O mesmo jeito vale para TODAS as colunas novas do time — o fuso (076), o escudo de duas cores e padrão (077)
 // e os jogadores por time padrão (079). Elas viajam juntas nas leituras do time (a mesma ida ao banco); a que faltar sai da leitura
 // SOZINHA (o erro do banco diz qual é) e as outras continuam valendo — com a 076 aplicada e a 077 não, o fuso vale e o escudo fica
 // sólido. Cada uma que falta vale o seu padrão (fuso de São Paulo, escudo sólido, 5 por time) até o Pedro aplicar a migração dela.

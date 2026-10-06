@@ -1,5 +1,5 @@
 // Ajuda a APAGAR ficheiros no Supabase Storage a partir das suas URLs públicas.
-// Tijolo 1B (peça 2): remover conteúdo tem de matar o objeto no bucket também —
+// Remover conteúdo tem de matar o objeto no bucket também —
 // senão fica órfão, público e para sempre. Best-effort: se falhar, regista e segue
 // (nunca quebra o fluxo do utilizador que só quer apagar o post).
 const { supabase } = require('./db');
@@ -8,12 +8,12 @@ const { parametroDe: recorteDoArquivo } = require('./recortesAvatar');
 
 /**
  * Extrai o caminho dentro do bucket a partir de uma URL de mídia — a URL
- * CRUA do Storage (.../object/public/<bucket>/<path>) OU a do PROXY que o
- * Tijolo 2 emite (/api/media/<token>). Uma URL que veio do CLIENTE (salva em
+ * CRUA do Storage (.../object/public/<bucket>/<path>) OU a do PROXY que
+ * emitimos (/api/media/<token>). Uma URL que veio do CLIENTE (salva em
  * feed_post_media.url, comentario_anexos.url — o que o utilizador reenviou
- * depois de um upload) é SEMPRE a forma do proxy desde o Tijolo 2: sem este
+ * depois de um upload) é SEMPRE a forma do proxy: sem este
  * segundo caminho, removerFicheirosPorUrl nunca achava o ficheiro e ele
- * ficava órfão no Storage para sempre (achado real, Rodada 15). Usa
+ * ficava órfão no Storage para sempre. Usa
  * decodificarToken (não verificarToken): apagar tem de continuar a
  * funcionar mesmo com o token há muito expirado — expiração é sobre PODER
  * SERVIR agora, não sobre saber a que ficheiro a URL se refere.
@@ -52,7 +52,7 @@ async function removerFicheirosPorUrl(bucket, urls) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tijolo 1C — buckets PRIVADOS + URLs ASSINADOS.
+// Buckets PRIVADOS + URLs ASSINADOS.
 // Os URLs guardados na BD são públicos (formato .../object/public/<bucket>/...).
 // Com os buckets privados, esses links morrem; assinamos na fronteira da API.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -60,11 +60,10 @@ const BUCKETS_PRIVADOS = ['avatars', 'resenha'];
 
 // Deteta um URL público de um bucket nosso privado → { bucket, path, v } | null.
 //
-// VELOCIDADE 6A (15-set): o `?v=<timestamp>` que os uploads gravam (routes/auth.js
-// :304 e :885, routes/teams.js :428) era simplesmente deitado fora aqui. É ele que
-// diz "este ficheiro MUDOU" — o caminho no bucket é fixo (upsert), só o v muda.
-// Agora é capturado e entra no token: conteúdo novo = v novo = URL novo (o cache
-// do celular renova-se sozinho); conteúdo igual = URL igual (o cache acerta).
+// O `?v=<timestamp>` que os uploads gravam é capturado e entra no token:
+// é ele que diz "este ficheiro MUDOU" — o caminho no bucket é fixo (upsert), só o v muda.
+// Conteúdo novo = v novo = URL novo (o cache do celular renova-se sozinho);
+// conteúdo igual = URL igual (o cache acerta).
 function parseUrlPublico(url) {
   if (typeof url !== 'string') return null;
   const m = url.match(/\/storage\/v1\/object\/public\/(avatars|resenha)\/([^?"'\s]+)(\?[^"'\s]*)?/);
@@ -148,8 +147,8 @@ async function assinarPayload(payload, expiresIn = 3600) {
 }
 
 /**
- * O URL do proxy de um arquivo ({ bucket, path, v }, de parseUrlPublico). Rodada 29B (bloco 3, E):
- * se a pessoa escolheu um recorte para a miniatura deste arquivo (utils/recortesAvatar.js), ele
+ * O URL do proxy de um arquivo ({ bucket, path, v }, de parseUrlPublico).
+ * Se a pessoa escolheu um recorte para a miniatura deste arquivo (utils/recortesAvatar.js), ele
  * vai junto na query (`?rc=x,y,escala`); o proxy só o aplica nos pedidos quadrados (`sq=1`) e o
  * resto (card, cromo, fotos grandes) o ignora. Fica na URL — e não no token — para o app, que
  * acrescenta `&w=…`, nunca ter de decodificar nada, e porque o URL novo é o que quebra o cache.
@@ -161,7 +160,7 @@ function urlDoProxy(base, p) {
 
 /**
  * Reescreve, IN-PLACE, os URLs de buckets privados para URLs ESTÁVEIS do proxy
- * (`${base}/api/media/<token>`). Tijolo 2: o DOM deixa de segurar URLs assinados
+ * (`${base}/api/media/<token>`). O DOM não segura URLs assinados
  * de vida curta → sem expiração à vista; o bucket continua privado. `base` é a
  * origem do backend (ex. http://localhost:3001).
  */

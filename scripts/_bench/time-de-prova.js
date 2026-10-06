@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// TIME DESCARTÁVEL PARA A PROVA DO PACOTE (22-set, Figurinha 3 bloco 2).
+// TIME DESCARTÁVEL PARA A PROVA DO PACOTE.
 //
 // O percurso do pacote tem TRÊS pessoas: o dono pede a ativação, o super-admin
 // ativa no Gabinete, e o membro é quem gera. A conta-de-prova.js faz uma conta

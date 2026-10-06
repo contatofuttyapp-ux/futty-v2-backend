@@ -1,4 +1,4 @@
-// CONFERIR O KIT (bancada do prompt, 17-set) — não gasta nada, não chama a fal.
+// CONFERIR O KIT (bancada do prompt) — não gasta nada, não chama a fal.
 //
 // A tabela do relatório pede "kits errados por variante". Julgar isso na folha
 // de contacto é impossível: o emblema do peito tem 20 px lá. Este script corta

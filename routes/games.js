@@ -3,7 +3,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings, goleirosDoTime } = require('../utils/db');
-const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // item 68 (29I, bloco 3): o padrão do time
+const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // o padrão do time
 const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
@@ -12,14 +12,14 @@ const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
 const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
-const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código> (29I, bloco 3)
+const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
 
 const router = express.Router();
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const NOMES_TIMES = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
 
-// Estado efetivo do jogo (achado 9): "em_curso" só quando a hora do jogo já
+// Estado efetivo do jogo: "em_curso" só quando a hora do jogo já
 // chegou e ainda não há resultado — nunca por causa do sorteio ter sido feito
 // cedo. Calculado a cada leitura, não depende de um write acertar a hora certa.
 function statusEfetivoJogo(game) {
@@ -29,8 +29,8 @@ function statusEfetivoJogo(game) {
   return comecou ? 'em_curso' : 'agendado';
 }
 
-// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time, 29I achado 83), não no
-// do servidor (o Cloud Run roda em UTC: "20:30" de São Paulo saía como "23:30").
+// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do
+// time), não no do servidor (o Cloud Run roda em UTC: "20:30" de São Paulo saía como "23:30").
 
 /** IDs dos membros de uma equipa (para notificações). */
 async function membrosDaEquipa(teamId) {
@@ -49,7 +49,7 @@ router.post(
     const team = await getTeamBySlug(teamSlug, 'id, slug, nome');
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
-    // Item 68 (29I, bloco 3): sem número no pedido, o jogo nasce com o padrão do time (Ajustes); com número, é o "mudar só neste jogo".
+    // Sem número no pedido, o jogo nasce com o padrão do time (Ajustes); com número, é o "mudar só neste jogo".
     const porTime = jogadoresPorTime == null || jogadoresPorTime === '' ? jogadoresPorTimeDoTime(team) : parseInt(jogadoresPorTime, 10);
     if (!porTime || porTime < 1) throw new HttpError(400, 'Indique quantos jogadores por time.');
 
@@ -85,7 +85,7 @@ router.post(
           title: '⚽ Novo jogo criado',
           body: `${team.nome || 'Seu time'} · ${dataCurtaNoFuso(game.data, fuso)}`,
           url: '/home',
-        }, { categoria: 'jogos' }) // 29I, bloco 3: quem desligou "Jogos e presença" no Perfil fica de fora
+        }, { categoria: 'jogos' }) // quem desligou "Jogos e presença" no Perfil fica de fora
       );
     }
   })
@@ -109,7 +109,7 @@ router.get(
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
 
-    // Contagem de confirmados por jogo (achados 109/116): enquanto o RSVP está aberto e ainda não
+    // Contagem de confirmados por jogo: enquanto o RSVP está aberto e ainda não
     // fechado, a presença de verdade vive em rsvp_respostas — game_players só é sincronizado no
     // "Fechar presença" (routes/rsvp.js). Fora disso (sem RSVP, ou já fechado), vale game_players,
     // como sempre (o "Vou" simples de Jogo.jsx/Inicio.jsx escreve direto nele).
@@ -167,9 +167,9 @@ router.get(
     const role = await getRole(game.teams.id, req.user.id);
     if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-    // Achado 3/23: estas 4 leituras não dependem umas das outras (só de game.id/
-    // game.teams.id, já conhecidos) — corriam em série, uma round-trip a seguir à
-    // outra. Em paralelo.
+    // Estas 4 leituras não dependem umas das outras (só de game.id/
+    // game.teams.id, já conhecidos) — em paralelo, não uma round-trip a seguir à
+    // outra.
     const [gpResult, inativosResult, golsResult, votosResult] = await Promise.all([
       supabase
         .from('game_players')
@@ -327,13 +327,13 @@ router.get(
     }
 
     res.json({
-      // logo_url (achado 121, 29J): a prévia do link (functions/_shared/previaDoLink.js) usa o
+      // logo_url: a prévia do link (functions/_shared/previaDoLink.js) usa o
       // logo do time como og:image quando existe — "o mínimo" para a prévia parar de ser genérica.
-      // cidade (achado 112, 29K): o rabicho do fuso ("horário de São Paulo") precisa dela.
-      // cor (achado 114, 29K): o resultado já montado (DrawnTeams) pinta o cabeçalho de cada time com ela.
+      // cidade: o rabicho do fuso ("horário de São Paulo") precisa dela.
+      // cor: o resultado já montado (DrawnTeams) pinta o cabeçalho de cada time com ela.
       equipa: { nome: game.teams.nome, slug: game.teams.slug, cor: game.teams.cor || null, fuso: fusoDoTime(game.teams), cidade: game.teams.cidade || null, logo_url: game.teams.logo_url || null },
-      // jogo (achado 112, 29K): quando e onde — a página pública mostrava só o time e os times sorteados,
-      // sem a informação que quem recebe o link no grupo foi mesmo procurar.
+      // jogo: quando e onde — a informação que quem recebe o link no grupo foi mesmo procurar,
+      // além do time e dos times sorteados.
       jogo: { data: game.data || null, local: game.local || null },
       times_resultado: game.times_resultado || null,
       resultado: {
@@ -380,8 +380,8 @@ router.patch(
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir o resultado.');
 
-    // Achado 9: sem resultado antes do jogo acontecer — exceto jogo histórico/
-    // retroativo (criado como "Já aconteceu"), que não tem essa trava.
+    // Sem resultado antes do jogo acontecer — exceto jogo histórico/retroativo
+    // (criado como "Já aconteceu"), que não tem essa trava.
     const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
     if (!jaComecou && !game.historico) {
       throw new HttpError(400, 'O resultado só pode ser registrado depois do início do jogo.');
@@ -466,9 +466,9 @@ router.post(
 
 /**
  * POST /api/games/:id/confirmar — confirma/cancela a própria presença.
- * Rodada 9: `goleiro` é opcional. Sem ele no body, vale o que já estiver
+ * `goleiro` é opcional. Sem ele no body, vale o que já estiver
  * marcado naquele jogo (pelo jogador ou pelo admin) e, se ainda não houver
- * linha, a flag do time (Rodada 10B: team_members.categoria === 'GR').
+ * linha, a flag do time (team_members.categoria === 'GR').
  */
 router.post(
   '/api/games/:id/confirmar',
@@ -481,7 +481,7 @@ router.post(
 
     const role = await getRole(game.teams.id, req.user.id);
     if (!role) throw new HttpError(403, 'Não é membro deste time.');
-    // Rodada 29B (E): quem só organiza o time não entra na lista de presença (desmarcar continua valendo).
+    // Quem só organiza o time não entra na lista de presença (desmarcar continua valendo).
     if (confirmado && (await soOrganiza(game.teams.id, req.user.id))) throw new HttpError(403, MSG_SO_ORGANIZA);
 
     await ensureUserRow(req.user);
@@ -527,7 +527,7 @@ router.post(
     // valida que cada user_id é membro da equipa
     const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', game.teams.id);
     const membroIds = new Set((membros || []).map((m) => m.user_id));
-    // Rodada 29B (E): quem só organiza o time não joga — não entra no elenco nem pela checklist do admin.
+    // Quem só organiza o time não joga — não entra no elenco nem pela checklist do admin.
     const organizam = await idsQueSoOrganizam(game.teams.id);
     const escolhidos = [];
     for (const j of lista) {
@@ -600,7 +600,7 @@ router.post(
       reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
     };
 
-    // Achado 9: status só vira "em_curso" se a hora do jogo já passou — sorteio
+    // Status só vira "em_curso" se a hora do jogo já passou — sorteio
     // feito com antecedência (ou times definidos à mão) não adianta o estado.
     const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
     const patchStatus = jaComecou && game.status !== 'cancelado' ? { status: 'em_curso' } : {};
@@ -665,7 +665,7 @@ router.post(
       .eq('team_id', game.teams.id)
       .eq('ativo', false);
     const inativos = new Set((inativosRows || []).map((m) => m.user_id));
-    // Rodada 29B (E): o sorteio só recebe quem joga — quem só organiza o time fica de fora (utils/soOrganiza.js).
+    // O sorteio só recebe quem joga — quem só organiza o time fica de fora (utils/soOrganiza.js).
     const organizam = await idsQueSoOrganizam(game.teams.id);
     const confirmados = (gp || []).filter((p) => p.users && !inativos.has(p.users.id) && !organizam.has(p.users.id));
 
@@ -742,7 +742,7 @@ router.post(
       reservas: sorteio.reservas,
     };
 
-    // Achado 9: status só vira "em_curso" se a hora do jogo já passou — sorteio
+    // Status só vira "em_curso" se a hora do jogo já passou — sorteio
     // feito com antecedência não adianta o estado (fica "agendado" + chip de
     // times sorteados no frontend).
     const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
@@ -850,8 +850,9 @@ router.patch(
     const b = req.body || {};
     const patch = {};
 
-    // Recombina data/hora (a coluna `data` guarda ambas). 29I (achado 83): data e hora são as do CAMPO — lidas e escritas no
-    // fuso do time, nunca no do servidor (UTC no Cloud Run: "20:00" virava 17:00 em São Paulo) nem no do aparelho de quem edita.
+    // Recombina data/hora (a coluna `data` guarda ambas). Data e hora são as do CAMPO — lidas e escritas no
+    // fuso do time, nunca no do servidor (UTC no Cloud Run: "20:00" virava 17:00 em São Paulo) nem no do
+    // aparelho de quem edita.
     if ('date' in b || 'time' in b) {
       const fuso = fusoDoTime(game.teams);
       const base = partesNoFuso(game.data, fuso);
@@ -1007,8 +1008,9 @@ router.post(
     const n = Number(semanas);
     if (![4, 8, 12].includes(n)) throw new HttpError(400, 'Semanas deve ser 4, 8 ou 12.');
 
-    // Próximas N datas para o dia da semana escolhido (a partir de hoje). 29I (achado 83): "hoje", o dia da semana e a hora são
-    // os do CAMPO (fuso do time), não os do servidor — o Cloud Run roda em UTC, e "quinta 20:00" saía às 17:00 de São Paulo.
+    // Próximas N datas para o dia da semana escolhido (a partir de hoje). "hoje", o dia da semana e a hora
+    // são os do CAMPO (fuso do time), não os do servidor — o Cloud Run roda em UTC, e "quinta 20:00" saía
+    // às 17:00 de São Paulo.
     const fuso = fusoDoTime(team);
     const hojeNoCampo = partesNoFuso(new Date(), fuso);
     const horaTexto = `${String(horas).padStart(2, '0')}:${String(minutos).padStart(2, '0')}`;
@@ -1037,7 +1039,7 @@ router.post(
     const existentesTs = (existentes || []).map((g) => new Date(g.data).getTime());
     const colide = (d) => existentesTs.some((ts) => Math.abs(ts - d.getTime()) <= 3600000);
 
-    const porTime = jogadoresPorTimeDoTime(team); // item 68 (29I, bloco 3): o padrão do time (sem ele, 5); o admin ajusta depois por jogo.
+    const porTime = jogadoresPorTimeDoTime(team); // o padrão do time (sem ele, 5); o admin ajusta depois por jogo.
     const aInserir = [];
     const criadas = [];
     let ignorados = 0;

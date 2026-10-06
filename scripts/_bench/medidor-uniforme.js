@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// MEDIDOR DE FIDELIDADE DO UNIFORME (6-out, achado 3g da LISTA-CURTA).
+// MEDIDOR DE FIDELIDADE DO UNIFORME.
 //
 // Não chama a fal, não gasta nada. Compara o TRONCO da figurinha com a imagem do
 // kit que entrou na geração e diz se o uniforme saiu fiel.
@@ -11,7 +11,7 @@
 // esquerda de quem veste (a da direita de quem olha) é toda do acento, com o
 // punho da cor base.
 //
-// Os defeitos de 5-out (LOJA/demo-avatares, 9 gerações, 4 certas):
+// Os defeitos do gabarito (LOJA/demo-avatares, 9 gerações, 4 certas):
 //   • FAIXA — o acento vira uma faixa de bordas PARALELAS: a borda direita
 //     desce na diagonal junto com a esquerda (dono t1 e t2, Careca).
 //     Ter preto à direita do ouro NÃO é o defeito — as 4 certas também têm
@@ -32,7 +32,7 @@
 //
 // Uso (bancada):
 //   node scripts/_bench/medidor-uniforme.js --gabarito [--debug pasta]
-//        as 9 de 5-out × o veredito do dono; sai com erro se errar alguma
+//        as 9 do gabarito × o veredito do dono; sai com erro se errar alguma
 //   node scripts/_bench/medidor-uniforme.js <recorte.png> --kit <kit.png> [--debug saida.png]
 // Módulo: const { medirUniforme, lerReferenciaKit } = require('./medidor-uniforme');
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -62,10 +62,10 @@ const difMatiz = (a, b) => { const d = Math.abs(a - b) % 360; return d > 180 ? 3
 /**
  * Uma cor do kit vira um TESTE de pertença, conforme o tipo:
  *   cromática (ouro, roxo)     → matiz a ±17° e croma >= 60% da do kit; luz livre.
- *     Medido nas 9 de 5-out: o ouro gerado sai com matiz 61–85° e croma 40–67;
+ *     Medido nas 9 do gabarito: o ouro gerado sai com matiz 61–85° e croma 40–67;
  *     a pele fica em 30–60° com croma 20–49. É o MATIZ que separa — numa
- *     distância Lab comum a pele cai mais perto do ouro do que do preto, e a
- *     primeira versão deste medidor pintava os rostos de "acento".
+ *     distância Lab comum a pele cai mais perto do ouro do que do preto, e os
+ *     rostos virariam "acento".
  *   acromática (preto, branco) → croma baixa e luz do mesmo lado: o preto
  *     pintado tem brilho de cetim (L até ~40), o branco tem sombra (L de 60).
  */
@@ -166,7 +166,7 @@ function duasCores(labs, noPeitoEsquerdo) {
  * cima) onde a camisa ocupa >= 60% da maior largura por 3% da altura seguidos:
  * cabelo e barba pretos passam no teste do preto, mas a cabeça nunca chega a
  * 60% da largura dos ombros. O tronco analisado vai até 0,8 ombro abaixo —
- * nas 9 de 5-out isso fica sempre acima da barra da camisa.
+ * nas 9 do gabarito isso fica sempre acima da barra da camisa.
  */
 function geometria(cls, w, h) {
   const buraco = Math.max(3, Math.round(w * 0.03));
@@ -307,7 +307,7 @@ async function lerReferenciaKit(kitBuf) {
 }
 
 // O veredito. Cada regra é uma frase sobre o kit; o número é o meio da folga
-// entre as certas e as erradas do gabarito de 5-out (rodar --gabarito):
+// entre as certas e as erradas do gabarito (rodar --gabarito):
 const REGRAS = {
   // manga esquerda de quem veste: certas 0,75–0,93 · erradas 0,07 · kit 0,72
   mangaMin: 0.45,
@@ -377,12 +377,12 @@ const DEMO = path.join(FUT, 'LOJA', 'demo-avatares');
 // As imagens dos kits (cópia do bucket público `kits`) vivem fora do repositório, com a saída da bancada.
 const KITS = path.join(FUT, 'LOJA', 'uniforme-bancada', 'kits');
 
-// O gabarito: as 9 V6 de 5-out, pela ordem em que foram geradas. A LISTA-CURTA
-// (3g) diz "fiel em 4 de 9": dono t1/t2 errados (faixa), t3 certo; Zé Gordo
-// 2 de 3 com a manga preta (as duas primeiras). Faltam 2 certas e 1 errada
-// entre Careca e os dois Paredões: de perto (6-out), o Careca é faixa de bordas
-// paralelas e os dois Paredões são cunha — o "reprovado" do Paredão foi pela
-// cara de revista, não pelo uniforme.
+// O gabarito: as 9 V6 geradas, pela ordem em que foram geradas. Fiel em 4 de 9:
+// dono t1/t2 errados (faixa), t3 certo; Zé Gordo 2 de 3 com a manga preta
+// (as duas primeiras). Faltam 2 certas e 1 errada entre Careca e os dois
+// Paredões: de perto, o Careca é faixa de bordas paralelas e os dois Paredões
+// são cunha — o "reprovado" do Paredão foi pela cara de revista, não pelo
+// uniforme.
 const GABARITO = [
   { id: 'l1-careca', certo: false },
   { id: 'l2-ze-gordo-reprovado', certo: false },

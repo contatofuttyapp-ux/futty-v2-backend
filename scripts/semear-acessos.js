@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Futty v2.0 — Semeia a tabela "Acessos & contas" do Gabinete a partir do CONTAS.md (Pagamentos P2, 26-set).
+// Futty v2.0 — Semeia a tabela "Acessos & contas" do Gabinete a partir do CONTAS.md.
 //
 // O CONTAS.md (raiz do FUT, da Freaky) é onde cada conta da operação mora — SEM senhas. O Gabinete
 // (aba Registros → "Acessos & contas") é o espelho no app. Este script leva do arquivo para lá só o que

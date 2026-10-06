@@ -1,20 +1,17 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// O PROMPT DA FIGURINHA — fonte única (17-set, variante 6 da bancada).
+// O PROMPT DA FIGURINHA — fonte única.
 //
 // Este ficheiro é o prompt. `routes/auth.js` e a bancada
 // (`scripts/_bench/testar-prompt.js`) importam daqui — nunca copiam.
 //
-// DE ONDE VEIO: bancada de 49 figurinhas (7 fotos × 7 variantes,
-// `scripts/_bench/testar-prompt.js`), avaliada às cegas pelo dono a 17-set:
-//   P1, o prompt antigo (5.375 caracteres, PRIORITY ORDER + STYLE de pincelada
-//        larga + checklist de kit em cinco pontos) ................. 1,6/5
-//   P2, este ("FACE FIRST", kit em uma frase) ..................... 4,0/5
-//   P3, P2 com o bloco STYLE antigo de volta ...................... 3,3/5
-//   P2 + input_fidelity high + entrada quadrada (a escolhida) ..... 4,1/5
-// O prompt é a alavanca principal: mesmo modelo, mesma qualidade, mesma conta —
-// 1,6 → 4,1 só trocando o texto. O bloco STYLE antigo ("broad brush", "hair as
-// masses", "skin smooth") está REPROVADO: era ele que apagava o rosto (P3 caiu
-// 0,7 ponto face a P2 sem mudar mais nada).
+// O prompt é a alavanca principal: mesmo modelo, mesma qualidade, mesma conta.
+// Na bancada de 49 figurinhas (7 fotos × 7 variantes), avaliada às cegas pelo dono,
+// o prompt antigo (5.375 caracteres, PRIORITY ORDER + STYLE de pincelada larga +
+// checklist de kit em cinco pontos) tirou 1,6/5; este ("FACE FIRST", kit em uma
+// frase, com input_fidelity high + entrada quadrada) tirou 4,1/5.
+// O bloco STYLE antigo ("broad brush", "hair as masses", "skin smooth") está
+// REPROVADO: era ele que apagava o rosto (com o STYLE antigo de volta a nota
+// caiu 0,7 ponto sem mudar mais nada).
 //
 // O que NÃO mudar sem outra bancada:
 //   • a ordem dos blocos (FACE FIRST vem primeiro de propósito);
@@ -23,12 +20,11 @@
 //   • "flat mid-grey #8a8a8a" no fundo, que é o que o birefnet recorta.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// A regra dos óculos vive numa LINHA PRÓPRIA, no início do FACE FIRST. Na
-// bancada de 17-set ela estava entre parênteses no fim do parágrafo e três
-// figurinhas do Gui saíram com os óculos escuros na cara — a versão entre
-// parênteses perde-se no meio do texto.
-// 22-set, forma FORTE: "remove them" sozinho deixava o modelo trocar lentes
-// escuras por óculos de grau, que também não é o que se pede. Agora não há
+// A regra dos óculos vive numa LINHA PRÓPRIA, no início do FACE FIRST: entre
+// parênteses no fim do parágrafo ela se perdia no meio do texto e três
+// figurinhas do Gui saíram com os óculos escuros na cara.
+// Forma FORTE: "remove them" sozinho deixava o modelo trocar lentes
+// escuras por óculos de grau, que também não é o que se pede. Não há
 // espaço: tira tudo e pinta os olhos.
 const REGRA_OCULOS = 'SUNGLASSES: if Image 1 shows sunglasses, remove them completely — no glasses of any kind — and paint natural open eyes that fit this face.';
 
@@ -78,10 +74,10 @@ function montarPrompt(kitId) {
   return MOLDE.replace('{{KIT_CURTO}}', curto).replace('{{KIT_CHECK}}', KIT_CHECK);
 }
 
-// ── A SEGUNDA PASSADA (22-set) ────────────────────────────────────────────────
+// ── A SEGUNDA PASSADA ────────────────────────────────────────────────────────
 //
-// Desde 22-set a figurinha nasce em duas passadas: o gpt-image-2.5 dá a CARA
-// (foi a que o dono aprovou) e o gpt-image-1.5 repinta no acabamento da casa.
+// Na receita de duas passadas, o gpt-image-2.5 dá a CARA (foi a que o dono
+// aprovou) e o gpt-image-1.5 repinta no acabamento da casa.
 // Este é o prompt da segunda — ele NÃO descreve a pessoa nem o kit, porque não
 // precisa: a imagem que recebe já tem tudo. A única coisa que ele faz é trocar
 // o acabamento sem deixar nada mais mudar.

@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// O PROMPT ANTIGO — ARQUIVO MORTO (17-set). NÃO USAR EM PRODUÇÃO.
+// O PROMPT ANTIGO — ARQUIVO MORTO. NÃO USAR EM PRODUÇÃO.
 //
-// Este era o prompt do avatar até 17-set: PROMPT_BASE (5.375 caracteres, com
+// Era o prompt do avatar: PROMPT_BASE (5.375 caracteres, com
 // PRIORITY ORDER e o bloco STYLE de pincelada larga) + a secção KIT em cinco
 // pontos + o checklist de cinco itens. Foi REPROVADO na bancada de 49
 // figurinhas: 1,6/5 contra 4,1/5 do prompt novo (prompts/figurinha.js), e errou
@@ -112,7 +112,7 @@ CRITICAL KIT RULES:
 - Image 2 is the ground truth — follow it exactly
 - Always use this kit — NEVER generate a white or blank jersey`;
 
-// Ronda 3 (30-jul): no low os detalhes pequenos do kit somem (o friso da manga
+// No low os detalhes pequenos do kit somem (o friso da manga
 // foi o primeiro visto na prova de produção). Checklist explícito no fim do prompt.
 const kitChecklist = (acento) => `KIT CHECKLIST — before finishing, verify ALL FIVE elements are present:
 1. base colour of the jersey exactly as Image 2

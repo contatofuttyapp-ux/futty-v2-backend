@@ -6,7 +6,7 @@ const cache = new Map(); // cidade (lower) -> {lat,lng,nomeOficial} | null
 let ultimoReq = 0;
 
 /**
- * O nome que a pessoa vê em "Encontramos: …" (Rodada 29B, D): o nome do lugar e a região — "Brasília, Distrito Federal",
+ * O nome que a pessoa vê em "Encontramos: …": o nome do lugar e a região — "Brasília, Distrito Federal",
  * "Porto, Portugal". Só o que o Nominatim diz do lugar; nunca a morada.
  */
 function nomeOficialDoNominatim(item) {

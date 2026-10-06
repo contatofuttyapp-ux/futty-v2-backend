@@ -3,7 +3,7 @@
 // próprio usuário) e scripts/limpar-usuarios-teste.js (limpeza em massa), para
 // nunca haver duas versões da ordem de deleção a divergir com o tempo.
 //
-// ORDEM (mesma auditoria de scripts/limpar-usuarios-teste.js, 14-set):
+// ORDEM (mesma auditoria de scripts/limpar-usuarios-teste.js):
 //   1) Times onde o usuário é criador/admin — sucessão ANTES de tudo: se sobra
 //      outro admin, só passa o criado_por adiante (teams.criado_por tem ON
 //      DELETE CASCADE — sem isto, apagar o usuário apagava também um time com
@@ -113,7 +113,7 @@ async function coletarUrlsStorage(userId) {
     console.warn('[apagarUsuario] user_avatar_slots (leitura) indisponível:', e.message);
   }
 
-  // user_avatar_historico — migração 057 (Rodada 19, "Minhas figurinhas"); defensivo.
+  // user_avatar_historico — migração 057 ("Minhas figurinhas"); defensivo.
   try {
     const { data: historico, error } = await supabase.from('user_avatar_historico').select('avatar_url').eq('user_id', userId);
     if (error) throw new Error(error.message);
@@ -161,10 +161,9 @@ async function apagarUsuario(userId) {
   const urlsPorBucket = { avatars: [], resenha: [] };
   for (const url of urls) {
     // bucketEcaminho (não parseUrlPublico): a mídia da Resenha guardada em
-    // feed_post_media/comentario_anexos é sempre a URL do PROXY desde o
-    // Tijolo 2 — sem isto, essas URLs nunca entravam em urlsPorBucket e a
-    // conta apagada deixava fotos/comentários órfãos no bucket resenha para
-    // sempre (achado real, Rodada 15 — mesma causa do item 3 em feed.js).
+    // feed_post_media/comentario_anexos é sempre a URL do PROXY — sem isto,
+    // essas URLs nunca entravam em urlsPorBucket e a conta apagada deixava
+    // fotos/comentários órfãos no bucket resenha para sempre.
     const p = bucketEcaminho(url);
     if (p) urlsPorBucket[p.bucket].push(url);
   }
@@ -176,7 +175,7 @@ async function apagarUsuario(userId) {
     fotosRemovidas += r.removidos;
     if (r.erro) console.warn(`[apagarUsuario] Storage (${bucket}): ${r.erro}`);
   }
-  // VARRIMENTO POR PREFIXO (22-set). Os ficheiros do utilizador passaram a ter
+  // VARRIMENTO POR PREFIXO. Os ficheiros do utilizador têm
   // carimbo de tempo no nome (`public/<userId>-<carimbo>.jpg`,
   // `public/<userId>-ai-<kit>-<carimbo>.png`, `tmp/<userId>-<carimbo>-*`), por
   // duas razões: cache nenhum serve versão velha, e cada geração é um objeto

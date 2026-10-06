@@ -1,4 +1,4 @@
-// Futty v2.0 — Cota de mídia da Resenha por time (Rodada 15, 16-set).
+// Futty v2.0 — Cota de mídia da Resenha por time.
 //
 // 500 MB por time: uma foto de celular sem compressão pesa 3-5 MB; 100 GB do
 // plano dariam só ~25 mil fotos. Depende da migração 053 (coluna

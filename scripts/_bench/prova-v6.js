@@ -1,10 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// PROVA DA RECEITA V6 (SPEC-FIGURINHA-3 §4, 22-set).
+// PROVA DA RECEITA V6 (SPEC-FIGURINHA-3 §4).
 //
 // A Brilhante é paga, por isso leva a MELHOR receita — a V6 que o dono avaliou
-// em 4,1/5 na bancada cega de 17-set, e não as duas passadas (US$0,05) que
-// serviam a figurinha grátis. Esta prova responde a uma pergunta só: a V6
-// continua a funcionar exactamente como em 17-set?
+// em 4,1/5 na bancada cega, e não as duas passadas (US$0,05) que servem a
+// figurinha grátis. Esta prova responde a uma pergunta só: a V6
+// continua a funcionar exactamente como na bancada cega?
 //
 //   mesmo motor      fal-ai/gpt-image-1.5/edit, quality low
 //   mesma entrada    corte QUADRADO 1024×1024 (utils/entradaFigurinha.js)
@@ -14,7 +14,7 @@
 //
 // Chama `gerarFigurinha` DIRETO, sem passar pela rota: o portão do direito
 // (§5) é outra coisa e tem os seus próprios testes. Usa a foto do modelo
-// FICTÍCIO da conta demo — nunca uma pessoa real (regra de 17-set).
+// FICTÍCIO da conta demo — nunca uma pessoa real.
 //
 //   node scripts/_bench/prova-v6.js
 //   --receita duas-passadas   compara com a receita alternativa (US$0,05)

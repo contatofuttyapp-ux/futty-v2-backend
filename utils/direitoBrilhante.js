@@ -1,15 +1,15 @@
 // Futty v2.0 — Quem pode gerar uma Figurinha Brilhante (SPEC-FIGURINHA-3, §5).
 //
-// Desde 22-set toda geração de IA nasce paga. Há dois direitos:
+// Toda geração de IA nasce paga. Há dois direitos:
 //
 //   1. CRÉDITO  `users.brilhante_creditos > 0` — comprou a "Minha Figurinha"
 //      (+10) ou recebeu crédito à mão pelo Gabinete. O uniforme é à escolha
 //      entre os 5. (O presente do criador de time, +3 ao criar o time, foi
-//      ABOLIDO em 26-set pelo dono: conta grátis não gera nada, nunca.)
+//      ABOLIDO pelo dono: conta grátis não gera nada, nunca.)
 //   2. TIME     é membro de um time com `teams.brilhante_ativo` e ainda tem
 //      geração no pacote: sem linha em `brilhantes_time` para
 //      (team_id, user_id) OU `geracoes < teams.brilhante_por_jogador` (2,
-//      migração 065; era 5 na 059), dentro de `teams.brilhante_limite` (25
+//      migração 065), dentro de `teams.brilhante_limite` (25
 //      jogadores). O uniforme é o do time (`teams.brilhante_kit`), fixado
 //      pelo dono.
 //
@@ -19,7 +19,7 @@
 // pior caso é um time passar da cota; aqui seria a casa pagar US$0,11 por
 // cadastro, que é exatamente o que esta spec veio acabar.
 //
-// Migração 059 (Rodada 21) é o MESMO tipo de fail-safe: sem a coluna
+// Migração 059 é o MESMO tipo de fail-safe: sem a coluna
 // `geracoes`, o motor lê "existe linha = já gerou a única vez que se sabia
 // dar" (o comportamento de antes da 059) — nunca deixa passar mais gerações
 // do que o banco sabe contar.
@@ -48,7 +48,7 @@ async function geracoesNoTime(teamId, userId) {
     return {
       existe: !!data,
       usadas: data ? (data.geracoes == null ? 1 : Number(data.geracoes)) : 0,
-      // Rodada 28: o custo JÁ gasto nesta linha — a geração nova SOMA a ele (ver debitar).
+      // O custo JÁ gasto nesta linha — a geração nova SOMA a ele (ver debitar).
       custoCents: data?.custo_cents ?? null,
       colunaExiste: true,
     };
@@ -67,9 +67,9 @@ async function geracoesNoTime(teamId, userId) {
 }
 
 /**
- * RODADA 28 (achado da Rodada 22) — o custo de uma linha do pacote é a SOMA das gerações dela.
- * O upsert gravava o custo da geração atual por cima do anterior: refazer 5 vezes deixava no
- * Gabinete só o custo da última. Sem custo nenhum conhecido fica null (o Gabinete conta à parte
+ * O custo de uma linha do pacote é a SOMA das gerações dela.
+ * Gravar o custo da geração atual por cima do anterior deixaria no
+ * Gabinete só o custo da última (refazer várias vezes). Sem custo nenhum conhecido fica null (o Gabinete conta à parte
  * as gerações sem custo gravado, para o total não se passar por completo).
  */
 function somarCusto(anteriorCents, destaCents) {
@@ -126,7 +126,7 @@ async function temDireito(userId) {
       .eq('teams.brilhante_ativo', true);
     if (erroMembros) throw new Error(erroMembros.message);
 
-    // Rodada 29B (E): quem só organiza o time não joga — não usa o pacote (nem as gerações, nem uma das 25 vagas).
+    // Quem só organiza o time não joga — não usa o pacote (nem as gerações, nem uma das 25 vagas).
     const soOrganiza = membros?.length ? await timesEmQueSoOrganiza(userId) : new Set();
     for (const m of membros || []) {
       const time = m.teams;
@@ -137,7 +137,7 @@ async function temDireito(userId) {
       // Fail-safe: `brilhante_por_jogador` também some se a 059 não rodou —
       // 1 mantém o comportamento de antes dela (uma geração por jogador).
       const porJogador = Number(time.brilhante_por_jogador) || 1;
-      // Rodada 29A: o pacote caiu de 5 para 2. Quem já tinha gasto mais de 2 antes da mudança
+      // Quem já gastou mais do que o limite atual do pacote (que já foi maior)
       // fica sem geração nova — e `restantes` nunca sai negativo (clamp em 0 logo abaixo).
       if (usadas >= porJogador) continue;
       // O time ainda cabe no tecto de JOGADORES (25), não de gerações: uma
@@ -183,8 +183,8 @@ function ehFuncaoEmFalta(erro) {
 
 /**
  * Soma `qtd` (negativo debita) a `users.brilhante_creditos` e devolve o saldo
- * novo — nunca abaixo de zero. Pagamentos P1: pela função atómica da migração
- * 064 (`update ... set x = x + n` num passo só); o ler-e-gravar antigo perdia
+ * novo — nunca abaixo de zero. Faz-se pela função atómica da migração
+ * 064 (`update ... set x = x + n` num passo só): o ler-e-gravar perdia
  * uma soma quando duas escritas caíam juntas (webhook + restaurar compras).
  * Sem a 064 no banco, cai no ler-e-gravar de sempre com aviso — nunca quebra.
  * `cliente` injetável para os testes de utils/compras.js (Supabase falso).
@@ -220,7 +220,7 @@ async function somarCreditos(userId, qtd, cliente = supabase) {
 async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
   try {
     if (direito?.fonte === 'time') {
-      // Rodadas 21/22/29A — o pacote dá várias gerações por jogador (2 desde a 29A), não 1:
+      // O pacote dá várias gerações por jogador (2), não 1:
       // `geracoes` conta quantas essa pessoa já usou NESTE time, e o upsert
       // tem de a SOMAR, não substituir. Lê-e-escreve (uma pessoa não gera
       // duas ao mesmo tempo) — sem linha ainda, começa de 0 (a que está a nascer é a 1ª).
@@ -230,7 +230,7 @@ async function debitar(direito, { userId, kitId, avatarUrl, custoCents }) {
         user_id: userId,
         kit_id: kitId,
         avatar_url: avatarUrl,
-        // Rodada 28: SOMA à linha (antes o upsert punha só o custo desta geração por cima).
+        // SOMA à linha, em vez de pôr só o custo desta geração por cima.
         custo_cents: somarCusto(jaGasto, custoCents),
         gerada_em: new Date().toISOString(),
       };

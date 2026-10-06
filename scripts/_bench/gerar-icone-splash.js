@@ -3,22 +3,22 @@
 // UMA VEZ (não é bancada de comparação); fica em _bench por convenção do
 // house style (scripts avulsos de geração de asset vivem aqui).
 //
-// 23-set — "ouro vivo": reusa a MESMA peça de F e o MESMO fundo de
+// "Ouro vivo": reusa a MESMA peça de F e o MESMO fundo de
 // scripts/_bench/testar-icone.js (gradiente vertical + reflexo diagonal +
 // brilho atrás, sobre a vinheta #0b0a12→#1a1826) em vez de redesenhar aqui —
 // é a linguagem escolhida pelo dono na bancada (variante 2, "ouro vivo + aro";
 // o aro fica só no ÍCONE — ver aplicar-icone.js — o splash não tem cantos de
-// app para emoldurar). Antes: F a 62%/40%, fundo chapado #0d0d12, ouro sólido
-// #d4a017 sem gradiente nem brilho.
+// app para emoldurar).
 //
-// 5-out, Rodada 29X — O resources/splash.png DESTE script NÃO é o splash que vai ao aparelho:
-//   · tem vinheta (#0b0a12→#1a1826) e o splash do app é o #080808 SÓLIDO (a cor de colors.xml, do capacitor.config.json
-//     e do --bg: com vinheta haveria degrau na troca da abertura para o app);
-//   · o ouro sai CHAPADO (#f5e070, sem degradê): o degradê do pecaF (defsOuro) é userSpaceOnUse e vive dentro do grupo
-//     transformado do F, ou seja, em coordenadas do próprio F — só cobre o F inteiro no quadrado de 1024 da bancada; a
-//     2732 px ele cai fora do F. (O icon.png, a 1024, está certo.)
-// O splash do app (iPhone, Android abaixo do 12 e frontend/assets/) sai de frontend/scripts/gerar-splash.mjs, que renderiza
-// a MESMA peça do ícone do iPhone em escala maior (scripts/_bench/renderizar-camadas.js). Este script só vale para o icon.png.
+// O resources/splash.png DESTE script NÃO é o splash que vai ao aparelho:
+//   · tem vinheta (#0b0a12→#1a1826) e o splash do app é o #080808 SÓLIDO (a cor de colors.xml, do
+//     capacitor.config.json e do --bg: com vinheta haveria degrau na troca da abertura para o app);
+//   · o ouro sai CHAPADO (#f5e070, sem degradê): o degradê do pecaF (defsOuro) é userSpaceOnUse e vive
+//     dentro do grupo transformado do F, ou seja, em coordenadas do próprio F — só cobre o F inteiro
+//     no quadrado de 1024 da bancada; a 2732 px ele cai fora do F. (O icon.png, a 1024, está certo.)
+// O splash do app (iPhone, Android abaixo do 12 e frontend/assets/) sai de
+// frontend/scripts/gerar-splash.mjs, que renderiza a MESMA peça do ícone do iPhone em escala maior
+// (scripts/_bench/renderizar-camadas.js). Este script só vale para o icon.png.
 const fs = require('fs');
 const path = require('path');
 const sharp = require('sharp');

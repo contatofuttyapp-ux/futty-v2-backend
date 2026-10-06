@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CAMADAS DO "OURO VIVO" NO TAMANHO CHEIO — Rodada 29X.
+// CAMADAS DO "OURO VIVO" NO TAMANHO CHEIO.
 //
-// Quem desenha o ícone e o splash do app é a receita da bancada de 23-set
+// Quem desenha o ícone e o splash do app é a receita da bancada do ícone
 // (testar-icone.js: o F real de futtyMonograma.js, em ouro com degradê, reflexo e
 // brilho, sobre a vinheta). Este script só RENDERIZA as peças dela no tamanho cheio
 // e as grava como PNG; quem compõe, redimensiona e grava nos lugares do app é o
@@ -14,8 +14,9 @@
 //
 //   adaptativo-fundo-1024.png   a vinheta #1a1826 → #0b0a12 SEM aro (variante 1 "ouro vivo"), sem alfa
 //   adaptativo-frente-1024.png  só o F ouro vivo com o brilho, transparente, dentro da zona segura (66/108)
-//   splash-f-<altura>.png       o F ouro vivo com o brilho, transparente, num quadrado só um pouco maior que o F (74% do lado),
-//                               com <altura> px de altura — a mesma peça do ícone do iPhone, só em escala maior
+//   splash-f-<altura>.png       o F ouro vivo com o brilho, transparente, num quadrado só um pouco
+//                               maior que o F (74% do lado), com <altura> px de altura — a mesma
+//                               peça do ícone do iPhone, só em escala maior
 //
 //   node scripts/_bench/renderizar-camadas.js --saida=<pasta> [--splash-altura=928]
 // ═══════════════════════════════════════════════════════════════════════════════

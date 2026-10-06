@@ -1,4 +1,4 @@
-// Futty v2.0 — RODADA 19: conta descartável para a cena 'rodada19' do
+// Futty v2.0 — conta descartável para a cena 'rodada19' do
 // ver-iphone.mjs (enquadrar dentro de Trocar foto, Minhas figurinhas,
 // miniatura pelo topo). Entra em domingueira-fc-demo (já tem 6+ jogos
 // passados) e confirma em 3 deles só para passar do MIN_JOGOS do Ranking —

@@ -1,4 +1,4 @@
-// Triagem de denúncias (Tijolo 3, Fase B) — o cérebro da SPEC-DENUNCIAS §3.
+// Triagem de denúncias — o cérebro da SPEC-DENUNCIAS §3.
 // Motor: Fable (claude-fable-5) quando ANTHROPIC_API_KEY existe; senão fallback
 // conservador por regras (o fluxo funciona e é provável sem chave). Camada
 // substituível: quem chama nunca sabe qual motor decidiu.

@@ -1,4 +1,4 @@
-// Futty v2.0 — Prazo para promessas que podem ficar penduradas (Rodada 8B, 15-set).
+// Futty v2.0 — Prazo para promessas que podem ficar penduradas.
 //
 // O Storage do Supabase, numa rede ruim ou instável, pode simplesmente nunca
 // responder — nem sucesso nem erro, só silêncio. Um try/catch não ajuda nesse

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Futty v2.0 — Arquivos órfãos do bucket `avatars` (Rodada 28, bloco G).
+// Futty v2.0 — Arquivos órfãos do bucket `avatars`.
 //
 // Lista (por padrão só LISTA — nada é apagado) os arquivos do bucket `avatars` que nenhuma linha do
 // banco usa: fotos e originais substituídas cuja faxina não terminou (a limpeza roda depois da resposta,

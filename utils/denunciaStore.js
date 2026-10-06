@@ -1,4 +1,4 @@
-// Futty v2.0 — Denúncias + triagem — camada de dados SEM DDL (Tijolo 3, Fase B).
+// Futty v2.0 — Denúncias + triagem — camada de dados SEM DDL.
 // À boleia do padrão da casa (campeonatoStore): cada denúncia vive como um JSON no
 // Storage (bucket privado "denuncias"), o LOG é append-only (eventos[] nunca se
 // reescreve destrutivamente — só se acrescenta) = escudo jurídico. O dono é cego
@@ -29,7 +29,7 @@ const hoje = (agora) => new Date(agora).toISOString().slice(0, 10);
 function caminhoReporter(userId) {
   return `reporters/${userId}.json`;
 }
-// Rodada 8B: prazo de 3 s (comPrazo) em toda LEITURA do Storage deste módulo —
+// Prazo de 3 s (comPrazo) em toda LEITURA do Storage deste módulo —
 // uma ida sem resposta nunca pode prender quem chama (ex.: obterDesfechosDenuncias,
 // no caminho de /api/inicio, embrulhado em seguro() do lado de lá).
 async function obterReporter(userId) {
@@ -66,9 +66,9 @@ async function ajustarPeso(userId, confirmada) {
 function chaveEquipa(teamId) { return teamId || '_sem'; }
 function caminhoCaso(teamId, id) { return `casos/${chaveEquipa(teamId)}/${id}.json`; }
 
-// VELOCIDADE 6A (15-set): quem lê casos em rota quente (services/inicio.js,
+// Quem lê casos em rota quente (services/inicio.js,
 // obterDesfechosDenuncias) guarda o resultado em cache por equipa. Gravar um
-// caso tem de esquecer essa cache, senão o utilizador não via o desfecho da
+// caso tem de esquecer essa cache, senão o utilizador não vê o desfecho da
 // própria denúncia durante minutos. Registado por quem cacheia, chamado aqui.
 const aoGravarCaso = [];
 function aoGravar(fn) { aoGravarCaso.push(fn); }

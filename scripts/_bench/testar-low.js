@@ -1,4 +1,4 @@
-// BANCADA — VIABILIZAR O `low` (prioridade nº1 do dono, 29-jul)
+// BANCADA — VIABILIZAR O `low` (prioridade nº1 do dono)
 //
 // ===========================================================================
 // COMO CORRER (é um script de terminal, não se abre com duplo-clique):

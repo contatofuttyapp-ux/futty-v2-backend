@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA "FIGURINHA GRÁTIS SEM IA" (22-set) — recorte + sharp, nada generativo.
+// BANCADA "FIGURINHA GRÁTIS SEM IA" — recorte + sharp, nada generativo.
 //
-// Decisão em estudo (dono, 22-set): a figurinha GRÁTIS passa a ser o recorte da
+// Decisão em estudo (dono): a figurinha GRÁTIS passa a ser o recorte da
 // foto real; a arte IA fica só para quem paga. Esta bancada mostra, nas 7 fotos
 // da BANCADA-FOTOS, como fica a figurinha grátis feita só com o birefnet
 // (US$0,002) e processamento nosso — e quanto custa e demora cada acabamento.
@@ -60,7 +60,7 @@ const { chamarFal, emDolares } = require('../../utils/falFila');
 const { topoDaPele, preprocessarQuadrado } = require('../../utils/entradaFigurinha');
 // A receita de produção, só para gerar UMA vez o busto de cada kit pago
 // (US$0,05 cada) a partir do modelo fictício da conta demo — nunca de uma
-// pessoa real, para não contaminar a cara (regra de 17-set).
+// pessoa real, para não contaminar a cara.
 const { gerarFigurinha } = require('../../utils/geracaoFigurinha');
 const { baixar, achatamento, molduraSVG, folhaDeContato, mulberry32, paraCsv, lerKit } = require('./comum');
 
@@ -73,8 +73,8 @@ const BUSTO_FONTE_GOLD = path.join(__dirname, 'saida-producao', 'prova-real-2026
 // ainda não têm figurinha guardada (adendo b: dark-purple).
 const FOTO_MODELO = path.join(__dirname, 'estado-demo', 'foto-silhueta-original.jpg');
 const caminhoAsset = (kit, sufixo = '') => path.join(ASSETS, `busto-${kit}${sufixo}`);
-// Todos os bustos à mesma altura: o de 17-set tem 680 px, e é essa a escala
-// em que as medidas (pescoço, gola, pluma) foram afinadas.
+// Todos os bustos à mesma altura: 680 px, a escala em que as medidas (pescoço,
+// gola, pluma) foram afinadas.
 const ALTURA_BUSTO = 680;
 const FOTOS = path.join(__dirname, '..', '..', '..', '..', 'BANCADA-FOTOS');
 const ESTADIO = path.join(__dirname, '..', '..', '..', 'frontend', 'public', 'stadium_bg.webp');
@@ -253,7 +253,7 @@ async function detectarRosto(fa, orientado) {
 
 // ─── O busto sem cabeça (asset) ──────────────────────────────────────────────
 /**
- * Apaga a cabeça da figurinha de produção de 17-set acima da gola, com pluma, e
+ * Apaga a cabeça da figurinha de produção acima da gola, com pluma, e
  * guarda em assets/. A gola é onde a largura dispara depois do pescoço (o V da
  * camisa começa nos ombros): pescoço = mínimo entre 20% e 50% da altura, gola =
  * primeira linha abaixo com largura > 1,5× o pescoço. Devolve as medidas que a
@@ -281,7 +281,7 @@ const ehPeleEstrita = (r, g, b) => {
  * O busto de um kit, sem cabeça, com a máscara de pele (braços + V) e as
  * medidas guardadas ao lado: assets/busto-<kit>.png, -pele.png, .json. Só se
  * gera quando falta ou com --refazer-busto; `obterFonte()` devolve a figurinha
- * COM cabeça (PNG com alpha) — do ficheiro de 17-set no dark-gold, de uma
+ * COM cabeça (PNG com alpha) — do ficheiro BUSTO_FONTE_GOLD no dark-gold, de uma
  * geração real no resto. Todas as fontes são trimadas e postas a 680 px de
  * altura, a escala em que as medidas foram afinadas.
  */
@@ -329,8 +329,8 @@ async function garantirBusto(kit, obterFonte) {
   for (let i = 0; i < w * h; i += 1) {
     if (pb.data[i * 4 + 3] > 128 && ehPeleEstrita(pb.data[i * 4], pb.data[i * 4 + 1], pb.data[i * 4 + 2])) { bruta[i] = 255; nBruta += 1; }
   }
-  // Limiar em JS: o .threshold() do sharp sobre um raw de 1 canal devolveu
-  // zero (achado do adendo, "pele 0 px"); o desfoque de 1 canal funciona.
+  // Limiar em JS: o .threshold() do sharp sobre um raw de 1 canal devolve
+  // zero ("pele 0 px"); o desfoque de 1 canal funciona.
   const cinza = (buf) => sharp(buf, { raw: { width: w, height: h, channels: 1 } });
   const desfocada = await cinza(bruta).blur(1.2).raw().toBuffer();
   const limpa = Buffer.alloc(w * h);
@@ -714,9 +714,8 @@ async function montarCard(conteudo, nome) {
   for (let i = 0; i < W * H; i += 1) sombraRgba[i * 4 + 3] = Math.round(alphaSombra[i] * 0.6);
   const mascara = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><path d="${octogonoPath(W, H, 8 * k)}" fill="#fff"/></svg>`);
   // UM composite só: no sharp, chamar .composite() duas vezes não acumula — a
-  // segunda chamada substitui a primeira (achado na 1ª corrida: o card saía só
-  // com o estádio). A lista é aplicada em ordem sobre o resultado acumulado, e
-  // o dest-in no fim recorta tudo pelo octógono.
+  // segunda chamada substitui a primeira. A lista é aplicada em ordem sobre o
+  // resultado acumulado, e o dest-in no fim recorta tudo pelo octógono.
   const dentro = await sharp(await fundoEstadio(W, H))
     .composite([{ input: sombraRgba, raw: { width: W, height: H, channels: 4 }, top: 4, left: 0 }, { input: jogador }, { input: mascara, blend: 'dest-in' }])
     .png().toBuffer();
@@ -728,8 +727,7 @@ async function montarCard(conteudo, nome) {
 // ─── As referências (5 e 6) escolhidas pelo CONTEÚDO, não pelo nome ──────────
 // Duas fotos da bancada partilham o nome de pasta (`…22d_-` e `…22d_-_2`) e
 // as bancadas anteriores atribuíram o sufixo por outra ordem: copiar por nome
-// punha a V6 de OUTRA pessoa ao lado do recorte (achado da 7ª corrida — e a
-// bancada da economia, que também copiou por nome, já tinha esse cruzamento).
+// punha a V6 de OUTRA pessoa ao lado do recorte.
 // A assinatura é a foto a 24×24 em cinza; dentro de cada grupo de pastas com o
 // mesmo nome base escolhe-se a permutação de menor distância total.
 async function assinatura(buf) {

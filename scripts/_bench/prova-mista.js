@@ -1,4 +1,4 @@
-// Futty v2.0 — CAPTURA DA CERIMÔNIA COM TIME MISTO (23-set).
+// Futty v2.0 — CAPTURA DA CERIMÔNIA COM TIME MISTO.
 //
 // Cria um time DESCARTÁVEL "Prova Mista" com 10 jogadores: 4 com figurinha
 // (PNGs já pagos de saida-prompt/saida-economia — nenhuma geração de IA nova,

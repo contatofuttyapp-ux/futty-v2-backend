@@ -1,8 +1,8 @@
-// Futty v2.0 — O dono escolhe o uniforme do pacote do time (Pagamentos P2, 26-set).
+// Futty v2.0 — O dono escolhe o uniforme do pacote do time.
 //
-// Achado do P1: o pacote comprado na LOJA liga o time sem uniforme quando o time ainda não tinha
+// O pacote comprado na LOJA liga o time sem uniforme quando o time ainda não tinha
 // `brilhante_kit` (nenhum pedido guarda uniforme) — e sem uniforme ninguém gera (direitoBrilhante
-// salta pacote sem kit). Até aqui só o Gabinete fixava o uniforme. Agora o próprio dono escolhe:
+// salta pacote sem kit). Por isso o próprio dono escolhe:
 //   · só o admin do time;
 //   · só com o pacote ativo;
 //   · a 1ª escolha sempre vale; trocar, só enquanto ninguém gerou (depois disso o time já tem

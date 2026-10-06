@@ -1,5 +1,5 @@
 // BANCADA — 5 MODELOS FICTÍCIOS para a publicidade "low vs medium"
-// (decisão do dono, 31-jul: exemplos diversos em rodízio, nunca classificar o
+// (decisão do dono: exemplos diversos em rodízio, nunca classificar o
 //  usuário; pessoas que NÃO existem, geradas por IA, sem direito de imagem)
 //
 // O que faz, por modelo:
@@ -13,9 +13,9 @@
 //
 // Uso:  node scripts/_bench/gerar-modelos-ficticios.js
 //
-// RONDA 2 — refazer só o medium de modelos escolhidos, com estilo "rico":
+// Refazer só o medium de modelos escolhidos, com estilo "rico":
 //   node scripts/_bench/gerar-modelos-ficticios.js --refazer m3-homem-negro,m5-homem-grisalho --estilo rico
-// Motivo (31-jul, dono): em m3/m5 o low saiu MELHOR que o medium. O prompt é
+// Motivo: em m3/m5 o low saiu MELHOR que o medium. O prompt é
 // afinado para o low (proíbe textura fina) e amarra o medium — o pago tem de
 // SUBIR de estilo junto com a qualidade. O --estilo rico liberta o detalhe
 // fino SÓ no medium; reusa as fotos fictícias do disco (sem custo t2i) e grava
@@ -71,12 +71,13 @@ function comEstiloRico(prompt) {
 
 const flag = (n, d) => { const i = process.argv.indexOf(`--${n}`); return i > 0 && process.argv[i + 1] && !process.argv[i + 1].startsWith('--') ? process.argv[i + 1] : d; };
 
-// ─── RODADA 29B (30-set): --jovens — 3 modelos novos para as REDES (onboarding/anúncios) ────────────────
-// Dono pediu 15–25 anos; a Freaky recomendou 18+ (modelo com cara de menor num app com compra e cadastro 13+ é
-// bandeira vermelha na revisão da Apple e do Google) — o prompt diz "clearly an adult in their early twenties".
+// ─── --jovens — 3 modelos novos para as REDES (onboarding/anúncios) ───
+// A Freaky recomendou 18+ (modelo com cara de menor num app com compra é bandeira vermelha na
+// revisão da Apple e do Google) — o prompt diz "clearly an adult in their early twenties".
 // Dois homens e uma mulher, traços brasileiros/europeus, kit Dark Gold. Usa a RECEITA REAL da produção
-// (utils/geracaoFigurinha.js, V6) e não a esteira antiga deste arquivo (que lia o prompt de routes/auth.js e já
-// não existe lá). Teto US$1 (estimativa ~US$0,40: 3 fotos + 3 V6). Só o cartão final importa: um por modelo.
+// (utils/geracaoFigurinha.js, V6) e não a esteira antiga deste arquivo (que lia o prompt de
+// routes/auth.js e já não existe lá). Teto US$1 (estimativa ~US$0,40: 3 fotos + 3 V6).
+// Só o cartão final importa: um por modelo.
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens
 // Saída: scripts/_bench/saida-modelos-jovens/ e cópia dos 3 cartões em FUT/REDES/modelos/ (fora do bundle do app).
 const MODELOS_JOVENS = [
@@ -85,15 +86,16 @@ const MODELOS_JOVENS = [
   { id: 'j3-homem-europeu', desc: 'Portuguese man, around 24, fair skin, short light-brown hair, light stubble' },
 ];
 const TETO_JOVENS = 1.0;
-// ─── RODADA 29E (1-out): --jovens2 — mais 3 na MESMA receita, para o mini sorteio do onboarding fechar 3 com cara de Brasil
-// (j1, j2, j4) e 3 de Portugal (j3, j5, j6). Mesma regra de idade (18–25, nunca menor, nunca pessoa real), mesmo kit.
+// ─── --jovens2 — mais 3 na MESMA receita, para o mini sorteio do onboarding fechar 3 com cara de Brasil
+// (j1, j2, j4) e 3 de Portugal (j3, j5, j6). Mesma regra de idade
+// (18–25, nunca menor, nunca pessoa real), mesmo kit.
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens2
 const MODELOS_JOVENS_2 = [
   { id: 'j4-homem-negro-br',    desc: 'Brazilian Black man, around 23, dark brown skin, very short hair, clean-shaven' },
   { id: 'j5-mulher-portuguesa', desc: 'Portuguese woman, around 22, light olive skin, long straight dark-brown hair' },
   { id: 'j6-homem-portugues',   desc: 'Portuguese man, around 20, olive Mediterranean skin, short dark curly hair, clean-shaven' },
 ];
-// ─── RODADA 29E2 (2-out): --jovens3 — os 4 HOMENS novos do mini sorteio (ficam DUDU = j6 e PEDRÃO = j4, aprovados pelo dono).
+// ─── --jovens3 — os 4 HOMENS novos do mini sorteio (ficam DUDU = j6 e PEDRÃO = j4, aprovados pelo dono).
 // Mesma receita e mesma regra (18–25, nunca menor, nunca pessoa real, kit Dark Gold). Todos diferentes entre si e dos dois que
 // ficam (j6: oliva, cacheado escuro, sem barba; j4: pele escura, raspado, sem barba) — varia tom de pele, cabelo, rosto e barba.
 // 2 com cara de Brasil (j7, j8) e 2 de Portugal (j9, j10). Nomes no app: BRUNINHO, TIAGÃO, LÉO, RAFA (exportar-bustos-onboarding.js).
@@ -104,11 +106,13 @@ const MODELOS_JOVENS_3 = [
   { id: 'j9-leo-pt',       desc: 'Portuguese man, around 23, fair skin with light freckles, short auburn red hair, short neat goatee' },
   { id: 'j10-rafa-pt',     desc: 'Portuguese man, around 21, light olive skin, wavy dark-brown hair reaching the ears, heavy dark stubble, narrow face' },
 ];
-// ─── RODADA 29E2, 2ª leva (2-out): --jovens4 — o dono reprovou DUDU/LÉO/BRUNINHO da 1ª leva ("cara de revista demais, todos na
-// mesma pose e no mesmo sorriso"). Ficam TIAGÃO (j8), PEDRÃO (j4) e RAFA (j10). Três homens novos com variedade DE VERDADE: idade
-// 25–35, nenhum sorriso aberto, cabeça e ombros fora do frontal. A foto fictícia ganha prompt PRÓPRIO (campo `foto`): o fotoPrompt()
-// padrão força "friendly smile" e "frontal", que é o que o dono não quer. A receita da figurinha (V6) mantém o ângulo da cabeça e a
-// expressão da foto, mas quadra os ombros (POSE em prompts/figurinha.js) — isso é produção, fica. 1 Brasil (j11) + 2 Portugal (j12, j13).
+// ─── --jovens4 — o dono reprovou DUDU/LÉO/BRUNINHO ("cara de revista demais, todos na mesma pose e
+// no mesmo sorriso"). Ficam TIAGÃO (j8), PEDRÃO (j4) e RAFA (j10). Três homens novos com variedade
+// DE VERDADE: idade 25–35, nenhum sorriso aberto, cabeça e ombros fora do frontal. A foto fictícia
+// ganha prompt PRÓPRIO (campo `foto`): o fotoPrompt() padrão força "friendly smile" e "frontal",
+// que é o que o dono não quer. A receita da figurinha (V6) mantém o ângulo da cabeça e a expressão
+// da foto, mas quadra os ombros (POSE em prompts/figurinha.js) — isso é produção, fica.
+// 1 Brasil (j11) + 2 Portugal (j12, j13).
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens4
 const fotoLivre = (desc, expressao, pose, idade) => `Casual amateur smartphone photo of a fictional ${desc}.
 Completely fictional person who does not exist and does not resemble any real or famous person. ${idade}
@@ -134,10 +138,12 @@ const MODELOS_JOVENS_4 = [
     'Head tilted slightly, shoulders a bit turned, leaning in a little.',
     'Clearly an adult in his late twenties.') },
 ];
-// ─── RODADA 29E2, 3ª leva (2-out): --jovens5 — só o DUDU (o j13 também saiu por "cara de revista"). Perfil bem diferente dos outros
-// cinco: ~28, gordinho (rosto cheio, bochechas, pescoço largo, ombros redondos), nerd simpático de óculos grossos, cabelo curto bagunçado,
-// sorriso tímido de boca fechada, cabeça inclinada. Pele bem clara e cabelo louro-acinzentado (nenhum dos cinco é claro nem louro). Portugal.
-// Óculos de grau ficam na V6 (REGRA_OCULOS); o corpo "athletic" da POSE pode afinar a barriga, mas o busto (62 % pelo topo) corta antes dela.
+// ─── --jovens5 — só o DUDU (o j13 também saiu por "cara de revista"). Perfil bem diferente dos outros
+// cinco: ~28, gordinho (rosto cheio, bochechas, pescoço largo, ombros redondos), nerd simpático de
+// óculos grossos, cabelo curto bagunçado, sorriso tímido de boca fechada, cabeça inclinada. Pele bem
+// clara e cabelo louro-acinzentado (nenhum dos cinco é claro nem louro). Portugal.
+// Óculos de grau ficam na V6 (REGRA_OCULOS); o corpo "athletic" da POSE pode afinar a barriga, mas o
+// busto (62 % pelo topo) corta antes dela.
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens5
 const MODELOS_JOVENS_5 = [
   { id: 'j14-dudu-pt', foto: fotoLivre(
@@ -146,9 +152,10 @@ const MODELOS_JOVENS_5 = [
     'Head tilted slightly to one side, shoulders relaxed and turned a little.',
     'Clearly an adult in his late twenties.') },
 ];
-// ─── RODADA 29E2, 4ª leva (2-out): --jovens6 — o DUDU de novo, MESMO perfil do j14, só a POSE muda (dono): cabeça reta e de frente,
-// nada de inclinar nem virar, queixo levemente baixo, ombros quadrados e relaxados, olhar direto. A receita de produção já pede
-// "frontal bust, shoulders square" e mantém a cabeça da foto — basta a foto fictícia nascer reta. prompts/figurinha.js intocado.
+// ─── --jovens6 — o DUDU de novo, MESMO perfil do j14, só a POSE muda (dono): cabeça reta e de frente,
+// nada de inclinar nem virar, queixo levemente baixo, ombros quadrados e relaxados, olhar direto.
+// A receita de produção já pede "frontal bust, shoulders square" e mantém a cabeça da foto — basta
+// a foto fictícia nascer reta.
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens6
 const MODELOS_JOVENS_6 = [
   { id: 'j15-dudu-pt', foto: fotoLivre(
@@ -158,9 +165,10 @@ const MODELOS_JOVENS_6 = [
     'Clearly an adult in his late twenties.') },
 ];
 
-// ─── RODADA 29E3 (2-out): --jovens7 — o dono aprovou os 6 e quer 4 jogadores por time (8 rolos). Dois homens novos, perfis que o elenco
-// ainda não tem (nenhum dos 6 é grisalho nem passa dos 33; e o único negro, PEDRÃO, sorri). "jovens" no nome da leva é só a sequência da
-// bancada — o NANDO tem 38–40. Fictícios, nunca pessoa real, nunca menor, mesma receita V6 e mesmo kit. Os 6 aprovados não são tocados.
+// ─── --jovens7 — o dono aprovou os 6 e quer 4 jogadores por time (8 rolos). Dois homens novos, perfis
+// que o elenco ainda não tem (nenhum dos 6 é grisalho nem passa dos 33; e o único negro, PEDRÃO, sorri).
+// "jovens" no nome da leva é só a sequência da bancada — o NANDO tem 38–40. Fictícios, nunca pessoa
+// real, nunca menor, mesma receita V6 e mesmo kit. Os 6 aprovados não são tocados.
 //   node scripts/_bench/gerar-modelos-ficticios.js --jovens7
 const MODELOS_JOVENS_7 = [
   { id: 'j16-nando-br', foto: fotoLivre(
@@ -196,9 +204,9 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   console.log(`\n${lista.length} MODELOS FICTÍCIOS (adultos, nunca menor) · receita real da produção · ~US$0,13 cada · teto US${teto.toFixed(2)}\n`);
   let gasto = 0;
   const feitos = [];
-  // --so id1,id2 corre só esses modelos da leva; --foto-do-disco reaproveita <id>-foto.png se já existir (sem pagar o t2i de novo).
-  // Rodada 29E3 (2-out): o j17 morreu em silêncio depois da foto (sem FALHOU nem resumo — morte nativa/processo, não erro de JS);
-  // o log por passo abaixo existe para a próxima vez dizer ONDE.
+  // --so id1,id2 corre só esses modelos da leva; --foto-do-disco reaproveita <id>-foto.png se já existir
+  // (sem pagar o t2i de novo). O log por passo abaixo existe para dizer ONDE o processo morre quando um
+  // modelo some em silêncio (sem FALHOU nem resumo — morte nativa/processo, não erro de JS).
   const SO_IDS = (() => { const i = process.argv.indexOf('--so'); return i > 0 && process.argv[i + 1] ? process.argv[i + 1].split(',') : null; })();
   const FOTO_DO_DISCO = process.argv.includes('--foto-do-disco');
   const passo = (id, msg) => console.log(`  · ${id}: ${msg}`);
@@ -248,17 +256,20 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   console.log(`saída: ${saida}\ncópias: ${REDES}\n`);
 }
 
-// ─── PRINTS DAS LOJAS, AJUSTE 2 DO DONO (5-out): --loja — os 4 lugares que ainda eram silhueta no Sorteio da peça 01 ──────────────
-// (LOJA-PRINTS-OUT.md, "Ajuste 2"). Receita de produção (V6, kit Dark Gold) e o enquadramento do avatar do Bruninho: o recorte INTEIRO,
-// com peito e uniforme, tratado como routes/auth.js trata (trim + 40 px de folga no topo + 512×640) — não o close do rosto de
-// public/onboarding/. Três fictícios novos (adultos, nunca pessoa real, sem parecença com famosos, diferentes entre si e dos 8 rostos que
-// já estão na peça) e o PRÓPRIO DONO, a partir da foto original que ele subiu (lida do Storage só para leitura, guardada em
-// LOJA/demo-avatares/foto-dono.jpg). "Índio" e "Nego Di" (apelidos de cor/etnia) saem da peça: no lugar do Índio entra o PAREDÃO; no do
-// Nego Di, o dono. Careca e Zé Gordo ficam e ganham rosto que combina.
+// ─── --loja — os 4 lugares que ainda eram silhueta no Sorteio da peça 01 (LOJA-PRINTS-OUT.md) ───
+// Receita de produção (V6, kit Dark Gold) e o enquadramento do avatar do Bruninho: o recorte INTEIRO,
+// com peito e uniforme, tratado como routes/auth.js trata (trim + 40 px de folga no topo + 512×640) —
+// não o close do rosto de public/onboarding/. Três fictícios novos (adultos, nunca pessoa real, sem
+// parecença com famosos, diferentes entre si e dos 8 rostos que já estão na peça) e o PRÓPRIO DONO,
+// a partir da foto original que ele subiu (lida do Storage só para leitura, guardada em
+// LOJA/demo-avatares/foto-dono.jpg). "Índio" e "Nego Di" (apelidos de cor/etnia) saem da peça:
+// no lugar do Índio entra o PAREDÃO; no do Nego Di, o dono. Careca e Zé Gordo ficam e ganham rosto
+// que combina.
 //
-// Nada vai para o banco nem para o Storage: a entrada vai à fal como data URI (as levas acima subiam-na no bucket `kits`; aqui nem isso).
-// Saída fora do repositório, em LOJA/demo-avatares/. Teto de US$1,50 para o ajuste INTEIRO: o custo de cada chamada é o lido da fal e fica
-// anotado em custos.json, que soma entre corridas — a corrida para ANTES de gastar se a próxima chamada passaria do teto.
+// Nada vai para o banco nem para o Storage: a entrada vai à fal como data URI (as levas acima subiam-na
+// no bucket `kits`; aqui nem isso). Saída fora do repositório, em LOJA/demo-avatares/. Teto de US$1,50
+// para o conjunto INTEIRO: o custo de cada chamada é o lido da fal e fica anotado em custos.json, que
+// soma entre corridas — a corrida para ANTES de gastar se a próxima chamada passaria do teto.
 //   node scripts/_bench/gerar-modelos-ficticios.js --loja                  os 3 fictícios
 //   node scripts/_bench/gerar-modelos-ficticios.js --loja --dono 1         uma tentativa do dono (até 3: ele quer ver o uniforme perfeito)
 //   node scripts/_bench/gerar-modelos-ficticios.js --loja --dono-final 2   a tentativa escolhida vira dono-avatar.png / dono-card.png (grátis)
@@ -276,7 +287,8 @@ const MODELOS_LOJA = [
     'Relaxed, good-natured closed-mouth smile under the beard, calm self-assured look.',
     'Head straight and level, facing the camera, shoulders square and relaxed.',
     'Clearly an adult in his late thirties.') },
-  // 1ª foto (5-out) saiu com "cara de revista" — o que o dono reprovou nos modelos do onboarding em 2-out. Esta é a de rosto comum.
+  // A 1ª foto saiu com "cara de revista" — o que o dono reprovou nos modelos do onboarding.
+  // Esta é a de rosto comum.
   { id: 'l3-paredao', foto: fotoLivre(
     'Brazilian man of Japanese descent, around 33, tall and lanky, long narrow face, slightly protruding ears, short spiky black hair, thin patchy goatee, ordinary everyday looks (not a model): a few small acne scars, slightly uneven skin, light skin with warm undertone',
     'Concentrated goalkeeper stare, eyebrows slightly furrowed, mouth closed, no smile.',

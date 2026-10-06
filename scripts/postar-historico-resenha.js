@@ -1,4 +1,4 @@
-// Futty v2.0 — HISTÓRICO DA MISSA DE QUINTA NA RESENHA (23-set).
+// Futty v2.0 — HISTÓRICO DA MISSA DE QUINTA NA RESENHA.
 //
 // Publica, com data retroativa, as fotos de "TIME CAMPEÃO" (uma por dia de
 // jogo) como posts da Resenha do time "Missa de Quinta". Mesma compressão do
@@ -23,7 +23,7 @@ const PASTA_FOTOS = 'C:\\Users\\phfer\\Desktop\\FUT\\TIME CAMPEÃO';
 const NOME_TIME = 'Missa de Quinta';
 const EMAIL_DONO = 'contatofuttyapp@gmail.com';
 const STORAGE_BUCKET = 'resenha';
-// Mesma receita de routes/feed.js (Rodada 15) — não duplicar a constante, copiar o valor.
+// Mesma receita de routes/feed.js — não duplicar a constante, copiar o valor.
 const COMPRESSAO_LADO_MAX = 1600;
 const COMPRESSAO_QUALIDADE = 80;
 const DATA_PRIMEIRO_CAMPEONATO = '19/06/2026';

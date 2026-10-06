@@ -1,4 +1,4 @@
-// Futty v2.0 — A lógica pura do restauro de backup (Manutenção 26-set, item B.5).
+// Futty v2.0 — A lógica pura do restauro de backup.
 // Separada de scripts/restaurar-banco.js (que só lê arquivo e fala com o Supabase)
 // para poder ser testada sem rede — mesmo espírito de utils/orfaos.js.
 //

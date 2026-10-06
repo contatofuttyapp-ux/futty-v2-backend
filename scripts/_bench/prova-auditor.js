@@ -1,4 +1,4 @@
-// BANCADA — TREINO DO AUDITOR (1-ago, dono). LOW APENAS, medium morto.
+// BANCADA — TREINO DO AUDITOR (dono). LOW APENAS, medium morto.
 // Para cada foto: gera 1x pela receita REAL de produção (prompt lido de auth.js,
 // low, retrato, birefnet) e mede TODOS os cheques do auditor SEM retry — o
 // objectivo é VER o julgamento, não escondê-lo:
@@ -101,7 +101,7 @@ async function posTrim(buf) {
 
 (async () => {
   const pasta = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : './public/fotos-treino';
-  // --fotos nome1,nome2 : repete SÓ essas (ex.: as reprovadas da rodada anterior)
+  // --fotos nome1,nome2 : repete SÓ essas (ex.: as reprovadas da corrida anterior)
   const iF = process.argv.indexOf('--fotos');
   const filtro = iF > 0 && process.argv[iF + 1] ? process.argv[iF + 1].split(',').map((x) => x.trim()) : null;
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }

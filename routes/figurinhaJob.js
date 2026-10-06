@@ -1,4 +1,4 @@
-// Futty v2.0 — Em que pé está a pintura da figurinha (Rodada 29B, bloco 2, parte A).
+// Futty v2.0 — Em que pé está a pintura da figurinha.
 //
 // POST /api/me/avatar/ai devolve na hora `{ jobId, estimativaSegundos }` (routes/auth.js); o trabalho
 // roda em segundo plano (utils/geracaoJobs.js) e o app pergunta aqui, a cada 3 s enquanto a aba está

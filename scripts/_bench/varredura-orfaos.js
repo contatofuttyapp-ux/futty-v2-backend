@@ -1,4 +1,4 @@
-// Futty v2.0 — LIMPEZA TOTAL (23-set): varredura de órfãos pós-limpeza.
+// Futty v2.0 — LIMPEZA TOTAL: varredura de órfãos pós-limpeza.
 //
 // apagarUsuario() já limpa o Storage de CADA usuário apagado (avatar/foto,
 // slots, mídia da Resenha, varrimento por prefixo). O que sobra depois disso

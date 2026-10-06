@@ -1,15 +1,11 @@
-// BANCADA DO AUDITOR — ronda 3: COMPETIÇÃO DE MODELOS DE VISÃO.
+// BANCADA DO AUDITOR — COMPETIÇÃO DE MODELOS DE VISÃO.
 //
-// Histórico:
-//   r1: moondream2 reprovou TODAS (pergunta errada: exigia mão visível com
-//       braços cruzados).
-//   r2: pergunta certa, e o moondream2 APROVOU todas — inclusive as sem braço.
-//       Pequeno demais: responde de memória ("pessoas têm braços"), não olha.
-//   r3 (esta): mesmos 6 casos-gabarito do dono, modelos maiores em competição.
-//       O any-llm/vision está marcado "deprecated" no fal mas pode ainda servir
-//       — a sonda custa centavos e responde a dúvida de uma vez.
+// O moondream2 é pequeno demais: aprova até as fotos sem braço, porque responde de memória
+// ("pessoas têm braços") em vez de olhar. Aqui, os mesmos 6 casos-gabarito do dono com modelos maiores
+// em competição. O any-llm/vision está marcado "deprecated" no fal mas pode ainda servir — a sonda
+// custa centavos e responde a dúvida de uma vez.
 //
-// Gabarito (30-jul, apontado pelo dono):
+// Gabarito (apontado pelo dono):
 //   Denis--L2PB, Renato, Kim2  → defeito de braço  (REPROVAR)
 //   Gui--L2P, foto-normal--L2P, prova-ruidosa--L2P → boas (PASSAR)
 //

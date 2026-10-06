@@ -1,5 +1,5 @@
 // Futty v2.0 — Camada de acesso à base de dados (cliente Supabase + helpers).
-// { quiet: true } (23-set): silencia os "tips" promocionais do dotenv nos
+// { quiet: true }: silencia os "tips" promocionais do dotenv nos
 // scripts (utils/db.js é o require mais comum entre eles) — ver server.js.
 require('dotenv').config({ quiet: true });
 
@@ -9,7 +9,7 @@ const { RATING_DEFAULT } = require('./helpers');
 const { chaveSecreta } = require('./chavesSupabase');
 const { lerComFuso } = require('./fuso');
 
-// Rodada 28: a chave secreta nova (SUPABASE_SECRET_KEY, sb_secret_…) manda; a
+// A chave secreta nova (SUPABASE_SECRET_KEY, sb_secret_…) manda; a
 // service_role antiga (SUPABASE_SERVICE_KEY) só vale enquanto a nova não estiver no
 // ambiente. Ver utils/chavesSupabase.js.
 const { SUPABASE_URL } = process.env;
@@ -30,7 +30,7 @@ const supabase = createClient(SUPABASE_URL, CHAVE_SECRETA, {
  *  Lazy-require do store para evitar dependência circular (plataformaStore → db). */
 async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, created_at') {
   const cols = /(^|,\s*)id(\s*,|$)/.test(columns) ? columns : `id, ${columns}`;
-  // Rodada 29I (achado 83): o fuso do time vai em TODA leitura de time — a resposta que devolve `team` já leva a hora do campo.
+  // O fuso do time vai em TODA leitura de time — a resposta que devolve `team` já leva a hora do campo.
   // Sem a migração 076 a leitura repete sem a coluna (utils/fuso.js#lerComFuso) e o time vale o padrão.
   const pedeFuso = !/\bfuso\b|\*/.test(cols);
   const { data } = await lerComFuso((novas) => supabase
@@ -123,7 +123,7 @@ async function requireTeamMember(slug, userId) {
   return { team, role };
 }
 
-/** Carrega um jogo com a equipa associada (game.teams, com o fuso, a cidade e o escudo dela — 29I). Null se não existir. */
+/** Carrega um jogo com a equipa associada (game.teams, com o fuso, a cidade e o escudo dela). Null se não existir. */
 async function loadGame(id) {
   const { data } = await lerComFuso((novas) => supabase
     .from('games')
@@ -181,9 +181,9 @@ async function computeRatings(teamId, userIds) {
 }
 
 /**
- * Rodada 9: quem é goleiro DO TIME. É o padrão de cada jogo: quem confirma sem
+ * Quem é goleiro DO TIME. É o padrão de cada jogo: quem confirma sem
  * dizer nada entra como goleiro.
- * Rodada 10B: a fonte passa a ser SÓ team_members.categoria ('GR'). A coluna
+ * A fonte é SÓ team_members.categoria ('GR'). A coluna
  * `posicao` ('GL'|null) era a mesma decisão guardada duas vezes — o dono
  * decidiu manter uma só, e é esta (é a que já mandava no ranking).
  * @param {string} teamId

@@ -181,8 +181,8 @@ const hashDe = (texto) => [...texto].reduce((h, c) => ((h * 31) + c.charCodeAt(0
 const emailDe = (slug, n) => `${PREFIXO_CONTA}-${slug.slice(PREFIXO_SLUG.length)}-${n}${DOMINIO}`;
 
 /**
- * O elenco do time: o primeiro é o admin, os outros members; 1 ou 2 goleiros (categoria GR). Nascimento de adulto
- * (1981–2004, lei de 1-out: 18+) e avatar genérico variado, tudo determinístico por slug.
+ * O elenco do time: o primeiro é o admin, os outros members; 1 ou 2 goleiros (categoria GR).
+ * Nascimento de adulto (1981–2004, lei: 18+) e avatar genérico variado, tudo determinístico por slug.
  */
 function elencoDe(time) {
   const rng = mulberry32(hashDe(time.slug));

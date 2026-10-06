@@ -21,6 +21,7 @@ para o processo completo: mockup-first, look do utilizador, selo só após aprov
   sobra→reservas); requisito aberto: persistir a SEMENTE para replay exacto.
 - Emails `@futtymock.com` = contas de teste (podem ser semeadas/limpas à vontade);
   contas reais nunca se tocam.
+- Comentário no código explica o PORQUÊ da regra, sem data nem número de rodada; a história vai para HISTORICO.md.
 
 ## Conector Supabase (ferramentas)
 - **ATIVO em READ-ONLY** (por desenho — segurança). Leituras SQL diretas: SIM.

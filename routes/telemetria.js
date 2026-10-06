@@ -1,4 +1,4 @@
-// Futty v2.0 — POST /api/telemetria: a velocidade que o app mediu, sem ninguém dentro (Rodada 28, E).
+// Futty v2.0 — POST /api/telemetria: a velocidade que o app mediu, sem ninguém dentro.
 //
 // Sem requireAuth DE PROPÓSITO: a rota não lê o Authorization nem o IP (o limiter conta por IP em
 // memória e esquece em 15 min). O que vai para a tabela é só o que utils/telemetria.js#montarLinha

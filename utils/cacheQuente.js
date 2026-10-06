@@ -1,5 +1,4 @@
-// Futty v2.0 — Cache em memória com dedupe de pedidos em voo e stale-while-revalidate
-// (15-set, "Velocidade 7A").
+// Futty v2.0 — Cache em memória com dedupe de pedidos em voo e stale-while-revalidate.
 //
 // Primeiro relatório real do Diagnóstico (iPhone em Lisboa): no arranque frio o
 // app dispara 3 pedidos em paralelo, os 3 chegam com os caches vazios e CADA UM
@@ -9,7 +8,7 @@
 //
 // O mesmo relatório mostrou picos isolados (inicio 783 ms, blocks 630 ms) no
 // instante em que um cache de TTL curto vencia: o azarado da vez pagava o
-// download inteiro. Regra agora: NENHUM pedido paga o vencimento de um cache. Se
+// download inteiro. Regra: NENHUM pedido paga o vencimento de um cache. Se
 // a entrada venceu mas existe, sai o valor velho NA HORA e a renovação corre por
 // trás (uma de cada vez). Só espera quem não tem nada em cache.
 //

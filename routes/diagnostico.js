@@ -1,4 +1,4 @@
-// Futty v2.0 — Diagnóstico do app (VELOCIDADE 4).
+// Futty v2.0 — Diagnóstico do app.
 //
 // O app mede-se a si próprio e a pessoa envia o que mediu. Serve para responder
 // com número a "está lento": o relatório separa o tempo do MOTOR (Server-Timing,

@@ -1,10 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA DO UNIFORME (6-out, achado 3g da LISTA-CURTA).
+// BANCADA DO UNIFORME.
 //
-// Em 5-out o uniforme saiu fiel ao kit em 4 de 9 gerações V6 (o dourado virou
-// faixa de bordas paralelas; a manga esquerda saiu preta). Esta bancada testa
-// até 3 variações da V6, cada uma mexendo numa alavanca só, e mede o resultado
-// com o medidor automático (medidor-uniforme.js, que acerta as 9 de 5-out):
+// Numa amostra de 9 gerações V6 de produção, o uniforme saiu fiel ao kit em 4
+// (o dourado virou faixa de bordas paralelas; a manga esquerda saiu preta). Esta
+// bancada testa até 3 variações da V6, cada uma mexendo numa alavanca só, e mede
+// o resultado com o medidor automático (medidor-uniforme.js, que acerta as 9
+// gerações da amostra):
 //
 //   controle   a V6 de produção, intocada (utils/geracaoFigurinha.js).
 //   v1-prompt  PROMPT: a frase do kit descreve a geometria como ela é — uma
@@ -307,7 +308,7 @@ const selo = (ok, x, y, r = 17) => (ok
   : `<circle cx="${x}" cy="${y}" r="${r}" fill="#d64545"/><path d="M${x - r * 0.38} ${y - r * 0.38} L${x + r * 0.38} ${y + r * 0.38} M${x + r * 0.38} ${y - r * 0.38} L${x - r * 0.38} ${y + r * 0.38}" stroke="#fff" stroke-width="${r * 0.22}" stroke-linecap="round"/>`);
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-// A régua do Dark Gold: as 9 V6 de produção de 5-out (o gabarito do medidor), na ordem em que nasceram.
+// A régua do Dark Gold: as 9 V6 de produção (o gabarito do medidor), na ordem em que nasceram.
 const NOVE_5OUT = ['l1-careca', 'l2-ze-gordo-reprovado', 'l3-paredao-reprovado', 'dono-t1', 'dono-t2', 'l2-ze-gordo-reprovado2', 'l3-paredao', 'dono-t3', 'l2-ze-gordo'];
 const ROTULO_5OUT = {
   'l1-careca': 'Careca', 'l2-ze-gordo-reprovado': 'Zé Gordo 1', 'l3-paredao-reprovado': 'Paredão 1', 'dono-t1': 'Dono 1', 'dono-t2': 'Dono 2',
@@ -338,7 +339,7 @@ async function folha() {
     texto(20, 58, 'Selo = veredito do medidor automático (verde = fiel ao kit, vermelho = errado). Uma geração por célula; custo lido da fal.', { tam: 14 })];
   const topo = [];
   const partes = [];
-  // faixa de cima: as 9 de 5-out (V6 de produção, Dark Gold), medidas agora pelo mesmo medidor
+  // faixa de cima: as 9 da régua (V6 de produção, Dark Gold), medidas agora pelo mesmo medidor
   const yN = TIT;
   const refDG = await referencia('dark-gold');
   let certas5 = 0;

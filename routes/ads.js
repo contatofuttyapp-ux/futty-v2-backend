@@ -1,7 +1,7 @@
 // Futty v2.0 — Serving REAL de publicidade + medição. As campanhas vivem no gabineteStore
 // (operacao.json), geridas no Gabinete. LEIS SELADAS respeitadas:
 //  · filtro etário FAIL-CLOSED: sem classificação = '18+'; quem não tem 18 anos confirmados pela
-//    data (e o anónimo) só recebe 'livre' — o app é 18+ (Rodada 29G) e esta é a 2ª linha;
+//    data (e o anónimo) só recebe 'livre' — o app é 18+ e esta é a 2ª linha;
 //  · interruptor geral (Gabinete 2.0, aba Anúncios) — desligado corta tudo,
 //    independente dos toggles por página;
 //  · toggle por página (default OFF) — página desligada = nenhum anúncio;
@@ -27,7 +27,7 @@ router.get(
 );
 
 /**
- * GET /api/ads/sessao — os slots de TODAS as páginas de uma vez (VELOCIDADE 9).
+ * GET /api/ads/sessao — os slots de TODAS as páginas de uma vez.
  * O app pede isto uma vez por sessão (ou recebe-o dentro do /api/inicio) e
  * serve as telas a partir dele durante `validadeMs`.
  */
@@ -52,7 +52,7 @@ router.post(
 
 /**
  * POST /api/ads/eventos { eventos: [{ id, tipo }] } — os mesmos eventos, em
- * lote (VELOCIDADE 9). O app junta as impressões e manda-as de uma vez, por
+ * lote. O app junta as impressões e manda-as de uma vez, por
  * `sendBeacon`, quando a tela sai da frente — fora do caminho de pintura.
  *
  * Teto de 50 por lote: um beacon é de confiança limitada e isto é contagem

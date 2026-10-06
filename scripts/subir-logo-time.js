@@ -8,7 +8,7 @@
 // exibição. Maior uso do logo hoje é TeamAvatar "lg" = 64px → 128px.
 // Sem filtro NSFW: upload direto do dono, sem fila de moderação.
 //
-// Generalizado (28-set, TIME-TESTE.md parte A) para servir qualquer time:
+// Serve qualquer time (TIME-TESTE.md parte A):
 //   node scripts/subir-logo-time.js                                sem args, comportamento de sempre (Missa de Quinta)
 //   node scripts/subir-logo-time.js --slug <slug> --arquivo <caminho>   sobe o logo de outro time
 // A função `subirLogoTime` é exportada para outros scripts (time-teste.js)

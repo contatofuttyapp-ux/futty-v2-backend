@@ -76,10 +76,10 @@ async function validarNoSupabase(token) {
   return error || !data?.user ? null : data.user;
 }
 
-// RODADA 28 — 401 passou a significar, para o app, "a sessão acabou: sai deste aparelho e vai para o
-// login" (lib/api.js). Então 401 só pode sair quando o Supabase DISSE que o token não vale. Sem sessão
-// em cache e com o Supabase Auth fora do ar, o motor não sabe — e a resposta honesta é 503 (antes era
-// 401, e um soluço do Supabase ia deslogar todo mundo que estivesse abrindo o app naquele minuto).
+// 401 significa, para o app, "a sessão acabou: sai deste aparelho e vai para o login" (lib/api.js). Então
+// 401 só pode sair quando o Supabase DISSE que o token não vale. Sem sessão em cache e com o Supabase Auth
+// fora do ar, o motor não sabe — e a resposta honesta é 503: um 401 aqui, num soluço do Supabase,
+// deslogaria todo mundo que estivesse abrindo o app naquele minuto.
 const MSG_AUTH_FORA = 'Não deu para confirmar sua sessão agora. Tente de novo em instantes.';
 
 async function getUserCacheado(token) {
@@ -155,14 +155,12 @@ async function requireSuperAdmin(req, res, next) {
 }
 
 /**
- * Remove o token do pedido atual do cache de sessão — usado por DELETE /api/me
- * (14-set): sem isto, a conta já excluída continuava "autenticada" nesse
- * mesmo token por até SESSAO_CACHE_TTL_MS (60s), porque requireAuth nunca
- * voltaria a validar contra o Supabase dentro dessa janela.
+ * Remove o token do pedido atual do cache de sessão — usado por DELETE /api/me: sem isto, a conta já
+ * excluída continuava "autenticada" nesse mesmo token por até SESSAO_CACHE_TTL_MS (60s), porque
+ * requireAuth nunca voltaria a validar contra o Supabase dentro dessa janela.
  *
- * Velocidade 7A: esquece também as sessões da MESMA conta em outros tokens
- * (outro aparelho). Com a renovação por trás, uma delas podia sair velha mais
- * uma vez — com a conta já apagada ou o onboarding já concluído.
+ * Esquece também as sessões da MESMA conta em outros tokens (outro aparelho). Com a renovação por
+ * trás, uma delas podia sair velha mais uma vez — com a conta já apagada ou o onboarding já concluído.
  */
 function invalidarSessaoDoPedido(req) {
   const token = bearerToken(req);

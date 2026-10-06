@@ -50,7 +50,7 @@ async function guardar(camp) {
   return camp;
 }
 
-// Rodada 8B: prazo de 3 s (comPrazo) nas duas leituras — uma ida sem resposta
+// Prazo de 3 s (comPrazo) nas duas leituras — uma ida sem resposta
 // nunca pode prender quem chama (mesmo padrão de denunciaStore/gabineteStore/
 // plataformaStore). Se o prazo vencer, rejeita como uma falha normal do Storage
 // já rejeitaria — quem chama (asyncHandler das rotas) já sabe tratar isso.

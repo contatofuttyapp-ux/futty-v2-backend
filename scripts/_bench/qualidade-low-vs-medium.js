@@ -20,7 +20,7 @@
 //    $0,013, 4× menos, e nunca foi testado. A copy do ENVELOPE já anuncia
 //    R$4,90 por 10 figurinhas, logo esta medição decide se o preço dá lucro.
 //
-// B) FUNDO — hipótese do dono (29-jul), e o prompt dá-lhe razão: o fundo de
+// B) FUNDO — hipótese do dono, e o prompt dá-lhe razão: o fundo de
 //    geração é #050810 (quase preto), a camisa é #0d0d12 (quase preto) e o
 //    cabelo do jogador é preto. O birefnet tem de recortar um objecto preto
 //    de um campo preto → come o cabelo → "cabeça achatada".
@@ -28,8 +28,7 @@
 //    preto é sabotar o recorte de graça. Este teste mede se um fundo com
 //    contraste resolve — custo zero, é só prompt.
 //    Consequência importante: se a causa é esta, o RETRY nunca conserta
-//    (regera preto sobre preto) → paga 2× com 0% de chance. Ver linha 695
-//    de routes/auth.js.
+//    (regera preto sobre preto) → paga 2× com 0% de chance.
 //
 // De borla mede o tamanho real de saída (define se a conta é $0,034 ou $0,051)
 // e a taxa de coroa cortada por combinação — as duas medições em falta do

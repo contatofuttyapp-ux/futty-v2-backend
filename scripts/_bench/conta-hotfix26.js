@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONTA DESCARTÁVEL NO ESTADO DO BUG DO "TROCAR FOTO" (Hotfix 26, 25-set).
+// CONTA DESCARTÁVEL NO ESTADO DO BUG DO "TROCAR FOTO".
 //
 // Para a cena 'hotfix26' do scripts/ver-iphone.mjs (frontend), que prova pela tela
 // que trocar a foto de uma conta SEM figurinha muda o card. O estado é o que o

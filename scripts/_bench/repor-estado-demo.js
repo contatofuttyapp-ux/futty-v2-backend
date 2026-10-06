@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// DEVOLVER A CONTA DEMO AO ESTADO DA LOJA (22-set).
+// DEVOLVER A CONTA DEMO AO ESTADO DA LOJA.
 //
 // A conta demo-loja@futtymock.com é a que aparece nas capturas da loja. Uma
 // bancada que mexa nela (a de reprodução do bug da foto antiga, por exemplo)
@@ -18,10 +18,9 @@
 //                            existente como a figurinha do kit — mesmo efeito
 //                            final (bucket, users, slot), custo zero. Serve
 //                            para repor depois de uma bancada que já pagou por
-//                            uma figurinha boa da MESMA foto (ex.: a prova da
-//                            Rodada 17) e não precisa pagar outra vez só para
-//                            devolver a conta ao estado da loja. Ignorado
-//                            junto com --sem-gerar.
+//                            uma figurinha boa da MESMA foto e não precisa pagar
+//                            outra vez só para devolver a conta ao estado da
+//                            loja. Ignorado junto com --sem-gerar.
 //
 // Custo: uma geração (~US$0,05); zero com --sem-gerar ou --figurinha-de.
 // Não é para correr contra produção: pede a um servidor LOCAL.

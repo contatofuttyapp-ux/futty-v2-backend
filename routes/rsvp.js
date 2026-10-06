@@ -12,7 +12,7 @@ const { fusoDoTime, dataCurtaNoFuso } = require('../utils/fuso');
 
 const router = express.Router();
 
-// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time, 29I achado 83).
+// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time).
 
 /**
  * Promove o primeiro da lista de espera de um jogo (se houver vaga libertada):
@@ -124,15 +124,14 @@ router.post(
 
     // Sincroniza os confirmados via RSVP para game_players (alimenta o sorteio
     // sem o admin ter de adicionar os jogadores manualmente).
-    // Rodada 9: quem já tem linha no jogo mantém o `goleiro` que ele ou o admin
-    // marcaram; quem entra agora herda a flag do time (Rodada 10B:
-    // team_members.categoria === 'GR', via goleirosDoTime).
+    // Quem já tem linha no jogo mantém o `goleiro` que ele ou o admin
+    // marcaram; quem entra agora herda a flag do time (team_members.categoria === 'GR', via goleirosDoTime).
     const { data: confirmados } = await supabase
       .from('rsvp_respostas')
       .select('user_id')
       .eq('game_id', game.id)
       .eq('status', 'confirmado');
-    // Rodada 29B (E): quem só organiza o time nunca entra no elenco (nem se respondeu antes de mudar de papel).
+    // Quem só organiza o time nunca entra no elenco (nem se respondeu antes de mudar de papel).
     const organizam = await idsQueSoOrganizam(game.teams.id);
     const ids = (confirmados || []).map((r) => r.user_id).filter((id) => id && !organizam.has(id));
     const { data: jaNoJogo } = ids.length
@@ -161,7 +160,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     const game = await jogoComoMembro(req);
-    // Rodada 29B (E): quem só organiza o time não entra na lista de presença.
+    // Quem só organiza o time não entra na lista de presença.
     if (await soOrganiza(game.teams.id, req.user.id)) throw new HttpError(403, MSG_SO_ORGANIZA);
     const { status } = req.body || {};
     if (!['confirmado', 'recusado'].includes(status)) throw new HttpError(400, 'Estado inválido.');

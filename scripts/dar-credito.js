@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// DAR CRÉDITOS DE FIGURINHA BRILHANTE À MÃO (SPEC-FIGURINHA-3, 22-set).
+// DAR CRÉDITOS DE FIGURINHA BRILHANTE À MÃO (SPEC-FIGURINHA-3).
 //
-// O Gabinete "Brilhantes" é o bloco 2. Até lá, é por aqui que se ativa alguém:
+// É por aqui que se ativa alguém à mão:
 // a conta demo das lojas (2 créditos, para o revisor ver o produto completo),
 // um pedido que chegou em `pedidos_ativacao`, ou a própria bancada.
 //
@@ -72,7 +72,7 @@ async function mostrar(email) {
   const antes = await mostrar(email);
   if (tem('ver')) return;
 
-  // Rodada 21 (24-set): padrão subiu de 1 para 10 — o mesmo que "Minha Figurinha" dá.
+  // Padrão: 10 créditos — o mesmo que "Minha Figurinha" dá.
   const quantos = Number(process.argv.slice(2).find((a) => /^\d+$/.test(a)) || 10);
   const novo = (Number(antes.brilhante_creditos) || 0) + quantos;
   const { error } = await supabase.from('users').update({ brilhante_creditos: novo }).eq('id', antes.id);

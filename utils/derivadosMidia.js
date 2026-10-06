@@ -1,11 +1,11 @@
-// Futty v2.0 — Derivados da mídia (Rodada 27, 25-set): o LRU em memória dos derivados WebP
+// Futty v2.0 — Derivados da mídia: o LRU em memória dos derivados WebP
 // do proxy de imagem e a receita que os gera, num módulo só, para o PROXY (routes/media.js)
 // e o UPLOAD DA FOTO (routes/auth.js) partilharem um cache.
 //
 // Por que isto existe. O proxy gera cada tamanho da foto na PRIMEIRA vez que alguém o pede
 // (baixa o original do Storage, redimensiona, guarda no LRU). Depois de "Trocar foto" o primeiro
-// pedido de cada tamanho era da própria pessoa, olhando a tela, e pagava tudo isso: ida ao
-// Storage + sharp. Agora quem grava a foto já tem os bytes na mão e deixa os derivados que as
+// pedido de cada tamanho seria da própria pessoa, olhando a tela, e pagaria tudo isso: ida ao
+// Storage + sharp. Por isso quem grava a foto, que já tem os bytes na mão, deixa os derivados que as
 // telas vão pedir prontos (aquecerDerivados), sem baixar nada.
 //
 // Os derivados NÃO são gravados no Storage de propósito: um WebP de rosto que sobrevivesse à
@@ -68,7 +68,7 @@ function normalizarLargura(bruto) {
 
 /**
  * A chave do derivado: o `v` entra nela, conteúdo novo nunca é servido a partir de um derivado velho.
- * O recorte (Rodada 29B, E) só entra quando conta — quadrado COM recorte —, para a chave de tudo o
+ * O recorte só entra quando conta — quadrado COM recorte —, para a chave de tudo o
  * que não tem recorte continuar exatamente a de sempre (e o aquecimento do upload continuar a bater).
  */
 function chaveDoDerivado({ bucket, path, v, largura, quadrado, recorte = null }) {
@@ -82,9 +82,9 @@ function chaveDoDerivado({ bucket, path, v, largura, quadrado, recorte = null })
 /**
  * A receita: os bytes do original → o derivado ({ buf, tipo }). GIF (animado) e o que não for
  * imagem conhecida passam intactos: converter um GIF para WebP estático mataria a animação.
- * `quadrado` corta o quadrado do TOPO (RODADA 19: o recorte 2:3 já garante o rosto no terço de
+ * `quadrado` corta o quadrado do TOPO (o recorte 2:3 já garante o rosto no terço de
  * cima; a 'attention' falhava em fotos de corpo inteiro, escolhendo o pulso em vez do rosto).
- * `recorte` (Rodada 29B, E): a janela quadrada que a pessoa escolheu para a miniatura (utils/recorteAvatar.js)
+ * `recorte`: a janela quadrada que a pessoa escolheu para a miniatura (utils/recorteAvatar.js)
  * substitui o "quadrado do topo" — só vale junto de `quadrado`.
  */
 async function gerarDerivado(original, tipoOriginal, { largura, quadrado, recorte = null }) {

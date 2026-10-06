@@ -1,4 +1,4 @@
-// Tijolo 1C — assina URLs de média na fronteira da API.
+// Assina URLs de média na fronteira da API.
 // Buckets 'avatars'/'resenha' são privados; os URLs guardados são públicos e
 // morreriam. Este middleware embrulha res.json e, ANTES de enviar:
 //   - rotas autenticadas → assina os URLs (validade curta) → o frontend renderiza
@@ -7,7 +7,7 @@
 // Fail-open: qualquer erro envia o payload original.
 const { proxificarPayload, despublicarPayload } = require('../utils/storage');
 
-// Tijolo 2: as rotas autenticadas passam a emitir URLs do PROXY de imagem
+// As rotas autenticadas emitem URLs do PROXY de imagem
 // (`/api/media/:token`), estáveis 7 dias → sem expiração à vista no DOM, bucket
 // privado. O proxy é que assina a Supabase (vida curta) a cada pedido. As páginas
 // públicas /api/p/ continuam a despublicar (→ silhueta). Fail-open.

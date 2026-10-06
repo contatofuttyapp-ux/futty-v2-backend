@@ -1,4 +1,4 @@
-// Futty v2.0 — Compras: a regra de crédito num lugar só (Pagamentos P1, 26-set).
+// Futty v2.0 — Compras: a regra de crédito num lugar só.
 //
 // Toda concessão de figurinha passa por aqui, venha de onde vier: a loja (webhook do
 // RevenueCat, routes/compras.js), o "Restaurar compras" do app, ou a mão do dono no
@@ -17,7 +17,7 @@ const crypto = require('node:crypto');
 const { supabase: supabaseReal } = require('./db');
 const { somarCreditos } = require('./direitoBrilhante');
 
-// Rodada 21 (24-set): a Minha Figurinha dá 10 gerações.
+// A Minha Figurinha dá 10 gerações.
 const MINHA_GERACOES = 10;
 const PRODUTOS = ['minha', 'pacote', 'manto'];
 const LOJAS = ['app_store', 'play_store', 'promo', 'gabinete', 'outra'];

@@ -1,18 +1,18 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA DA ECONOMIA (18-set) — baratear a V6 sem trocar de motor.
+// BANCADA DA ECONOMIA — baratear a V6 sem trocar de motor.
 //
 // ┌────────────────────────────────────────────────────────────────────────┐
-// │ A VARIANTE 3 É A PRODUÇÃO desde 22-set (decisão do dono, 7 folhas).    │
+// │ A VARIANTE 3 É A PRODUÇÃO (decisão do dono, 7 folhas).                 │
 // │ US$0,049 reais contra US$0,112 da V6, 0/7 cabeças cortadas, 0/7        │
-// │ uniformes errados. A receita dela vive agora em                        │
+// │ uniformes errados. A receita dela vive em                              │
 // │ utils/geracaoFigurinha.js e é de lá que esta bancada a chama — correr  │
-// │ isto outra vez compara sempre contra o que está mesmo no ar.          │
+// │ isto outra vez compara sempre contra o que está mesmo no ar.           │
 // └────────────────────────────────────────────────────────────────────────┘
 //
-// Onde estamos: a V6 (gpt-image-1.5/edit + P2 + entrada quadrada + fidelidade
-// alta) é a única receita aprovada, e custa US$0,112. Duas bancadas já tentaram
-// baratear trocando de motor (todos reprovados) e pintando o 2.5 por prompt
-// (não pegou). Esta tenta dois caminhos diferentes:
+// Ponto de partida: a V6 (gpt-image-1.5/edit + P2 + entrada quadrada + fidelidade
+// alta) custa US$0,112. Duas bancadas já tentaram baratear trocando de motor
+// (todos reprovados) e pintando o 2.5 por prompt (não pegou). Esta tenta dois
+// caminhos diferentes:
 //
 //   A) PAGAR MENOS PELA MESMA CHAMADA. A fal cobra os tokens da imagem de
 //      ENTRADA, e em fidelidade alta uma imagem 1024×1024 são 3.050 tokens

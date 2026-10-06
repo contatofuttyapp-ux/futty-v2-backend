@@ -1,8 +1,8 @@
-// Futty v2.0 — Rodada 29H (item 7): o link curto do convite, futtyapp.com.br/c/<código>.
+// Futty v2.0 — O link curto do convite, futtyapp.com.br/c/<código>.
 //
 // O convite continua sendo uma linha de `convites` com o token longo (uuid) — o link /convite/<uuid> segue válido, igual. O
 // código é só outro jeito de chegar à MESMA linha (tabela `convite_codigos`, migração 072): mesmo prazo (vale o
-// `expires_at` do convite), some junto se o admin revoga (ON DELETE CASCADE). Aqui vivem as quatro peças pequenas disso:
+// `expires_at` do convite), some junto se o admin cancela o convite (ON DELETE CASCADE). Aqui vivem as quatro peças pequenas disso:
 // gerar o código, reconhecê-lo, gravá-lo e achar o convite a partir de um parâmetro que pode ser uuid OU código.
 //
 // Alfabeto: minúsculas e números sem os que se confundem (0/o, 1/l/i): 31 símbolos; 8 posições ≈ 8,5 × 10^11 combinações.

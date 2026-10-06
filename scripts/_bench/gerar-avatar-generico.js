@@ -1,4 +1,4 @@
-// BANCADA — AVATAR GENÉRICO DA CASA (31-jul, ideia do dono).
+// BANCADA — AVATAR GENÉRICO DA CASA.
 // O jogador SEM ROSTO que veste o card de quem ainda não gerou avatar próprio:
 // substitui as iniciais ("CH") e o texto "seu card espera por você" por um
 // jogador de verdade, em grafite neutro (sem tom de pele), vestindo o manto
@@ -19,7 +19,7 @@ const { supabase } = require('../../utils/db');
 fal.config({ credentials: process.env.FAL_KEY });
 
 const SAIDA = path.join(__dirname, 'saida-generico');
-// --feminino (31-jul, dono): gera/publica a versão feminina — 3 masc + 3 fem no total.
+// --feminino: gera/publica a versão feminina — 3 masc + 3 fem no total.
 const FEM = process.argv.includes('--feminino');
 const prefixo = () => (FEM ? 'generico-f' : 'generico');
 const KIT_URL = 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit1-dark-gold.png';
@@ -44,8 +44,8 @@ Create a FACELESS GENERIC SOCCER PLAYER for a trading-card placeholder:
 (async () => {
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
 
-  // ---- publicar TODOS (decisão do dono, 31-jul: os 3 em rodízio para que
-  //      vários jogadores sem foto no mesmo time não fiquem idênticos) ----
+  // ---- publicar TODOS (decisão do dono: os 3 em rodízio para que vários jogadores sem foto
+  //      no mesmo time não fiquem idênticos) ----
   if (process.argv.includes('--publicar-todos')) {
     for (let c = 1; c <= 3; c++) {
       const abs = path.join(SAIDA, `${prefixo()}-c${c}.png`);

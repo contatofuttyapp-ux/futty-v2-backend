@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29I, bloco 3 (item 74 da Rodada 29): o link curto do sorteio, futtyapp.com.br/s/<código>.
+// Futty v2.0 — O link curto do sorteio, futtyapp.com.br/s/<código>.
 //
 // O MESMO molde do link curto do convite (utils/conviteCodigo.js, /c/<código>): o sorteio continua morando em /p/<slug>/<id do jogo>
 // — esse link segue valendo, igual —, e o código é só outro jeito de chegar ao MESMO jogo (tabela `sorteio_codigos`, migração 078;

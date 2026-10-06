@@ -84,7 +84,7 @@ function montarTimes(jogadores) {
   const uid = (email) => byEmail[email].user_id;
 
   // 3) Config dos 3 jogos. (Motta não existe → fallback Kimzera; Dudu = Eduardo.)
-  // AVISO (SEGURANCA-REVISAO-10SET.md secção 2/3, 10-set): as *_foto_url abaixo
+  // AVISO (SEGURANCA-REVISAO-10SET.md secção 2/3): as *_foto_url abaixo
   // apontam para /public/fotos-jogos/..., que deixou de ser servido pelo
   // backend (a pasta saiu de public/ e mudou para
   // C:\Users\phfer\Desktop\FUT\FOTOS-PRIVADAS, fora dos repos — fotos reais de

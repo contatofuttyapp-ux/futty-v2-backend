@@ -1,9 +1,9 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// ÍCONE DO APP — "o F está apagado na tela inicial do celular" (dono, 23-set).
+// ÍCONE DO APP — "o F está apagado na tela inicial do celular" (dono).
 //
 // Bancada de COMPARAÇÃO (não aplica nada): 3 variantes do ícone em 1024×1024 e
 // uma folha lado a lado com o ícone ATUAL, nos tamanhos reais de tela inicial.
-// O passo seguinte (outro bloco) aplica a escolhida no iOS, Android e web.
+// Aplicar a escolhida no iOS, Android e web é outro passo.
 //
 // Regras da casa que mandam aqui:
 //   • O F é sempre o ASSET REAL — o mesmo `F_CONTORNO` de
@@ -12,7 +12,7 @@
 //     tamanho, gradiente, brilho, fundo. Nenhum traço do F é redesenhado.
 //   • Sem IA, sem imagem baixada: tudo é SVG (gradientes, blur, vinheta)
 //     renderizado pelo sharp/librsvg. Os "papéis de parede" da folha também.
-//   • App leve: 1024 é o mestre; o bloco de aplicação gera os tamanhos.
+//   • App leve: 1024 é o mestre; a aplicação gera os tamanhos.
 //
 // Ponto de partida: scripts/_bench/gerar-icone-splash.js (F a 62%, fundo chapado).
 //

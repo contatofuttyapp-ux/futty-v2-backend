@@ -1,10 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A CONTA PESADA DE PROVA (1-out, Rodada 29B, bloco 2, parte B) — a forma da conta Chavo, sem tocar em time de ninguém.
+// A CONTA PESADA DE PROVA — a forma da conta Chavo, sem tocar em time de ninguém.
 //
-// Achado do Pedro (30-set): no MESMO iPhone a conta nova de teste abre o Início rápido e a conta Chavo, devagar. A Chavo é
-// super-admin e está em 2 times: o Missa de Quinta (1 membro, 16 posts de Resenha com foto) e o Várzea FC (22 membros, 9 jogos,
-// 9 posts). Entrar nesses times com uma conta de prova poluiria o ranking e as listas de gente de verdade, então esta
-// bancada monta a MESMA forma em times descartáveis, com contas @futtymock:
+// No MESMO iPhone a conta nova de teste abre o Início rápido e a conta Chavo, devagar. A Chavo é
+// super-admin e está em 2 times: o Missa de Quinta (1 membro, 16 posts de Resenha com foto) e o Várzea FC
+// (22 membros, 9 jogos, 9 posts). Entrar nesses times com uma conta de prova poluiria o ranking e as
+// listas de gente de verdade, então esta bancada monta a MESMA forma em times descartáveis, com contas
+// @futtymock:
 //
 //   pesada  super-admin, admin dos 2 times:
 //             prova-r29b-pesada-missa   (Missa-like)  1 membro · 16 posts com 1–2 fotos · 30 jogos passados

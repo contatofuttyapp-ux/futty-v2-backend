@@ -1,8 +1,7 @@
-// Futty v2.0 — LIMPEZA TOTAL (23-set): inventário dos 3 buckets ANTES da
-// limpeza — nome e tamanho de cada objeto, recursivo (list() do Supabase
-// Storage não é recursivo por si só, e cada bucket tem uma estrutura de
-// pastas diferente: avatars = Kits/public/tmp, resenha = plano, denuncias =
-// _diagnostico/_gabinete/_plataforma/casos/reporters).
+// Futty v2.0 — inventário dos 3 buckets ANTES da limpeza: nome e tamanho de cada
+// objeto, recursivo (list() do Supabase Storage não é recursivo por si só, e cada
+// bucket tem uma estrutura de pastas diferente: avatars = Kits/public/tmp,
+// resenha = plano, denuncias = _diagnostico/_gabinete/_plataforma/casos/reporters).
 //
 // Uso único, não é ferramenta permanente — roda a partir de backend/:
 //   node scripts/_bench/inventario-storage.js > caminho/inventario-storage.json

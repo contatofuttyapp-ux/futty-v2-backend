@@ -41,10 +41,10 @@ router.get(
 
     // Estado de suspensão (store de plataforma, sem DDL) anexado a cada linha.
     const { users: susUsers } = await plataforma.conjuntos();
-    // 22-set (SPEC-FIGURINHA-3): `plan` saiu — o que resta ver aqui é o direito
+    // (SPEC-FIGURINHA-3) Não há `plan`: o que se vê aqui é o direito
     // de Brilhante (créditos e se já tem uma), pela mesma regra do resto do app
-    // (o avatar atual ser um arquivo de figurinha nosso; Hotfix 26, antes era
-    // avatar_url ≠ foto_url e a foto do Google contava). Sem avatar_url no
+    // (o avatar atual ser um arquivo de figurinha nosso — não avatar_url ≠ foto_url,
+    // que contava a foto do Google). Sem avatar_url no
     // payload de volta: é detalhe de implementação, não algo que a tela precise
     // mostrar.
     const users = (data || []).map(({ avatar_url, ...u }) => ({
@@ -95,8 +95,8 @@ router.patch(
   })
 );
 
-// Rodada 29Y: o Supabase devolve no máximo 1.000 linhas por resposta (o teto do PostgREST). Uma consulta sem paginação
-// cortava a lista de equipas e a contagem de membros calado. Lê em páginas de 1.000 com .range até uma página vir menor.
+// O Supabase devolve no máximo 1.000 linhas por resposta (o teto do PostgREST). Uma consulta sem paginação
+// corta a lista de equipas e a contagem de membros calado. Lê em páginas de 1.000 com .range até uma página vir menor.
 // A ordem tem de ser TOTAL para as páginas não se repetirem nem pularem linhas: quem chama termina o .order() com 'id'.
 const PAGINA_SUPABASE = 1000;
 async function lerTudo(consulta) {
@@ -111,7 +111,7 @@ async function lerTudo(consulta) {
 
 /**
  * GET /api/super/teams — lista todas as equipas com nr. de membros e uso de
- * mídia da Resenha (Rodada 15: cota de 500 MB por time). Lê tudo, sem teto de 1.000 (Rodada 29Y).
+ * mídia da Resenha (cota de 500 MB por time). Lê tudo, sem teto de 1.000.
  */
 router.get(
   '/api/super/teams',

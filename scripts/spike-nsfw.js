@@ -13,8 +13,8 @@ const tf = require('@tensorflow/tfjs');
 const nsfw = require('nsfwjs');
 
 const B = path.join(__dirname, '..', 'public');
-// SEGURANCA-REVISAO-10SET.md secção 2/3 (10-set): fotos-jogos saiu de public/
-// (não era mais servida sem login) e vive agora fora dos repos.
+// SEGURANCA-REVISAO-10SET.md secção 2/3: fotos-jogos vive fora dos repos, não em public/
+// (não é servida sem login).
 const FOTOS_PRIVADAS = path.join(__dirname, '..', '..', '..', 'FOTOS-PRIVADAS');
 
 // Fotos da casa (devem PASSAR — nada de Porn alto).

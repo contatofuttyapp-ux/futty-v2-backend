@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// REPRODUZIR O BUG DA FOTO ANTIGA (22-set, conta do Pedro).
+// REPRODUZIR O BUG DA FOTO ANTIGA (conta do Pedro).
 //
 // O que aconteceu em produção: às 12:21:08 subiu uma foto nova, às 12:21:14
 // pediu figurinha — e a figurinha saiu da foto ANTIGA. Seis segundos.

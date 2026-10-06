@@ -4,9 +4,9 @@
 // PII, só dinheiro/infra/registos. Seed = os valores reais de PAINEL-E-CUSTOS.md
 // (editáveis; NÃO são medições — são estimativas do dono a ajustar à mão).
 //
-// Gabinete 2.0 (11-set): custos_fixos e registros ganharam schema novo (campos
-// explícitos da aba Dinheiro/Registros do painel de 5 abas). custos/registos
-// (schema antigo) saem — a página velha de 16 secções que os lia foi substituída.
+// Schema (Gabinete 2.0): custos_fixos e registros têm campos explícitos
+// (aba Dinheiro/Registros do painel de 5 abas). custos/registos
+// (schema antigo) saíram — a página velha de 16 secções que os lia foi substituída.
 // cobertura/protecao_dados/toggles continuam a existir (a Gabinete.jsx só deixa
 // de MOSTRAR essas secções atrás da flag MOSTRAR_AVANCADO — o dado não morre).
 const { randomUUID } = require('crypto');
@@ -19,10 +19,9 @@ const BUCKET = 'denuncias';
 const CAMINHO = '_gabinete/operacao.json';
 
 const SEED = {
-  // Câmbio US$→€ (14-set): a fal cobra em dólar (gasto_ia_diario), mas o
-  // painel de Dinheiro passou a mostrar tudo em euros (custos já regravados
-  // em EUR) — este número converte o card "IA do mês" para o mesmo padrão.
-  // Editável à mão na aba Dinheiro; não há fonte automática de câmbio.
+  // Câmbio US$→€: a fal cobra em dólar (gasto_ia_diario), mas o
+  // painel de Dinheiro mostra tudo em euros — este número converte o card "IA do mês"
+  // para o mesmo padrão. Editável à mão na aba Dinheiro; não há fonte automática de câmbio.
   cambio_usd_eur: 0.86,
   // Aba Dinheiro > Custos fixos. Valores reais de hoje (PAINEL-E-CUSTOS.md §1):
   // tudo em plano grátis, R$0/mês fixo — só a IA custa, e essa vive à parte
@@ -78,9 +77,7 @@ const SEED = {
   // continuam default OFF.
   ads_ativo: true,
   // toggle por página (default OFF). Chaves = as páginas onde há slot de publicidade.
-  // Rodada 12C (16-set): entraram 'resenha', 'ranking' e 'figurinha' — a Resenha
-  // pedia 'inicio' emprestado (não dava para ligar uma sem a outra) e as outras
-  // duas não tinham slot nenhum. Nada no motor valida estes nomes: obterAd faz
+  // Nada no motor valida estes nomes: obterAd faz
   // `toggles[pagina] !== true` e `c.paginas.includes(pagina)`, os dois
   // fail-closed — uma página desconhecida devolve `ad: null` em vez de erro.
   toggles: { inicio: false, resenha: false, ranking: false, figurinha: false, sorteio: false, p: false },
@@ -108,7 +105,7 @@ function pareceSegredo(texto) {
 
 function validarAcessos(lista) {
   for (const a of lista) {
-    // P2 (26-set): a coluna "Custo €/mês" (custo_eur, texto livre) passa pela mesma trava.
+    // A coluna "Custo €/mês" (custo_eur, texto livre) passa pela mesma trava.
     if (pareceSegredo(a?.obs) || pareceSegredo(a?.custo_eur)) {
       throw new HttpError(400, 'Senhas não entram aqui. Guarde no Gerenciador de Senhas do Google.');
     }
@@ -116,22 +113,24 @@ function validarAcessos(lista) {
   return lista;
 }
 
-// VELOCIDADE 6A (15-set): ler() corria um DOWNLOAD do Storage dentro de rotas
+// ler() corre um DOWNLOAD do Storage dentro de rotas
 // quentes — um por /api/inicio e outro por /api/ads, em todo carregamento de
 // tela. O ficheiro muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
 // (mesmo padrão de utils/plataformaStore.js), invalidada em gravar() para o
 // dono ver a própria edição de imediato.
-// Velocidade 7A: leituras simultâneas (arranque frio) esperam o MESMO download,
+// Leituras simultâneas (arranque frio) esperam o MESMO download,
 // e depois dos 30 s sai o valor conhecido enquanto o novo baixa por trás.
 const TTL_MS = 30000;
 const CHAVE = 'operacao';
 const cache = criarCache({ nome: 'gabinete', ttlMs: TTL_MS, max: 1 });
 
-/** Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia.
- *  Rodada 8B: prazo de 3 s (comPrazo) — este é o download que /api/inicio e
- *  /api/ads pagam em toda tela fria; sem prazo, uma ida sem resposta prendia
- *  a tela inteira (o catch já existia, mas não protege contra uma promessa
- *  pendurada, só contra uma que rejeita). */
+/**
+ * Lê SEM cache — usado por gravar(), para não gravar por cima de escrita alheia.
+ * Prazo de 3 s (comPrazo) — este é o download que /api/inicio e
+ * /api/ads pagam em toda tela fria; sem prazo, uma ida sem resposta prendia
+ * a tela inteira (o catch já existia, mas não protege contra uma promessa
+ * pendurada, só contra uma que rejeita).
+ */
 async function lerRaw() {
   try {
     const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO), 3000, 'gabinete/operacao');

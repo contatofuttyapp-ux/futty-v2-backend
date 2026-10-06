@@ -1,6 +1,6 @@
-// Futty v2.0 — Rodada 29I, bloco 3 (item 68 da Rodada 29): jogadores por time, UM padrão no time.
+// Futty v2.0 — Jogadores por time, UM padrão no time.
 //
-// Era perguntado duas vezes — na criação do time e em cada jogo novo. Agora o time guarda o seu padrão (teams.jogadores_por_time,
+// O time guarda o seu padrão (teams.jogadores_por_time,
 // migração 079; Ajustes do time) e o "Novo jogo" e os recorrentes já nascem com ele; cada jogo continua podendo mudar só para si
 // (games.jogadores_por_time). Sem a migração, ou sem padrão escolhido, vale 5 — o que os recorrentes sempre usaram.
 // Puro (sem banco), para testar no Node.

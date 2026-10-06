@@ -1,13 +1,10 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // APLICA O ÍCONE DO iPHONE — variante 2 "ouro vivo + aro" da bancada
-// (scripts/_bench/testar-icone.js, commit e2914ab). Reusa as MESMAS funções da
-// bancada (require, não cópia).
+// (scripts/_bench/testar-icone.js). Reusa as MESMAS funções da bancada (require, não cópia).
 //
-// RODADA 29X (5-out): este script grava SÓ o ícone do iPhone, e só com --so-ios.
-// Até a 29W ele também gravava o Android e o site — e a variante 2 tem o ANEL
-// dourado, que o dono mandou tirar de todo lugar menos da moldura fina do iPhone
-// ("um ícone só, o ouro vivo, sem anel": 5-out). Rodá-lo sem opção devolvia o
-// anel ao Android e ao site. Agora, de onde sai cada ícone:
+// Grava SÓ o ícone do iPhone, e só com --so-ios: a variante 2 tem o ANEL dourado, que o dono mandou
+// tirar de todo lugar menos da moldura fina do iPhone ("um ícone só, o ouro vivo, sem anel").
+// De onde sai cada ícone:
 //
 //   iPhone    ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png
 //             — ESTE script, com --so-ios: 1024, sem alpha, ouro vivo + a moldura

@@ -17,7 +17,7 @@ const { olheiroEntrada } = require('../utils/olheiroEntrada');
 const { sha256Hex, verificarTeto, verificarFreeze, registrarGeracao } = require('../utils/antiAbusoIA');
 const { apagarUsuario } = require('../utils/apagarUsuario');
 const { dataDeNascimentoValida, menorQueIdadeMinima, MSG_MENOR } = require('../utils/idade');
-// A figurinha, em três módulos próprios (17-set, variante 6 da bancada):
+// A figurinha, em três módulos próprios:
 //   prompts/figurinha.js       o texto que vai à IA (a bancada importa o MESMO)
 //   utils/entradaFigurinha.js  a foto que vai com ele (faixa + corte quadrado)
 //   utils/falFila.js           a chamada, e o custo REAL vindo dos headers da fal
@@ -28,28 +28,28 @@ const {
   gerarFigurinha, RECEITA, V6_ENDPOINT, FIDELIDADE_V6,
   PASSADA1_ENDPOINT, PASSADA2_ENDPOINT, QUALIDADE, FIDELIDADE_PASSADA2, TAMANHO_1_5,
 } = require('../utils/geracaoFigurinha');
-// Quem pode gerar uma Brilhante (SPEC-FIGURINHA-3, §5). Desde 22-set toda
-// geração nasce paga: crédito comprado/presenteado ou pacote do time.
+// Quem pode gerar uma Brilhante (SPEC-FIGURINHA-3, §5). Toda geração nasce paga:
+// crédito comprado/presenteado ou pacote do time.
 const { temDireito, debitar, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
-// Rodada 29B (bloco 2, A): a pintura roda em segundo plano, numa fila em memória (uma por vez por pessoa).
+// A pintura roda em segundo plano, numa fila em memória (uma por vez por pessoa).
 const geracaoJobs = require('../utils/geracaoJobs');
 // Bloco 2-A2: com o Cloud Tasks ligado, quem pinta é o pedido da tarefa (POST /api/interno/pintar/:jobId), não a CPU ociosa.
 const tarefasPintura = require('../utils/tarefasPintura');
 const { enviarNotificacao } = require('./push'); // o "Sua figurinha ficou pronta" (avisarQuePintou)
-// Rodada 29B (bloco 3, E): o enquadramento da miniatura (PUT/DELETE /api/me/avatar/enquadro).
+// O enquadramento da miniatura (PUT/DELETE /api/me/avatar/enquadro).
 const { validarRecorte } = require('../utils/recorteAvatar');
 const recortesAvatar = require('../utils/recortesAvatar');
 const { parseUrlPublico } = require('../utils/storage');
 
 // fal.ai — a chave vem do ambiente (FAL_KEY) e é lida dentro de utils/falFila.js,
-// que é quem fala com a fal desde 17-set (o SDK escondia os headers de custo).
+// que é quem fala com a fal (o SDK escondia os headers de custo).
 
 const router = express.Router();
 
 // Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
 const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
-// RODADA 19 — "Escolher outra foto" manda dois ficheiros no mesmo pedido: o
+// "Escolher outra foto" manda dois ficheiros no mesmo pedido: o
 // recorte 2:3 (campo "avatar", como sempre) e, opcional, a foto ORIGINAL
 // antes do recorte (campo "original", para "Ajustar enquadramento" mais
 // tarde). .fields() em vez de .single(): quem só manda "avatar" (Onboarding,
@@ -77,7 +77,7 @@ function receberAvatar(req, res, next) {
     }
     req.file = req.files?.avatar?.[0] || null;
     req.fileOriginal = req.files?.original?.[0] || null;
-    // EXIF (build 9, achado real: selfie do iPhone girada 180°). .rotate() sem
+    // EXIF (caso real: selfie do iPhone girada 180°). .rotate() sem
     // argumentos lê a tag Orientation, reescreve os pixels já em pé e apaga a
     // tag — ninguém depois (NSFW, Olheiro, Storage, IA) precisa de voltar a
     // interpretar orientação. O frontend já normaliza antes de subir
@@ -102,7 +102,7 @@ function receberAvatar(req, res, next) {
   });
 }
 
-// RODADA 19 — PUT /api/me/avatar/recorte: um ficheiro só (campo "recorte"),
+// PUT /api/me/avatar/recorte: um ficheiro só (campo "recorte"),
 // o resultado de reabrir o CropModal sobre a original (ou o fallback, sobre
 // o recorte atual). Mesmo teto/mesmos tipos do avatar normal.
 const uploadRecorteMw = multer({
@@ -142,7 +142,7 @@ const FUNDOS_FIGURINHA = ['estadio', 'gradiente', 'aura', 'preto', 'golden', 'ro
 // Avatar genérico escolhido (migração 044) — masc m1-m3, fem f1-f3. NULL = rodízio.
 const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // Fundos PREMIUM: GOLDEN, AURA e ROYAL. ÉPICO ('gradiente', chave interna) é
-// GRÁTIS (15-set, decisão do dono) — fora desta lista de propósito.
+// GRÁTIS (decisão do dono) — fora desta lista de propósito.
 //
 // LEI DA REGRA JUSTA (sem punição retroativa): o gate só corre AQUI, no PATCH
 // que TROCA fundo_figurinha — nunca em leitura (GET /api/me) nem no render.
@@ -154,9 +154,9 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // é o que preserva isto: reabrir a mesma página nunca reenvia o PATCH do
 // fundo já equipado).
 //
-// 22-set (SPEC-FIGURINHA-3): estes 3 fundos vêm com a BRILHANTE, não com um
-// plano — o gate virou DIREITO (ter avatar_url ≠ foto_url), super-admin
-// sempre passa. Lista de ids, já não um mapa de planos.
+// (SPEC-FIGURINHA-3) Estes 3 fundos vêm com a BRILHANTE, não com um
+// plano — o gate é DIREITO (ter avatar_url ≠ foto_url), super-admin
+// sempre passa. Lista de ids, não um mapa de planos.
 const FUNDOS_PREMIUM = ['golden', 'aura', 'royal'];
 // MORTO desde 22-set (SPEC-FIGURINHA-3): quem manda na geração é o DIREITO
 // (utils/direitoBrilhante.js), não o plano. Nada lê esta tabela — nem esta rota,
@@ -166,12 +166,12 @@ const FUNDOS_PREMIUM = ['golden', 'aura', 'royal'];
 // eslint-disable-next-line no-unused-vars
 const LIMITES_IA_APOSENTADO = { free: 2, pro: 10, elite: 20 };
 // Colunas de perfil devolvidas ao frontend.
-// mostrar_rosto_publico (migração 040) e avatar_generico (migração 044) confirmadas
-// presentes em produção (10-set) — juntas aqui em vez de 2 consultas extra por /api/me.
+// mostrar_rosto_publico (migração 040) e avatar_generico (migração 044) —
+// juntas aqui em vez de 2 consultas extra por /api/me.
 const PERFIL_COLS =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 
-// RODADA 29G (1-out) — o Futty é para maiores de 18 anos (utils/idade.js). "Cadastro em curso" = o
+// O Futty é para maiores de 18 anos (utils/idade.js). "Cadastro em curso" = o
 // onboarding dia-1 ainda não foi concluído: é aí que a data chega (e-mail: no formulário; Google/Apple:
 // no passo "Quando você nasceu?"). Contas que já existiam (onboarding concluído) o motor não apaga:
 // com data menor de 18, o app mostra a tela com "Excluir minha conta".
@@ -246,12 +246,11 @@ router.patch(
     if ('fundo_figurinha' in b) {
       const v = String(b.fundo_figurinha);
       if (!FUNDOS_FIGURINHA.includes(v)) throw new HttpError(400, 'Fundo de figurinha inválido.');
-      // GATE (servidor é a fonte da verdade — sem truque de frontend). 22-set,
-      // SPEC-FIGURINHA-3 §4/§9: os 3 fundos de cima deixaram de ser por PLANO e
-      // passaram a vir COM a Brilhante. Os planos saíram das telas e um membro
-      // do pacote via o Aura trancado no card que o time tinha acabado de
-      // pagar. Quem não tem Brilhante não tem sequer seletor de fundo — este
-      // gate é a defesa em profundidade para um pedido montado à mão.
+      // GATE (servidor é a fonte da verdade — sem truque de frontend). SPEC-FIGURINHA-3
+      // §4/§9: os 3 fundos de cima vêm COM a Brilhante, não por PLANO (os planos saíram
+      // das telas: um membro do pacote não pode ver o Aura trancado no card que o time
+      // tinha acabado de pagar). Quem não tem Brilhante não tem sequer seletor de fundo
+      // — este gate é a defesa em profundidade para um pedido montado à mão.
       if (FUNDOS_PREMIUM.includes(v)) {
         // O avatar ser uma figurinha NOSSA (utils/figurinhaRegra.js), não "≠ foto_url":
         // a foto do Google, que o trigger 001 copiava, não abre os fundos pagos.
@@ -274,7 +273,7 @@ router.patch(
       if (v && !AVATARES_GENERICOS.includes(v)) throw new HttpError(400, 'Avatar genérico inválido.');
       patch.avatar_generico = v;
     }
-    // Data de nascimento (pedido único do Início a quem não a tem; e, desde a Rodada 28, o passo
+    // Data de nascimento (pedido único do Início a quem não a tem; e o passo
     // "Quando você nasceu?" do onboarding de quem entrou com Google/Apple). SET-ONCE: se já
     // existir, não deixa mudar (evita a passagem trivial menor→adulto).
     if ('birthdate' in b) {
@@ -284,7 +283,7 @@ router.patch(
         if (!v) throw new HttpError(400, 'Data de nascimento inválida.');
         const atual = await getUserById(req.user.id, 'birthdate');
         if (atual && atual.birthdate) throw new HttpError(400, 'A data de nascimento já está definida.', 'NASCIMENTO_JA_DEFINIDO');
-        // Rodada 29G: no cadastro, menor de 18 não fica com conta.
+        // No cadastro, menor de 18 não fica com conta.
         if (cadastroEmCurso(req.user) && menorQueIdadeMinima(v)) await recusarMenor(req);
         patch.birthdate = v;
       }
@@ -340,7 +339,7 @@ router.post(
   '/api/me/onboarding-completo',
   requireAuth,
   asyncHandler(async (req, res) => {
-    // RODADA 29G: a data do cadastro por e-mail (metadata → users.birthdate) ou a do
+    // A data do cadastro por e-mail (metadata → users.birthdate) ou a do
     // passo do onboarding. Menor de 18: a conta não fica. Sem data nenhuma a conclusão passa — o
     // app da loja que ainda não tem o passo (iOS 33, Android 15) não pode ficar preso aqui; o app
     // novo não deixa concluir sem ela. Quando só houver builds novos nas lojas, exigir aqui.
@@ -354,7 +353,7 @@ router.post(
     // Sem isto, o req.user cacheado (middleware/auth.js, TTL 60s) continuava a
     // devolver onboarding_completo:false ao GET /api/me seguinte — o
     // OnboardingGate do frontend mandava de volta para /onboarding em loop
-    // (achado 14-set: só aparecia em quem pulava a foto, porque esse caminho é
+    // (só aparecia em quem pulava a foto, porque esse caminho é
     // rápido demais para os 60s do cache expirarem sozinhos).
     invalidarSessaoDoPedido(req);
     res.json({ onboarding_completo: true });
@@ -382,7 +381,7 @@ router.post(
 
 /**
  * POST /api/me/avatar — upload da foto de perfil (multipart, campo "avatar";
- * opcional "original" — RODADA 19, a foto ANTES do recorte 2:3, guardada para
+ * opcional "original" — a foto ANTES do recorte 2:3, guardada para
  * "Ajustar enquadramento" reabrir sem perder área/qualidade).
  * Vai para o Supabase Storage (bucket "avatars", caminho
  * `public/{userId}-{carimbo}.{ext}`) e guarda o URL em users.foto_url — e o
@@ -393,8 +392,8 @@ router.post(
   '/api/me/avatar',
   requireAuth,
   receberAvatar,
-  filtroNSFW, // Tijolo 1: bloqueia imagem explícita antes de guardar (avatar + onboarding)
-  olheiroEntrada, // 11-ago: barra foto sem futuro (pequena/corrompida/preta/estourada) antes de guardar
+  filtroNSFW, // bloqueia imagem explícita antes de guardar (avatar + onboarding)
+  olheiroEntrada, // barra foto sem futuro (pequena/corrompida/preta/estourada) antes de guardar
   asyncHandler(async (req, res) => {
     const file = req.file;
     if (!file) throw new HttpError(400, 'Nenhuma imagem enviada (campo "avatar").');
@@ -411,7 +410,7 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    // Nome POR VERSÃO (22-set): cada foto é um objeto novo. Ver a nota em
+    // Nome POR VERSÃO: cada foto é um objeto novo. Ver a nota em
     // `caminhoFotoNovo` — caminho que muda de conteúdo é caminho que alguém,
     // algures, serve desactualizado. A original leva um caminho PRÓPRIO
     // (sufixo "-original"), nunca confundível com o recorte.
@@ -419,8 +418,8 @@ router.post(
     const caminhoOriginal = original && extOriginal ? caminhoFotoOriginalNovo(userId, extOriginal) : null;
     console.log('[avatar] upload p/ Storage:', { bucket: 'avatars', caminho, caminhoOriginal });
 
-    // RODADA 27 (25-set) — gravar o recorte, gravar a original (opcional) e ler o estado atual da
-    // pessoa saem JUNTOS: eram três idas ao Supabase em série e nenhuma depende das outras (a
+    // Gravar o recorte, gravar a original (opcional) e ler o estado atual da
+    // pessoa saem JUNTOS: são três idas ao Supabase e nenhuma depende das outras (em série, a
     // rota levava seis a sete idas até responder; ver o resto depois do res.json). Sem upsert:
     // o carimbo de tempo já torna o nome único, e se por absurdo colidisse, o certo é falhar
     // aqui em vez de escrever por cima do objeto de outra chamada.
@@ -459,27 +458,27 @@ router.post(
     console.log('[avatar] URL público:', avatarUrl);
 
     // 3. UPDATE na tabela users. foto_url = a nova foto (fonte da geração IA).
-    //    avatar_url (o que o card mostra): no modo 'foto' (Rodada 18,
-    //    users.card_modo, migração 056) segue sempre a foto nova, mesmo
+    //    avatar_url (o que o card mostra): no modo 'foto' (users.card_modo,
+    //    migração 056) segue sempre a foto nova, mesmo
     //    havendo figurinha — é a escolha explícita da pessoa. Nos demais
     //    casos (modo 'figurinha' ou ainda sem escolha) SÓ é preservado se o
     //    avatar atual for mesmo uma figurinha nossa (utils/figurinhaRegra.js);
     //    aí o card continua a mostrá-la até a pessoa gerar de novo (nunca a
     //    foto crua) — comportamento de sempre, mantido como fail-safe se a 056
     //    ainda não tiver corrido. Sem figurinha, avatar_url vira a foto nova,
-    //    sempre. (Hotfix 26: antes decidia por avatar_url ≠ foto_url, e a foto
-    //    do Google copiada pelo trigger contava como figurinha: a foto nova ia
+    //    sempre. (Não se decide por avatar_url ≠ foto_url: a foto do Google
+    //    copiada pelo trigger contava como figurinha, a foto nova ia
     //    para foto_url e o card nunca mudava.)
     const modoFoto = atual?.card_modo === 'foto';
     const preservar = devePreservarAvatar({ avatarUrlAtual: atual?.avatar_url, cardModo: atual?.card_modo });
     const novoAvatarUrl = preservar ? atual.avatar_url : avatarUrl;
     console.log('[avatar] UPDATE users:', { userId, preservar, modoFoto });
 
-    // O HASH VAI NO MESMO UPDATE que o URL (22-set). Antes era gravado a
-    // seguir, num update próprio, e isso abria uma janela de milissegundos em
-    // que `foto_url` já era a foto NOVA e `foto_hash` ainda era o da ANTIGA.
-    // Quem pedisse figurinha dentro dessa janela caía no reuso de slot — que
-    // compara o fingerprint do slot com o `foto_hash` — e recebia a figurinha
+    // O HASH VAI NO MESMO UPDATE que o URL. Num update próprio, a
+    // seguir, abriria uma janela de milissegundos em
+    // que `foto_url` já seria a foto NOVA e `foto_hash` ainda o da ANTIGA.
+    // Quem pedisse figurinha dentro dessa janela cairia no reuso de slot — que
+    // compara o fingerprint do slot com o `foto_hash` — e receberia a figurinha
     // velha de volta. Uma linha só fecha a janela: ou grava tudo, ou nada.
     // foto_original_url só entra no patch quando há original nova — sem ela,
     // uma original antiga (se houver) fica exatamente como está.
@@ -516,20 +515,20 @@ router.post(
     marcarFigurinhaStatus(userId, 'pronta');
 
     console.log('[avatar] concluído:', { userId, preservouAvatarIA: preservar, modoFoto, comOriginal: !!originalUrl });
-    // figurinha_ativa (Rodada 28): o que o card mostra agora, pela regra única — as telas não comparam URLs.
+    // figurinha_ativa: o que o card mostra agora, pela regra única — as telas não comparam URLs.
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, foto_original_url: originalUrl || atual?.foto_original_url || null, figurinha_ativa: avatarEhFigurinhaNossa(novoAvatarUrl) });
 
-    // RODADA 27 — a pessoa já tem o que precisa; o resto é faxina e adiantamento.
+    // A pessoa já tem o que precisa; o resto é faxina e adiantamento.
     faxinaDaFotoNova({ atual, caminho, caminhoOriginal, originalUrl, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype, motivoAntiga: 'foto substituída' });
   })
 );
 
 /**
- * PUT /api/me/avatar/recorte — RODADA 19: "Ajustar enquadramento" regrava só
+ * PUT /api/me/avatar/recorte — "Ajustar enquadramento" regrava só
  * o recorte 2:3 (multipart, campo "recorte"), sem tocar em foto_original_url.
  * O CropModal (cliente) já reabriu sobre a foto original guardada — ou, sem
  * ela (foto antiga, fail-safe), sobre o recorte atual — e manda aqui só o
- * resultado. A TRAVA DE HASH passa a ser a do recorte novo: é ele que a
+ * resultado. A TRAVA DE HASH é a do recorte novo: é ele que a
  * geração de figurinha usa.
  */
 router.put(
@@ -547,7 +546,7 @@ router.put(
     const userId = req.user.id;
     await ensureUserRow(req.user);
 
-    // RODADA 27 — ler o estado e gravar o recorte novo saem juntos (não dependem um do outro).
+    // Ler o estado e gravar o recorte novo saem juntos (não dependem um do outro).
     // Sem foto, não há o que reenquadrar: o objeto que subiu à toa é apagado.
     const caminho = caminhoFotoNovo(userId, ext);
     const [atual, upRecorte] = await Promise.all([
@@ -581,21 +580,21 @@ router.put(
     console.log('[avatar-recorte] concluído:', { userId, preservouAvatarIA: preservar });
     res.json({ foto_url: avatarUrl, avatar_url: novoAvatarUrl, figurinha_ativa: avatarEhFigurinhaNossa(novoAvatarUrl) });
 
-    // RODADA 27 — a foto anterior sai e os derivados da nova ficam prontos DEPOIS da resposta.
+    // A foto anterior sai e os derivados da nova ficam prontos DEPOIS da resposta.
     faxinaDaFotoNova({ atual, caminho, caminhoOriginal: null, originalUrl: null, novoAvatarUrl, avatarUrl, buffer: file.buffer, tipo: file.mimetype });
   })
 );
 
-// O PROMPT DA FIGURINHA vive em prompts/figurinha.js (fonte única, 17-set).
-// Aqui ficou só a chamada: montarPrompt(kitId). O prompt antigo (PROMPT_BASE
+// O PROMPT DA FIGURINHA vive em prompts/figurinha.js (fonte única).
+// Aqui fica só a chamada: montarPrompt(kitId). O prompt antigo (PROMPT_BASE
 // de 5.375 caracteres + kitPrompt em cinco pontos + kitChecklist) foi REPROVADO
 // na bancada de 49 figurinhas — 1,6/5 contra 4,1/5 do que está agora lá. Não
 // voltar a escrever prompt dentro desta rota: a bancada importa do mesmo módulo,
 // e é isso que garante que o que se mede é o que está no ar.
 // Kit Futty (referência) no Supabase Storage — usado na composição final (ETAPA 3).
 // Assets dos kits em bucket PÚBLICO próprio ('kits') — são assets do app, não PII.
-// (Antes viviam em avatars/Kits/; o tijolo 1C privatizou avatars e partia o fal +
-// as thumbnails. Movidos para 'kits' público, que a privatização não toca.)
+// (Em 'avatars', que é privado, partiriam o fal + as thumbnails; no 'kits' público
+// a privatização não toca.)
 const KIT_URL =
   'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit1-dark-gold.png';
 const KIT2_URL =
@@ -606,10 +605,10 @@ const KIT2_URL =
 // (usada no cartaz e na composição do app). A frase do kit para a IA NÃO vive
 // aqui: está em prompts/figurinha.js, uma por kit.
 //
-// 22-set (SPEC-FIGURINHA-3): o campo `planos` (Free/Pro/Elite) saiu — quem
+// (SPEC-FIGURINHA-3) Não há campo `planos` (Free/Pro/Elite): quem
 // pode GERAR um kit novo é o DIREITO (utils/direitoBrilhante.js), não plano
 // nenhum; quem já gerou um kit pode sempre voltar a vesti-lo (PUT /api/me/kit,
-// sem gate nenhum). Nenhum kit é mais "grátis" ou "pago" em si — o que é pago
+// sem gate nenhum). Nenhum kit é "grátis" ou "pago" em si — o que é pago
 // é a Brilhante inteira.
 const KITS_IA = {
   'dark-gold': {
@@ -623,17 +622,17 @@ const KITS_IA = {
     acento: 'vivid purple #8b5cf6',
   },
   'white-gold': {
-    ativo: true, // asset escolhido pelo dono (31-jul): white-gold-c1 → kit3
+    ativo: true, // asset escolhido pelo dono: white-gold-c1 → kit3
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit3-white-gold.png',
     acento: 'metallic gold #d4a017',
   },
   'elite-gold': {
-    ativo: true, // asset escolhido pelo dono (31-jul): elite-gold-c1 → kit4
+    ativo: true, // asset escolhido pelo dono: elite-gold-c1 → kit4
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit4-elite-gold.png',
     acento: 'deep black #0d0d12', // kit invertido — o acento aqui é o preto, não o ouro
   },
   'royal-purple': {
-    ativo: true, // 5º kit do lançamento (31-jul): royal-purple-c3 → kit5. Par do Elite Gold.
+    ativo: true, // 5º kit do lançamento: royal-purple-c3 → kit5. Par do Elite Gold.
     url: 'https://ynzmjcvqdljffgbeqglh.supabase.co/storage/v1/object/public/kits/kit5-royal-purple.png',
     acento: 'deep black #0d0d12', // invertido — roxo é a base, preto é o acento
   },
@@ -642,7 +641,7 @@ const KITS_IA = {
 // O prompt vem inteiro do módulo — esta rota não monta texto nenhum.
 const promptFutty = (kitId) => montarPrompt(kitId);
 
-// O bucket "avatars" é PRIVADO (Tijolo 1C) — um users.foto_url guardado como URL
+// O bucket "avatars" é PRIVADO — um users.foto_url guardado como URL
 // "público" do Storage já não é descarregável por ninguém de fora (nem a própria fal.ai,
 // que busca a imagem do lado dela). Estas duas funções extraem o CAMINHO desse URL
 // legado e emitem um URL ASSINADO de vida curta, o único que a fal consegue mesmo buscar.
@@ -659,10 +658,10 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
   return data.signedUrl;
 }
 
-// ── Nomes de ficheiro POR VERSÃO (22-set) ────────────────────────────────────
+// ── Nomes de ficheiro POR VERSÃO ─────────────────────────────────────────────
 //
-// Antes, a foto ia sempre para `public/<userId>.<ext>` e a figurinha para
-// `public/<userId>-ai-<kit>.png`, com upsert por cima. Um caminho que muda de
+// O padrão antigo era `public/<userId>.<ext>` para a foto e
+// `public/<userId>-ai-<kit>.png` para a figurinha, com upsert por cima. Um caminho que muda de
 // conteúdo é um convite a cache velho: navegador, WebView, CDN e qualquer
 // proxy pelo caminho podem servir a versão anterior, e não há como pedir para
 // esquecerem. Com o carimbo de tempo no nome, cada versão é um OBJETO NOVO —
@@ -672,7 +671,7 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
 // LEITURA sai sempre de `users.foto_url` / `avatar_url`, que guardam o caminho
 // completo, e por isso aceita os dois padrões sem saber a diferença.
 const caminhoFotoNovo = (userId, ext) => `public/${userId}-${Date.now()}.${ext}`;
-// RODADA 19 — sufixo "-original" para nunca colidir com o nome do recorte
+// Sufixo "-original" para nunca colidir com o nome do recorte
 // (os dois podem nascer no MESMO milissegundo, no mesmo pedido).
 const caminhoFotoOriginalNovo = (userId, ext) => `public/${userId}-original-${Date.now()}.${ext}`;
 const caminhoFigurinhaNova = (userId, kitId) => `public/${userId}-ai-${kitId}-${Date.now()}.png`;
@@ -707,9 +706,9 @@ async function lerEstadoDoAvatar(userId, { comOriginal = true } = {}) {
 }
 
 /**
- * O que sobra de trocar a foto e NÃO precisa segurar a resposta (RODADA 27, 25-set):
+ * O que sobra de trocar a foto e NÃO precisa segurar a resposta:
  *   · apagar a foto e a original anteriores. Só depois de o banco estar gravado: se apagasse
- *     antes e o update falhasse, a pessoa ficava sem foto nenhuma. Ficou depois da RESPOSTA
+ *     antes e o update falhasse, a pessoa ficava sem foto nenhuma. Fica depois da RESPOSTA
  *     porque já não há update a esperar; o pior caso continua sendo um arquivo órfão (logado);
  *   · deixar prontos os derivados que as telas vão pedir da foto nova (utils/derivadosMidia.js),
  *     a partir dos bytes que o motor já tem: o primeiro pedido da própria pessoa deixa de pagar a
@@ -735,9 +734,7 @@ function faxinaDaFotoNova({ atual, caminho, caminhoOriginal, originalUrl, novoAv
   })().catch((e) => console.error('[avatar] faxina depois da resposta falhou:', e.message));
 }
 
-// RODADA 19 — teto de "Minhas figurinhas" (decisão do dono, 23-set).
-// RODADA 21 (24-set) — subiu de 6 para 10: gerações mais generosas enchiam o
-// histórico mais depressa (Minha Figurinha sozinha já dá 10).
+// Teto de "Minhas figurinhas" (decisão do dono): 10 (Minha Figurinha sozinha já dá 10).
 const TETO_HISTORICO_FIGURINHAS = 10;
 
 /**
@@ -779,7 +776,7 @@ async function arquivarFigurinhaAntiga(userId, kitId, avatarUrlAntigo) {
 /**
  * Baixa a foto e confirma que é a que a tabela diz ser a atual.
  *
- * Existe por causa do relato de 22-set (foto nova, figurinha da foto antiga).
+ * Existe por causa do relato de foto nova com figurinha da foto antiga.
  * A causa nunca se reproduziu em bancada — o download autenticado devolveu
  * sempre a versão certa —, mas a verificação é barata e o que ela evita é caro:
  * uma figurinha da foto errada com o dinheiro já gasto. Se o hash não bater,
@@ -820,7 +817,7 @@ async function baixarFotoConferida(caminho, hashEsperado) {
   );
 }
 
-// 6-out (decisão do dono): cabeça cortada (ou braço extremo na lateral) nas DUAS tentativas → a FOTO fica recusada. Um pedido novo com a
+// Decisão do dono: cabeça cortada (ou braço extremo na lateral) nas DUAS tentativas → a FOTO fica recusada. Um pedido novo com a
 // mesma foto é barrado ANTES da fal (FOTO_RECUSADA), sem débito. A identidade é o foto_hash (sha256 dos bytes
 // da foto guardada), não o nome do arquivo nem a conta: foto nova = hash novo = libera. Migração 080 (fotos_recusadas).
 const MSG_FOTO_RECUSADA = 'Essa foto não deu certo. Escolha outra: de frente, com a cabeça e os ombros inteiros aparecendo, sem nada cortado nas bordas.';
@@ -889,20 +886,19 @@ async function garantirFotoHash(userId, perfil) {
 }
 
 /**
- * A PINTURA em si — era o corpo de POST /api/me/avatar/ai (Rodada 29B, bloco 2, A: passou a rodar em
- * segundo plano, pela fila de utils/geracaoJobs.js). Baixa a foto conferida, pinta (fal), audita a
+ * A PINTURA em si — roda em segundo plano, pela fila de utils/geracaoJobs.js (era o corpo de POST /api/me/avatar/ai). Baixa a foto conferida, pinta (fal), audita a
  * coroa, grava a figurinha e o slot e, SÓ DEPOIS de ela existir, debita o direito. `etapa(nome)` avisa
- * em que pé está (o app mostra 'preparando a foto → pintando o uniforme → acabamento'). Lança HttpError
- * como sempre lançou; quem chama transforma isso no desfecho do job (e, como antes, no status
+ * em que pé está (o app mostra 'preparando a foto → pintando o uniforme → acabamento'). Lança HttpError;
+ * quem chama transforma isso no desfecho do job (e no status
  * 'falhou' do usuário). O pedido HTTP pode já ter respondido: `req` só serve para o IP, o usuário e
  * a invalidação da sessão.
  */
 async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitId, kit, slot }, { etapa }) {
   // Conta sem foto_hash (antes da 048): calcula-o aqui se a POST ainda não o fez (a tarefa relê o perfil do banco).
   await garantirFotoHash(userId, perfil);
-  // 6-out: foto já recusada não chega à fal — esta é a última porta antes do dinheiro (a da POST é a primeira).
+  // Foto já recusada não chega à fal — esta é a última porta antes do dinheiro (a da POST é a primeira).
   if (await fotoEstaRecusada(perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
-  // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
+  // ETAPA 0 — a foto que vai à IA: faixa de
   // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
   // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
   // Porquê quadrado: ganhou em 6 das 7 fotos (4,1/5 contra 4,0 do retrato) e
@@ -920,8 +916,8 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   try {
     if (!caminhoFoto) throw new Error('foto_url não é um caminho do bucket avatars.');
     // download() autenticado (SDK) em vez de fetch(url pública) — o bucket é
-    // PRIVADO (Tijolo 1C), um fetch simples do URL "público" devolve 400.
-    // TRAVA ANTES DE GASTAR (22-set). A foto que se baixou tem de ser a que a
+    // PRIVADO, um fetch simples do URL "público" devolve 400.
+    // TRAVA ANTES DE GASTAR. A foto que se baixou tem de ser a que a
     // tabela diz ser a atual — senão a figurinha sairia da foto errada e o
     // dinheiro já estaria gasto quando alguém percebesse. Três tentativas com
     // 2 s de intervalo: se for atraso de propagação, passa; se for outra
@@ -1013,7 +1009,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
         etiqueta: 'fig',
       });
     } catch (err) {
-      // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): era logada a resposta
+      // SEGURANCA-REVISAO-10SET.md secção 3: não se loga a resposta
       // inteira do fal (body/response, que pode incluir o inputUrl assinado
       // enviado no pedido) — fica só o código de erro e a mensagem curta.
       console.error('[avatar-ai] erro fal:', { status: err.status, message: err.message });
@@ -1022,7 +1018,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
       // do serviço). Código próprio para o frontend distinguir sem depender do texto.
       let corpo = err.body;
       if (typeof corpo === 'string') { try { corpo = JSON.parse(corpo); } catch { corpo = null; } }
-      // Bug corrigido (14-set): em 401/403 a fal devolve `detail` como STRING
+      // Em 401/403 a fal devolve `detail` como STRING
       // ("Forbidden"), não array — .some() nessa string derrubava com
       // TypeError e escondia a causa real. Só chama .some() se for array.
       if (Array.isArray(corpo?.detail) && corpo.detail.some((d) => d.type === 'file_download_error')) {
@@ -1077,7 +1073,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
     for (let x = 0; x <= 2 && x < w; x++) esqCount = Math.max(esqCount, contarColuna(x));
     let dirCount = 0;
     for (let x = Math.max(0, w - 3); x < w; x++) dirCount = Math.max(dirCount, contarColuna(x));
-    // HIERARQUIA DOS DEFEITOS (11-ago, dono): braço tocando a borda lateral NÃO
+    // HIERARQUIA DOS DEFEITOS (decisão do dono): braço tocando a borda lateral NÃO
     // reprova — é linguagem de cromo (Panini/FIFA cortam braço na moldura) e era
     // a causa nº1 de retry (~31% de custo a mais). Vira AVISO no log. Rede de
     // segurança: contacto EXTREMO (>60% da altura colada) ainda reprova.
@@ -1121,7 +1117,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   };
 
   await etapa('pintando');
-  // 6-out: "defeito da foto" = a cabeça cortada (o topo na borda, ou a coroa achatada) OU o braço EXTREMO na lateral
+  // O "defeito da foto" = a cabeça cortada (o topo na borda, ou a coroa achatada) OU o braço EXTREMO na lateral
   // (>60% da altura colada). Só as DUAS tentativas com defeito recusam a FOTO; o braço colado normal (só aviso) e a
   // 2ª tentativa caída por outro motivo não marcam nada.
   const defeitoDaFoto = (v) => v.borda.topo.cortado || v.achatamento.cortada || v.borda.esquerda.cortado || v.borda.direita.cortado;
@@ -1149,7 +1145,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
     // de qualquer um dos três, mais abaixo neste handler).
     console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
     if (defeitoNaPrimeira && defeitoNaSegunda) {
-      // 6-out: a foto reprovou nas duas tentativas (cabeça cortada ou braço extremo) → recusada. O próximo pedido com ela é barrado antes da fal.
+      // A foto reprovou nas duas tentativas (cabeça cortada ou braço extremo) → recusada. O próximo pedido com ela é barrado antes da fal.
       await recusarFoto(userId, perfil.foto_hash);
       throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
     }
@@ -1170,7 +1166,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
 
   await ensureUserRow(req.user);
   // Um ficheiro POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
-  // a figurinha nova não escreve por cima da velha (22-set). Sem upsert: o
+  // a figurinha nova não escreve por cima da velha. Sem upsert: o
   // carimbo de tempo torna colisão impossível, e se algum dia houvesse, o
   // certo é rebentar aqui em vez de apagar o trabalho de outra chamada.
   const caminho = caminhoFigurinhaNova(userId, kitId);
@@ -1201,23 +1197,23 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   if (updErr) throw new HttpError(500, updErr.message);
   // Separado do update acima de propósito (ver nota no slot-reuse, mais acima).
   marcarFigurinhaStatus(userId, 'pronta');
-  invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
+  invalidarSessaoDoPedido(req); // nota completa no 'gerando', mais acima.
 
-  // RODADA 19 (decisão do dono, 23-set): a figurinha anterior DESTE kit
+  // (decisão do dono) A figurinha anterior DESTE kit
   // já não é apontada por ninguém (o slot e o users.avatar_url acabaram de
   // mudar) — mas em vez de sair do bucket, vai para "Minhas figurinhas"
   // (user_avatar_historico, migração 057). custo_cents fica null: é o custo
-  // de QUANDO ELA foi gerada, que não foi guardado antes desta rodada — só
+  // de QUANDO ELA foi gerada, que não foi guardado antes — só
   // passa a existir para gerações futuras (não há como recuperar retroativo).
   const figurinhaAntiga = caminhoNoBucket(slot?.avatar_url, 'avatars');
   if (figurinhaAntiga && figurinhaAntiga !== caminho) {
     await arquivarFigurinhaAntiga(userId, kitId, slot.avatar_url);
   }
 
-  // Pacote anti-abuso (11-ago): soma o gasto do dia, guarda o log de IP e
+  // Pacote anti-abuso: soma o gasto do dia, guarda o log de IP e
   // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
   // derruba a resposta — a figurinha já foi entregue ao utilizador).
-  // 17-set: vai o custo REAL em cêntimos, somado de todas as chamadas desta
+  // Vai o custo REAL em cêntimos, somado de todas as chamadas desta
   // geração (retry incluído). `null` só quando a fal não mandou header nenhum
   // — nesse caso quem decide o valor é o antiAbusoIA, não este sítio.
   const custoCents = conta.semHeader === conta.chamadas ? null : conta.usd * 100;
@@ -1229,7 +1225,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
     // das quatro chamadas mudou de preço.
     parcelas: Object.fromEntries(Object.entries(conta.parcelas).map(([k, v]) => [k, Number(v.toFixed(4))])),
   });
-  // Rodada 28: o time que pagou (pacote) vai junto — é o custo por time e por mês do Gabinete.
+  // O time que pagou (pacote) vai junto — é o custo por time e por mês do Gabinete.
   registrarGeracao({ userId, ip: req.ip, custoCents, teamId: direitoUsado?.fonte === 'time' ? direitoUsado.teamId : null }).catch(() => {});
 
   // DEBITA O DIREITO — só AGORA, com a figurinha gravada e entregue
@@ -1287,7 +1283,7 @@ function respostaDePinturaEmCurso(res, jobId, estimativaSegundos, assincrono) {
  * (receita V6 por omissão, ver utils/geracaoFigurinha.js) e guarda em
  * avatars/public/{userId}-ai-{kit}-{carimbo}.png, separada da foto real.
  *
- * SPEC-FIGURINHA-3 (22-set): toda geração nasce PAGA. Sem direito (crédito ou
+ * SPEC-FIGURINHA-3: toda geração nasce PAGA. Sem direito (crédito ou
  * pacote do time) → 403 SEM_DIREITO. `LIMITES_IA` por plano e
  * `users.avatar_ia_mes` deixaram de mandar aqui — a figurinha grátis é a
  * COMUM (a foto na moldura), que não passa por esta rota nem custa nada.
@@ -1302,7 +1298,7 @@ router.post(
     const perfil = await getUserById(userId, 'foto_url, foto_hash, is_super_admin, created_at');
     if (!perfil?.foto_url) throw new HttpError(400, 'Adicione uma foto primeiro.');
 
-    // RODADA 29B (bloco 2, A) — uma pintura por vez por pessoa: quem já está pintando acompanha a que existe,
+    // Uma pintura por vez por pessoa: quem já está pintando acompanha a que existe,
     // não abre uma segunda (e não se debita duas vezes). Antes do slot-reuse de propósito.
     const assincrono = req.body?.assincrono === true;
     const emCurso = await geracaoJobs.emCursoDoUsuario(userId);
@@ -1333,7 +1329,7 @@ router.post(
     console.log('[avatar-ai] direito', { userId, fonte: direitoUsado.fonte, teamId: direitoUsado.teamId, kitId, creditos: direito.creditos });
 
     // --- IDEMPOTÊNCIA: se já existe slot deste kit E foi gerado da MESMA foto
-    // atual, veste-o e NÃO gera nem gasta quota. (build 9, achado real: uma
+    // atual, veste-o e NÃO gera nem gasta quota. (Caso real: uma
     // foto NOVA não invalidava o slot — o motor servia o avatar da foto
     // ANTIGA como se fosse da nova. foto_fingerprint = foto_hash, migração 052,
     // guardada no slot no momento da geração; se alguma das duas faltar
@@ -1357,7 +1353,7 @@ router.post(
       // nova (migração 051) e nunca pode derrubar o essencial (avatar_url/kit_ativo)
       // se ainda não tiver sido migrada.
       marcarFigurinhaStatus(userId, 'pronta');
-      invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando' logo abaixo.
+      invalidarSessaoDoPedido(req); // nota completa no 'gerando' logo abaixo.
       console.log('[avatar-ai] slot reutilizado (sem geração, sem direito gasto):', { userId, kitId });
       return res.json({ avatar_url: slot.avatar_url, kit: kitId, do_slot: true, reutilizado: true, figurinha_ativa: avatarEhFigurinhaNossa(slot.avatar_url) });
     }
@@ -1375,11 +1371,11 @@ router.post(
 
     // Conta sem foto_hash (antes da 048): calcula-o agora, para a checagem de recusa abaixo valer também para ela.
     await garantirFotoHash(userId, perfil);
-    // 6-out: foto já recusada (cabeça cortada nas duas tentativas) não gera de novo — nem fal, nem débito, nem job.
+    // Foto já recusada (cabeça cortada nas duas tentativas) não gera de novo — nem fal, nem débito, nem job.
     // Vem depois do slot-reuse de propósito: vestir uma figurinha que já existe continua de graça.
     if (await fotoEstaRecusada(perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
 
-    // Figurinha automática (12-set): marca 'gerando' AQUI — depois de kit/plano/
+    // Figurinha automática: marca 'gerando' AQUI — depois de kit/plano/
     // slot-reuse/quota (validações de uso normal do endpoint, não específicas do
     // cadastro), mas ANTES do e-mail-gate. Motivo: no fluxo do Onboarding (fire-
     // and-forget logo após o upload), o e-mail-gate é o erro mais provável de
@@ -1388,14 +1384,14 @@ router.post(
     // fica preso mostrando "criando..." para sempre. Try/catch amplo a partir
     // daqui (não só ao redor da geração): qualquer gate reprovado também conta.
     await marcarFigurinhaStatus(userId, 'gerando');
-    // RODADA 17 — invalida o cache de sessão (60s, middleware/auth.js) nas 4
+    // Invalida o cache de sessão (60s, middleware/auth.js) nas 4
     // marcações de figurinha_status (aqui e as 'pronta'/'falhou' mais abaixo).
-    // Investigado antes de adicionar: HOJE isto não muda nada sozinho — esse
+    // Hoje isto não muda nada sozinho — esse
     // cache guarda o USER do Supabase Auth (id/email/user_metadata), nunca as
     // colunas de `users`, e obterMe() lê figurinha_status com uma query
     // própria e SEMPRE fresca (obterPerfilResiliente), sem cache nenhum por
     // cima. GET /api/me e /api/inicio já respondem "na hora" sem esta linha.
-    // Fica mesmo assim por pedido explícito e por ser grátis: mesmo padrão já
+    // Fica mesmo assim por ser grátis: mesmo padrão já
     // usado para onboarding-completo/tour-visto (linhas ~237-278), e barato
     // o suficiente para não pesar a decisão — se um dia figurinha_status
     // entrar em req.user (ex.: um JWT custom claim), esta chamada já está no
@@ -1403,7 +1399,7 @@ router.post(
     invalidarSessaoDoPedido(req);
 
     try {
-      // PACOTE ANTI-ABUSO DE CUSTO (11-ago) — três gates, só a partir daqui (uma
+      // PACOTE ANTI-ABUSO DE CUSTO — três gates, só a partir daqui (uma
       // geração real vai custar dinheiro; o slot-reuse acima nunca passa por aqui).
       //
       // 1. E-MAIL-GATE: contas Google confirmam e-mail no próprio login (passam
@@ -1429,11 +1425,11 @@ router.post(
     } catch (err) {
       // Qualquer gate reprovado → 'falhou', para o polling do Início parar de mostrar "criando...".
       await marcarFigurinhaStatus(userId, 'falhou');
-      invalidarSessaoDoPedido(req); // RODADA 17 — nota completa no 'gerando', mais acima.
+      invalidarSessaoDoPedido(req); // nota completa no 'gerando', mais acima.
       throw err;
     }
 
-    // RODADA 29B (bloco 2, A) — A PINTURA DEIXOU DE SEGURAR O PEDIDO. Reserva a vez (uma por vez por pessoa:
+    // A PINTURA NÃO SEGURA O PEDIDO. Reserva a vez (uma por vez por pessoa:
     // o toque duplo recebe a pintura do primeiro), anota na tabela e devolve na hora `{ jobId,
     // estimativaSegundos }`; o app consulta GET /api/figurinha/job/:id. O direito só é debitado lá dentro,
     // DEPOIS da figurinha gravada — um job que morre a meio não custa nada a ninguém.
@@ -1443,7 +1439,7 @@ router.post(
     if (jaEmAndamento) return respostaDePinturaEmCurso(res, job.id, job.estimativaSegundos, assincrono);
     await geracaoJobs.registrar(job);
 
-    // RODADA 29B (bloco 2-A2) — com o Cloud Tasks ligado, a pintura roda DENTRO de um pedido (o da tarefa), porque o
+    // Com o Cloud Tasks ligado, a pintura roda DENTRO de um pedido (o da tarefa), porque o
     // Cloud Run só dá CPU enquanto há pedido: o POST só enfileira e responde. O app antigo (sem `assincrono`) espera a
     // figurinha na resposta — esse pedido já segura a CPU, então pinta aqui mesmo, como sempre. Sem a linha na tabela
     // (069 por aplicar) ou se o Cloud Tasks recusar, cai na fila em memória: o app consulta e a CPU anda.
@@ -1568,10 +1564,10 @@ router.put(
     const kit = KITS_IA[kitId];
     if (!kit) throw new HttpError(400, 'Uniforme inexistente.');
 
-    // ACHADO DA VARREDURA (22-set): esta rota só veste o que JÁ existe num slot
-    // — nunca gera nada, nunca custa direito. O gate de `plan` que havia aqui
-    // era do modelo Free/Pro/Elite (aposentado na SPEC-FIGURINHA-3) e, como
-    // ninguém mais tem `plan` diferente de 'free', barrava QUALQUER kit que não
+    // Esta rota só veste o que JÁ existe num slot
+    // — nunca gera nada, nunca custa direito. Não há gate de `plan` aqui: era
+    // do modelo Free/Pro/Elite (aposentado na SPEC-FIGURINHA-3) e, como
+    // ninguém mais tem `plan` diferente de 'free', barraria QUALQUER kit que não
     // fosse o dark-gold para todo mundo — mesmo para quem já tinha aquela
     // Brilhante gerada e só queria voltar a vesti-la. O direito de gerar já foi
     // gasto quando o slot nasceu; vestir de novo é livre, sempre.
@@ -1582,7 +1578,7 @@ router.put(
       .eq('kit_id', kitId)
       .maybeSingle();
 
-    // RODADA 21 — "uniformes guardados": o slot é a fonte normal (guarda a
+    // Uniformes guardados: o slot é a fonte normal (guarda a
     // ÚLTIMA versão de cada kit e nunca é apagado, só substituído quando o
     // MESMO kit é regerado). Ainda assim, sem slot, olha para o histórico
     // (user_avatar_historico) antes de mandar gerar — mesma rede de segurança
@@ -1622,7 +1618,7 @@ router.put(
 );
 
 /**
- * PUT /api/me/avatar/modo { modo: 'foto' | 'figurinha' } — Rodada 18: quem
+ * PUT /api/me/avatar/modo { modo: 'foto' | 'figurinha' } — quem
  * tem figurinha (IA) escolhe o que o card mostra. 'foto' põe avatar_url =
  * foto_url (a figurinha continua no slot, nada é apagado); 'figurinha' repõe
  * o slot do kit ativo (ou outro já gerado, se o ativo não tiver um). Só quem
@@ -1699,7 +1695,7 @@ router.put(
 );
 
 /**
- * GET /api/me/avatar/historico — RODADA 19: as últimas figurinhas de
+ * GET /api/me/avatar/historico — as últimas figurinhas de
  * "Minhas figurinhas" (user_avatar_historico, migração 057). Fail-safe: sem
  * a migração, devolve lista vazia (a galeria some sozinha, sem erro na tela).
  */
@@ -1767,10 +1763,10 @@ router.put(
 );
 
 /**
- * PUT /api/me/avatar/enquadro { x, y, escala } — Rodada 29B (bloco 3, E): grava o recorte da
+ * PUT /api/me/avatar/enquadro { x, y, escala } — grava o recorte da
  * MINIATURA do avatar (a janela quadrada que aparece no Início, no ranking, no sorteio…). Vale para
  * o arquivo que é o avatar AGORA (foto crua ou figurinha): trocar de foto/uniforme leva a outro
- * arquivo e o recorte velho para de valer sozinho. O motor passa a servir TODAS as miniaturas desse
+ * arquivo e o recorte velho para de valer sozinho. O motor serve TODAS as miniaturas desse
  * arquivo — as dela e as que as outras pessoas veem — no enquadramento escolhido (utils/recortesAvatar.js).
  * 200 { recorte, avatar_url } (o avatar_url já sai com o recorte, pelo proxy) ·
  * 400 recorte inválido · 409 o avatar não é um arquivo nosso (foto do Google, silhueta) · 503 sem a migração 070.
@@ -1835,7 +1831,7 @@ function erroDoEnquadro(error) {
 // do time — pendurado no router como o enviarNotificacao de routes/push.js,
 // para não haver uma segunda lista a envelhecer sozinha.
 router.KITS_IA = KITS_IA;
-// RODADA 19 — testável sem chamar a fal (custaria dinheiro de verdade): os
+// Testável sem chamar a fal (custaria dinheiro de verdade): os
 // testes de user_avatar_historico chamam arquivarFigurinhaAntiga() direto.
 router.arquivarFigurinhaAntiga = arquivarFigurinhaAntiga;
 router.TETO_HISTORICO_FIGURINHAS = TETO_HISTORICO_FIGURINHAS;

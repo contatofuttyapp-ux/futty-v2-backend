@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29I, bloco 3 (achado 102 + bancadas aprovadas pelo dono em 2-out): o escudo do time sem logo.
+// Futty v2.0 — O escudo do time sem logo.
 //
 // UM controle: cor principal + segunda cor + padrão. Paleta FIXA de 12 cores nas duas pontas, 6 padrões = 864 escudos, todos
 // legíveis em 84, 36 e 20 px (DESIGN/escudo-cores.html, DESIGN/escudo-padroes.html). Reprovados pelo dono e fora daqui: RGB livre,

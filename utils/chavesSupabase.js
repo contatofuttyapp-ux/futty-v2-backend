@@ -1,4 +1,4 @@
-// Futty v2.0 — De onde saem as chaves do Supabase (Rodada 28, formato novo).
+// Futty v2.0 — De onde saem as chaves do Supabase.
 //
 // O Supabase trocou as chaves JWT (anon / service_role) pelas novas: publishable
 // (sb_publishable_…) e secret (sb_secret_…). As novas giram sem derrubar sessões

@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29B (F): a lista "Avise-me" — a parte pura (validar o pedido, ler e contar a lista, montar o CSV).
+// Futty v2.0 — A lista "Avise-me" — a parte pura (validar o pedido, ler e contar a lista, montar o CSV).
 // Quem recebe o pedido é routes/aviseMe.js; quem mostra a lista é o Gabinete (routes/gabinete.js). Aqui não há Express
 // nem rede: o cliente do banco entra por parâmetro, para testar de ponta a ponta sem nada.
 //

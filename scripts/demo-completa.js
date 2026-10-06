@@ -1,10 +1,10 @@
-// Futty — DEMO COMPLETA para o dono testar no celular (15-set).
+// Futty — DEMO COMPLETA para o dono testar no celular.
 //
 //   node scripts/demo-completa.js                   cria tudo (idempotente: 2ª vez não duplica)
 //   node scripts/demo-completa.js --limpar          desfaz TUDO o que este script criou
 //   node scripts/demo-completa.js --email=x@y.com   adiciona mais um admin além dos dois do dono
 //   node scripts/demo-completa.js --ensaio          só mostra os elencos/sorteios, não grava nada
-//   node scripts/demo-completa.js --so-jogo-extra   só o 2º jogo futuro (Rodada 8B), sobre uma
+//   node scripts/demo-completa.js --so-jogo-extra   só o 2º jogo futuro, sobre uma
 //                                                    demo já criada; idempotente (não duplica)
 //
 // Correr a partir de backend/ (utils/db.js lê o .env do diretório atual).
@@ -329,7 +329,7 @@ async function criarTimePrincipal(ids, donos) {
   const membros = JOGADORES.map((j) => ({
     user_id: ids[j.apelido], team_id: time.id,
     role: j.apelido === 'Cacau' ? 'admin' : 'member',
-    // Rodada 9: em team_members só existe goleiro ('GL') ou linha (null). O
+    // Em team_members só existe goleiro ('GL') ou linha (null). O
     // `pos` do elenco fictício continua a valer para distribuir os gols
     // (distribuirGols), que é outra coisa — não vai para o banco.
     categoria: j.gr ? 'GR' : 'linha', posicao: j.gr ? 'GL' : null, pode_postar: true,
@@ -552,13 +552,12 @@ async function criarJogoFuturo(ids, teamId, donos) {
   return game;
 }
 
-// Segundo jogo futuro (Rodada 8B, 15-set): outro dia, outro formato — para o
-// Início mostrar DOIS jogos ao mesmo tempo (pedido do dono). 5x5, capacidade
-// menor (14), RSVP aberto com prazo mais folgado (5 dias).
+// Segundo jogo futuro: outro dia, outro formato — para o Início mostrar DOIS jogos
+// ao mesmo tempo (pedido do dono). 5x5, capacidade menor (14), RSVP aberto com prazo
+// mais folgado (5 dias).
 //
-// FLUIDEZ 2 (16-set): este nasce com o SORTEIO FEITO — o Início mostra-o como
-// "sorteado" e a escalação abre ao toque. O de Alvalade fica por sortear, é o que
-// o dono sorteia ao vivo.
+// Este nasce com o SORTEIO FEITO — o Início mostra-o como "sorteado" e a escalação
+// abre ao toque. O de Alvalade fica por sortear, é o que o dono sorteia ao vivo.
 //
 // 11 confirmados (10 jogadores + o dono), não 9: com 9 pessoas em times de 5 o
 // executarSorteio devolve 1 time só — e nesse caso devolve `times: []`, que

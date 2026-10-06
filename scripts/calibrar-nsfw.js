@@ -1,4 +1,4 @@
-// CALIBRAÇÃO (experimental, fora das rotas) — Tijolo 2.
+// CALIBRAÇÃO (experimental, fora das rotas).
 // Corre o filtro contra uma bateria LIMPA (fotos reais da casa + proxies sintéticos
 // dos casos-limite do futebol amador). Mede porn/hentai/sexy e ajuda a fixar o
 // limiar com margem. ZERO download de conteúdo explícito.
@@ -10,8 +10,8 @@ const tf = require('@tensorflow/tfjs');
 const nsfw = require('nsfwjs');
 
 const B = path.join(__dirname, '..', 'public');
-// SEGURANCA-REVISAO-10SET.md secção 2/3 (10-set): fotos-jogos saiu de public/
-// (não era mais servida sem login) e vive agora fora dos repos.
+// SEGURANCA-REVISAO-10SET.md secção 2/3: fotos-jogos vive fora dos repos, não em public/
+// (não é servida sem login).
 const FOTOS_PRIVADAS = path.join(__dirname, '..', '..', '..', 'FOTOS-PRIVADAS');
 
 // ── Reais da casa (legítimas — celebração/abraço/campeão/jogo) ──

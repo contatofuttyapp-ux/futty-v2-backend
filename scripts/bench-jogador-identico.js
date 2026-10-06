@@ -1,9 +1,6 @@
-// Futty — bancada da rodada "Fluidez 2" (16-set).
-//
-// Prova que GET /api/teams/:slug/jogador/:userId, depois de paralelizado, devolve
-// BYTE A BYTE o mesmo corpo de antes. Mesma ideia da rodada "Velocidade 6A": a
-// versão ANTIGA sai do git, a de AGORA sai do disco, as duas sobem no MESMO Express
-// (em prefixos diferentes) e recebem o MESMO pedido, contra o banco de verdade.
+// Futty — bancada que prova que GET /api/teams/:slug/jogador/:userId, depois de paralelizado, devolve
+// BYTE A BYTE o mesmo corpo de antes. A versão ANTIGA sai do git, a de AGORA sai do disco, as duas
+// sobem no MESMO Express (em prefixos diferentes) e recebem o MESMO pedido, contra o banco de verdade.
 //
 //   cd C:\Users\phfer\Desktop\FUT\FUTTY-V2\backend
 //   node scripts/bench-jogador-identico.js

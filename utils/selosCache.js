@@ -1,4 +1,4 @@
-// Futty v2.0 — Cache dos selos do usuário (GET /api/me/selos), 15-set, "Velocidade 7A".
+// Futty v2.0 — Cache dos selos do usuário (GET /api/me/selos).
 //
 // computeSelos (routes/campeonatos.js) faz, POR TIME, um list no Storage + um
 // download por campeonato + o ranking inteiro: 515-525 ms de motor no relatório

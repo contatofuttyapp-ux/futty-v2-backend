@@ -1,7 +1,6 @@
-// BANCADA — FUNDO DE CAMPO da ESCALAÇÃO (31-jul, dono).
-// A tentativa antiga desenhava o campo por código e "ficou horroroso" — a regra
-// da casa agora: CAMPO É ASSET (gerado 1x por IA), a composição só põe coisas
-// por cima (avatares, chapas, aura pixelada, escudo, título).
+// BANCADA — FUNDO DE CAMPO da ESCALAÇÃO.
+// Desenhar o campo por código "ficou horroroso" — a regra da casa: CAMPO É ASSET (gerado 1x por IA),
+// a composição só põe coisas por cima (avatares, chapas, aura pixelada, escudo, título).
 //
 // Gera 2 candidatos de cada estilo:
 //   verde — gramado clássico premium (nostálgico, vibe álbum de figurinha)

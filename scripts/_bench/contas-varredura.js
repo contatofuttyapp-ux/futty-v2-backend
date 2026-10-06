@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONTAS DESCARTÁVEIS PARA A VARREDURA GERAL PÓS-FIGURINHA 3 (22-set).
+// CONTAS DESCARTÁVEIS PARA A VARREDURA GERAL.
 //
 // Os 4 papéis do roteiro (App.jsx logado como cada um):
 //   novo     conta nova sem time (onboarding feito, figurinha comum, zero times)

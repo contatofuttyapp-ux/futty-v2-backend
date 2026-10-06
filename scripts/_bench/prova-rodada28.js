@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// CONTAS DESCARTÁVEIS DA RODADA 28 (25-set) — para a cena `rodada28` do scripts/ver-iphone.mjs.
+// CONTAS DESCARTÁVEIS PARA A CENA `rodada28` do scripts/ver-iphone.mjs.
 //
-// O que a cena prova pela tela, em servidor LOCAL (nunca a produção — CLAUDE.md, 25-set):
+// O que a cena prova pela tela, em servidor LOCAL (nunca a produção — CLAUDE.md):
 //   A · card com a FOTO: sem seletor de fundos, zoom com piso em "cobre a moldura", grade de
 //       uniformes com o 1º liberado e cadeados que levam aos Planos (e o card do pacote do time,
 //       com o uniforme do time pintável);
@@ -10,7 +10,7 @@
 //   D · Diagnóstico só para o super-admin, pelo Gabinete;
 //   E · telemetria anônima de velocidade (o que sai do aparelho);
 //   H · Gabinete: jogadores, gerações e custo por time.
-// Nada gera figurinha (custo de IA zero). Tudo @futtymock; os times são só desta rodada.
+// Nada gera figurinha (custo de IA zero). Tudo @futtymock; os times são só desta cena.
 //
 //   node scripts/_bench/prova-rodada28.js            cria/refaz tudo e grava as sessões
 //   node scripts/_bench/prova-rodada28.js --apagar   apaga times e contas

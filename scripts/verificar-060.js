@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Futty v2.0 — A migração 060 (a foto do Google não é figurinha, Hotfix 26) já foi aplicada?
+// Futty v2.0 — A migração 060 (a foto do Google não é figurinha) já foi aplicada?
 //
 // Não há ligação direta ao Postgres nesta máquina (só a API REST do Supabase), então o
 // que se confere é o COMPORTAMENTO, e não o catálogo:

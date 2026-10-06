@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29I, bloco 3 (item 4): as notificações que cada pessoa quer receber.
+// Futty v2.0 — As notificações que cada pessoa quer receber.
 //
 // Perfil → Notificações tem um interruptor por tipo. Todos ligados por padrão: `users.notificacoes` (migração 079) guarda só o
 // que a pessoa DESLIGOU — {"pedidos": false}; chave ausente = ligada. Vale para o push e para o aviso dentro do app.

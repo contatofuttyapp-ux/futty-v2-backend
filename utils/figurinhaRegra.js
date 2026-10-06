@@ -1,5 +1,4 @@
-// Futty v2.0 — A regra ÚNICA de "esse avatar é uma figurinha IA" (Rodada 20, corrigida no
-// Hotfix 26, 25-set).
+// Futty v2.0 — A regra ÚNICA de "esse avatar é uma figurinha IA".
 //
 // O motor decidia por `avatar_url <> foto_url`. Só que o trigger handle_new_user (001)
 // copiava a foto de perfil da conta Google para users.avatar_url, então quem entrava com

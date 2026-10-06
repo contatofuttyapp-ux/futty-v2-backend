@@ -43,8 +43,8 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const userId = req.user.id;
-    // Rodada 29B (bloco 2, B — conta pesada): as quatro leituras não dependem uma da outra e corriam EM FILA (~1,2 s de motor,
-    // medido); agora correm juntas e a resposta leva o tempo da mais lenta (o direito, ~2 idas).
+    // As quatro leituras não dependem uma da outra: correm juntas e a resposta leva o tempo da mais lenta
+    // (o direito, ~2 idas); em fila eram ~1,2 s de motor (medido).
     const lerTimes = async () => {
       try {
         const { data, error } = await supabase
@@ -68,7 +68,7 @@ router.get(
         return [];
       }
     };
-    // Pagamentos P1: há ao menos uma compra creditada? Sem a 064, false (nunca quebra a tela).
+    // Há ao menos uma compra creditada? Sem a 064, false (nunca quebra a tela).
     const lerComprasAtivas = async () => {
       try {
         const { count, error } = await supabase

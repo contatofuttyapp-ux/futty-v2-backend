@@ -4,10 +4,9 @@
 // propositalmente chamativa, ninguém confunde com um anúncio real), sobe para o
 // Storage e liga a campanha nas páginas de PAGINAS.
 //
-// Rodada 12B (16-set): nasceu só para o slot IAB 320×100 da página do sorteio.
-// Rodada 12C (16-set): passa a ligar nas CINCO telas com espaço de publicidade —
-// o dono quis ver o formato em todas. A vista pública /p/ fica de fora de
-// propósito (é a tela de quem não tem conta; anúncio ali é outra decisão).
+// Liga nas CINCO telas com espaço de publicidade — o dono quis ver o formato em todas.
+// A vista pública /p/ fica de fora de propósito (é a tela de quem não tem conta;
+// anúncio ali é outra decisão).
 //
 // A MESMA arte serve os dois formatos: o slot 320×100 (proporção 3.2, igual à
 // da arte) e o nativo de altura 100 (proporção ~3.9). Num `object-fit: cover` a
@@ -35,7 +34,7 @@ const { obterAd } = require('../services/inicio');
 // deixaria a primeira órfã na lista do dono — o id é interno, o que ele lê é o
 // `nome`.
 const CAMPANHA_ID = 'previa-sorteio-320x100';
-// As telas com espaço de publicidade (Rodada 12C). Os toggles do Gabinete
+// As telas com espaço de publicidade. Os toggles do Gabinete
 // mandam por cima disto: uma página aqui com o toggle desligado não mostra nada.
 const PAGINAS = ['inicio', 'resenha', 'ranking', 'figurinha', 'sorteio'];
 // O bucket "avatars" (o único que a rota de upload de fotos usa) está com

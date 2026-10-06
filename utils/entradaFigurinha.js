@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A ENTRADA DA FIGURINHA — o que se manda à IA junto com o prompt (17-set).
+// A ENTRADA DA FIGURINHA — o que se manda à IA junto com o prompt.
 //
 // Vem da variante 6 da bancada (`scripts/_bench/testar-prompt.js`), a que o dono
 // escolheu: faixa de 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12%
@@ -73,7 +73,7 @@ async function topoDaPele(buf) {
 }
 
 /**
- * A ENTRADA DE PRODUÇÃO desde 17-set: faixa de 18% no topo, corte quadrado com
+ * A ENTRADA DE PRODUÇÃO: faixa de 18% no topo, corte quadrado com
  * a cabeça a 12% do topo, 1024×1024, JPEG q90.
  * Sem pele encontrada, o quadrado assenta no topo da faixa — nunca abaixo, para
  * não cortar a cabeça.

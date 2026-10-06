@@ -1,4 +1,4 @@
-// Futty v2.0 — Denúncias + triagem IA (Tijolo 3, Fase B). Segue a SPEC-DENUNCIAS.
+// Futty v2.0 — Denúncias + triagem IA. Segue a SPEC-DENUNCIAS.
 // Fluxo: denunciar (anti-abuso) → triagem (Fable/regras, leis duras) → auto-resolve
 // OU fila do admin → decisão do admin → desfecho. Dono só vê agregados.
 const express = require('express');
@@ -76,7 +76,7 @@ router.post(
     if (!store.CATEGORIAS.includes(categoria)) throw new HttpError(400, 'Categoria inválida.');
 
     const { teamId, tipo, conteudo, urls } = await resolverAlvo(targetType, targetId);
-    // SEGURANCA-REVISAO-10SET.md secção 3 (10-set): sem isto qualquer
+    // SEGURANCA-REVISAO-10SET.md secção 3: sem isto qualquer
     // utilizador logado denunciava conteúdo de um time onde nunca esteve
     // (bastava adivinhar/enumerar um UUID). targetType 'perfil' não tem
     // teamId (denúncia de perfil não é presa a nenhum time) — só se aplica

@@ -1,4 +1,4 @@
-// Futty v2.0 — Olheiro de entrada (11-ago): barra foto sem futuro ANTES de
+// Futty v2.0 — Olheiro de entrada: barra foto sem futuro ANTES de
 // gastar geração de avatar IA. Corre no upload da foto de perfil, ANTES de
 // guardar — reprovado não consome nada (nem Storage, nem cota de IA).
 //

@@ -1,6 +1,6 @@
-// Futty v2.0 — Rodada 29I, bloco 3 (item 1): o card "Seu time" do Início, só para quem administra algum time.
+// Futty v2.0 — O card "Seu time" do Início, só para quem administra algum time.
 //
-// "Admin não é um lugar" (dono, 3-out): o que o Dashboard do painel mostrava vira, no Início, uma linha por pendência —
+// "Admin não é um lugar" (dono): o que o Dashboard do painel mostrava vira, no Início, uma linha por pendência —
 // pedido de entrada, jogo sem presença aberta, resultado por lançar, denúncia — e o card fica compacto ("Tudo tranquilo por
 // aqui.") quando não há nenhuma. Aqui vive a conta, pura (sem banco), para testar no Node; a leitura está em services/inicio.js.
 

@@ -63,21 +63,21 @@ const excluirContaLimiter = criarLimiter({
   mensagem: 'Muitas tentativas de excluir a conta. Tente de novo daqui a 1 hora.',
 });
 
-// POST /api/diagnostico — 10/hora por utilizador (VELOCIDADE 4). É um botão que
-// se toca de propósito na tela de Diagnóstico, não um fluxo automático; o tecto
-// existe para um relatório enviado em loop não encher o Storage.
+// POST /api/diagnostico — 10/hora por utilizador. É um botão que se toca de propósito na tela de
+// Diagnóstico, não um fluxo automático; o tecto existe para um relatório enviado em loop não encher
+// o Storage.
 const diagnosticoLimiter = criarLimiter({
   windowMs: HORA,
   max: 10,
   mensagem: 'Você já enviou relatórios de sobra nesta hora. Tente de novo mais tarde.',
 });
 
-// ─── Limites gerais (hotfix 25, 25-set) ──────────────────────────────────────
+// ─── Limites gerais ───────────────────────────────────────────────────────────
 //
 // Incidente real: o celular do dono levou "Muitos pedidos" no onboarding porque o
 // IP da casa esgotou os 200/15 min, e no dia do time 20 celulares numa quadra
 // dividem um IP de Wi-Fi ou de operadora (CGNAT). Um teto por IP sozinho junta
-// gente diferente no mesmo balde. Agora o IP é só a rede grossa (anti-tráfego
+// gente diferente no mesmo balde. Por isso o IP é só a rede grossa (anti-tráfego
 // anônimo) e cada sessão tem o seu balde.
 
 /**
@@ -92,10 +92,10 @@ function limitesPara(emProducao) {
     apiPorSessao: emProducao ? 600 : 6000, // um percurso normal usa ~9 pedidos; 600 é abuso
     avatar: 20, // por pessoa
     midia: 2000, // por IP
-    // Rodada 28: a telemetria anônima manda no máximo 1 aviso por tela por sessão (~15 numa sessão
+    // A telemetria anônima manda no máximo 1 aviso por tela por sessão (~15 numa sessão
     // longa). 300 por IP cabe um time inteiro no mesmo Wi-Fi da quadra; o resto é enchimento.
     telemetria: 300, // por IP
-    // Pagamentos P1: o webhook do RevenueCat. Chega de poucos IPs deles, em rajada quando
+    // O webhook do RevenueCat. Chega de poucos IPs deles, em rajada quando
     // reenviam uma fila; 120/min folga o real e barra quem martela a porta sem o segredo.
     webhookCompras: 120, // por IP, por MINUTO
   };
@@ -203,7 +203,7 @@ function criarLimiteDeMidia({ limites = LIMITES } = {}) {
 }
 
 /**
- * POST /api/telemetria (Rodada 28): anônima, sem sessão — conta pelo IP real, que só vive na
+ * POST /api/telemetria: anônima, sem sessão — conta pelo IP real, que só vive na
  * memória do limiter durante a janela e nunca vai para tabela nenhuma.
  */
 function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
@@ -218,7 +218,7 @@ function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
 }
 
 /**
- * POST /api/avise-me (Rodada 29B, F): a lista de quem quer ser avisado do lançamento. Pública, sem sessão: conta pelo
+ * POST /api/avise-me: a lista de quem quer ser avisado do lançamento. Pública, sem sessão: conta pelo
  * IP real (o mesmo da telemetria — pela Cloudflare vem em CF-Connecting-IP), 10 por HORA. Uma pessoa não precisa de mais
  * que isso; e o IP só vive na memória do limiter, não vai para a tabela.
  */
@@ -234,7 +234,7 @@ function criarLimiteDeAviseMe({ max = 10 } = {}) {
 }
 
 /**
- * POST /api/compras/webhook/revenuecat (Pagamentos P1): sem sessão — a autorização é o segredo
+ * POST /api/compras/webhook/revenuecat: sem sessão — a autorização é o segredo
  * no header. Conta por IP real, 120 por minuto.
  */
 function criarLimiteDeWebhook({ limites = LIMITES } = {}) {

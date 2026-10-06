@@ -96,7 +96,7 @@ const JOGADORES = [
 const emailDe = (j) => `${PREFIXO}-${j.slug}${DOMINIO}`;
 const porApelido = (a) => JOGADORES.find((j) => j.apelido === a);
 
-// Figurinhas SEM IA (custo zero): PNGs já pagos noutra rodada, publicados no
+// Figurinhas SEM IA (custo zero): PNGs já pagos antes, publicados no
 // molde de _bench/repor-estado-demo.js --figurinha-de. Pessoas inventadas
 // pela IA a partir da silhueta genérica — nenhuma é real.
 const FIGURINHAS = [
@@ -106,8 +106,8 @@ const FIGURINHAS = [
 ];
 
 // Rotação dos 6 jogos passados: quem confirmou em cada um (12-14 por jogo,
-// todo mundo chega a ≥3 — o ranking exige 3). Ver relatório da rodada para a
-// conta: 5 "titulares" (cabeça-de-chave/figurinha) em todos os 6; os 3
+// todo mundo chega a ≥3 — o ranking exige 3). A conta:
+// 5 "titulares" (cabeça-de-chave/figurinha) em todos os 6; os 3
 // goleiros revezam 2 de cada vez (sempre 2 presentes); os outros 12 entram
 // em janelas de 3 jogos seguidos (sempre exatamente 3 presenças).
 const CONFIRMADOS_PASSADOS = [

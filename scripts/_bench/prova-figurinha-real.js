@@ -1,13 +1,13 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// PROVA DE PRODUÇÃO REAL — uma figurinha pelo caminho de verdade (17-set).
+// PROVA DE PRODUÇÃO REAL — uma figurinha pelo caminho de verdade.
 //
 // Não é bancada: isto chama a ROTA (`POST /api/me/avatar/ai`) com a sessão da
 // conta demo da loja, e por isso exercita tudo o que mudou de uma vez —
 // prompts/figurinha.js, a entrada quadrada, input_fidelity explícito, a fila da
 // fal com leitura do custo, e a gravação em `gasto_ia_diario`.
 //
-// O que se prova: que a linha do dia ganha o custo REAL (~11 cêntimos), não a
-// constante de 1,7 que estava lá antes.
+// O que se prova: que a linha do dia ganha o custo REAL (~11 cêntimos), não uma
+// constante fixa de 1,7.
 //
 //   node scripts/_bench/prova-figurinha-real.js            (servidor em :3009)
 //   --porta 3009     onde o servidor de prova está a ouvir
@@ -113,9 +113,9 @@ const lerGasto = async () => {
 
   // A figurinha em si: baixar, medir, guardar.
   fs.mkdirSync(SAIDA, { recursive: true });
-  // O caminho vem do `avatar_url` que a rota devolveu — desde 22-set o nome do
-  // ficheiro leva carimbo de tempo (`public/<id>-ai-<kit>-<carimbo>.png`) e já
-  // não dá para o adivinhar aqui. Este é também o caminho que o resto do app
+  // O caminho vem do `avatar_url` que a rota devolveu — o nome do
+  // ficheiro leva carimbo de tempo (`public/<id>-ai-<kit>-<carimbo>.png`) e não
+  // dá para o adivinhar aqui. Este é também o caminho que o resto do app
   // usa: se a prova o lê do mesmo sítio, prova a mesma coisa que o app vê.
   const marcador = '/object/public/avatars/';
   const caminho = String(corpo.avatar_url || '').includes(marcador)

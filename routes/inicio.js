@@ -1,11 +1,11 @@
 // Futty v2.0 — GET /api/inicio: agrega TUDO que a tela Início precisa num
-// round-trip só. Motivo (11-set): motor em São Paulo, utilizador em Lisboa
+// round-trip só. Motivo: motor em São Paulo, utilizador em Lisboa
 // (~240ms/pedido) — os ~13 pedidos que o Início disparava ao abrir davam 3-4s
 // só de latência de rede, antes de qualquer dado chegar. Cada peça usa a MESMA
 // função de services/inicio.js que a rota antiga (nunca diverge do JSON que
 // outras telas já dependem — as rotas antigas continuam de pé).
 //
-// Fila de idas ao banco (Rodada 29B, bloco 2, B): vínculos → jogos → RSVP = 3. Tudo o que não depende de ninguém arranca
+// Fila de idas ao banco: vínculos → jogos → RSVP = 3. Tudo o que não depende de ninguém arranca
 // no instante zero; o que depende do time principal (votação, campeonato) ou do próximo jogo (RSVP) arranca assim que a
 // sua dependência chega — não quando uma onda inteira acaba.
 //
@@ -40,17 +40,12 @@ router.get(
     // O requireAuth já correu: tudo até aqui foi autenticação.
     marcarFase(res, 'auth');
 
-    // RODADA 29B (bloco 2, B — "conta pesada"). Medido com a conta pesada (super-admin, 2 times) e a leve (1 time): o
-    // /api/inicio levava ~990 ms de motor e 31 consultas nas DUAS — o que pesava era a FILA de idas ao banco (4 em série),
-    // não o volume. A fila era esta:
-    //   1ª ida   os times (team_members) e os convites (team_members de novo)…
-    //   2ª ida   …+ os pedidos pendentes (team_join_requests) e os jogos (games); só então o time principal era conhecido…
-    //   3ª ida   …votação e campeonato do principal, e o jogo do próximo convite (loadGame)…
-    //   4ª ida   …e o resto do RSVP (membros, respostas, fila) só depois do loadGame.
-    // Agora: UMA consulta de vínculos no instante zero, repartida entre todas as partes (11 consultas de team_members viram 1);
+    // O que pesava no /api/inicio era a FILA de idas ao banco, não o volume: medido com a conta pesada (super-admin,
+    // 2 times) e a leve (1 time), com 4 idas em série levava ~990 ms de motor e 31 consultas nas DUAS.
+    // Hoje: UMA consulta de vínculos no instante zero, repartida entre todas as partes (11 consultas de team_members viram 1);
     // os times saem na hora (o contador de pedidos pendentes corre ao lado, fora do caminho crítico); a votação e o campeonato
     // arrancam assim que o principal é conhecido (sem esperar os jogos); e o RSVP do próximo jogo sai numa ida só (o time dele
-    // já veio na lista de jogos). Fila: vínculos → jogos → RSVP = 3 idas. A lista de jogos também parou de crescer com o
+    // já vem na lista de jogos). Fila: vínculos → jogos → RSVP = 3 idas. A lista de jogos também não cresce com o
     // histórico (ver obterConvites: os que vão acontecer + os 3 últimos de cada time, que é o que a tela mostra).
     const vinculosP = medir(res, 'vinculos', seguro(inicioService.obterVinculos(userId)));
     const soOrganizaP = seguro(timesEmQueSoOrganiza(userId));
@@ -63,7 +58,7 @@ router.get(
     // O contador de pedidos pendentes (badge do chip de quem administra) sai ao lado: ninguém espera por ele, só a resposta.
     const pendentesP = teamsP.then((t) => (t?.teams && t.teams.some((x) => x.role === 'admin') ? seguro(inicioService.contarPedidosPendentes(t.teams)) : null));
 
-    // 29I, bloco 3: as pendências do card "Seu time" (só quem administra algum time) — ao lado, ninguém espera por elas.
+    // As pendências do card "Seu time" (só quem administra algum time) — ao lado, ninguém espera por elas.
     const seuTimeP = medir(res, 'seu_time', teamsP.then((t) => (
       t?.teams?.some((x) => x.role === 'admin') ? seguro(inicioService.obterSeuTime(t.teams)) : []
     )));
@@ -93,7 +88,7 @@ router.get(
       medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
       medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos })))),
       medir(res, 'denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
-      // VELOCIDADE 9: vêm os slots de TODAS as páginas, não só o do Início. A
+      // Vêm os slots de TODAS as páginas, não só o do Início. A
       // conta de servidor é a mesma (uma leitura do store, uma do utilizador) e
       // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do
       // percurso que o dono mediu, ~500 ms cada, de Lisboa.
@@ -101,7 +96,7 @@ router.get(
       // O direito de gerar Brilhante vem JUNTO (SPEC-FIGURINHA-3 §7): o Início
       // mostra o cartão dourado "Você tem uma Brilhante para gerar" e dispara a
       // geração preguiçosa do pacote do time. Um pedido à parte só para isto
-      // seria mais um round-trip na tela que a Velocidade 6A juntou num só.
+      // seria mais um round-trip numa tela que já junta tudo num só.
       medir(res, 'brilhante', seguro(temDireito(userId))),
       // Os pedidos de ativação vivos (pendente/recusado recente) — bloco 2. O
       // Início tem de saber dizer "a gente ativa e avisa" e o motivo de uma
@@ -119,14 +114,14 @@ router.get(
 
     res.json({
       me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp,
-      // 29I, bloco 3: [{ team_id, slug, nome, fuso, pendencias }] — um por time em que a pessoa é admin ([] = não administra nenhum).
+      // [{ team_id, slug, nome, fuso, pendencias }] — um por time em que a pessoa é admin ([] = não administra nenhum).
       seu_time: seu_time || [],
       // `ad` continua a ser o slot do Início e com a MESMA forma de antes
       // ({ ad }) — telas e testes que já o liam não mudam. `ads` é a novidade:
       // os slots de todas as páginas, para o app não voltar a pedir por tela.
       ad: { ad: ads?.paginas?.inicio ?? null },
       ads: ads || null,
-      // Pagamentos P2: `loja_pronta` (PAGAMENTOS_ATIVOS no motor) vai junto — a Figurinha abre a partir
+      // `loja_pronta` (PAGAMENTOS_ATIVOS no motor) vai junto — a Figurinha abre a partir
       // deste payload e decide aqui se o convite é "Comprar" ou "Pedir ativação", sem pedir o /estado.
       brilhante: {
         ...(brilhante

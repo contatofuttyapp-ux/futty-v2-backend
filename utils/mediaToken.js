@@ -1,4 +1,4 @@
-// Token de capacidade para o proxy de imagem (Tijolo 2).
+// Token de capacidade para o proxy de imagem.
 // Um <img> não pode enviar o header Authorization, por isso a autorização viaja
 // NO URL: um token HMAC assinado por nós, emitido só dentro de respostas já
 // autenticadas (middleware mediaUrls). O proxy valida a assinatura + validade e
@@ -84,7 +84,7 @@ function verificarToken(token) {
   const alvo = decodificarToken(token);
   if (!alvo) return null;
   if (Math.floor(Date.now() / 1000) > alvo.exp) return null;
-  // Tokens emitidos antes da Velocidade 6A não têm `v` — continuam válidos.
+  // Tokens antigos não têm `v` — continuam válidos.
   return { bucket: alvo.bucket, path: alvo.path, v: alvo.v };
 }
 

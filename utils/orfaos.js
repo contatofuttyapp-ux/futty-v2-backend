@@ -1,7 +1,7 @@
-// Futty v2.0 — Quais arquivos do bucket `avatars` já não servem a ninguém (Rodada 28, bloco G).
+// Futty v2.0 — Quais arquivos do bucket `avatars` já não servem a ninguém.
 //
 // Puro: quem lista o bucket e lê o banco é scripts/limpar-orfaos.js; aqui só se decide. A limpeza da
-// foto antiga roda DEPOIS da resposta (Rodada 27) e o Cloud Run sem "CPU sempre alocada" pode deixar
+// foto antiga roda DEPOIS da resposta e o Cloud Run sem "CPU sempre alocada" pode deixar
 // esse trabalho pela metade — daí as sobras. Regras, todas do lado seguro:
 //   · órfão = nenhuma linha do banco aponta para ele (fotos, originais, figurinhas, slots, histórico,
 //     pacote do time, logo do time — ver REFERENCIAS em scripts/limpar-orfaos.js);

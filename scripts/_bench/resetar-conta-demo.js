@@ -1,4 +1,4 @@
-// BANCADA — RESET DE CONTA PARA DEMONSTRAÇÃO (31-jul).
+// BANCADA — RESET DE CONTA PARA DEMONSTRAÇÃO.
 // Devolve uma conta mock ao estado "recém-instalado": sem foto, sem avatar IA,
 // onboarding por fazer. Serve para o dono VER com os próprios olhos:
 //   · o onboarding completo (3 passos, de verdade, não simulado)

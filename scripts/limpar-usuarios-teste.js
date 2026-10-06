@@ -40,10 +40,8 @@ const { supabase } = require('../utils/db');
 const { removerFicheirosPorUrl, parseUrlPublico, bucketEcaminho } = require('../utils/storage');
 const { apagarUsuario } = require('../utils/apagarUsuario');
 
-// LIMPEZA TOTAL (23-set, decisão do dono): a lista mudou — phferreiraborgesbackup@
-// (a conta de teste do próprio dono) sai e demo-loja@futtymock.com (o revisor
-// das lojas) entra. Registro histórico: antes disto a dupla era
-// phferreiraborgesbackup@gmail.com + contatofuttyapp@gmail.com.
+// demo-loja@futtymock.com (o revisor das lojas) é conta MANTER, por decisão do dono;
+// a conta de teste do próprio dono (phferreiraborgesbackup@) não é.
 const MANTER_EMAILS = ['contatofuttyapp@gmail.com', 'demo-loja@futtymock.com'].map((e) => e.toLowerCase());
 const TAMANHO_LOTE = 200; // PostgREST/.in() em lotes — mesmo espírito do TAMANHO_PAGINA de backup-banco.js
 
@@ -68,7 +66,7 @@ async function selecionarEmLotes(tabela, coluna, select, ids) {
 /**
  * DELETE em lotes de `coluna IN ids`. Devolve o nº de linhas apagadas — via
  * .select(coluna) no delete (RETURNING), não .select('id'): nem toda tabela
- * tem uma coluna `id` (achado 14-set: user_avatar_slots não tem — RETURNING
+ * tem uma coluna `id` (user_avatar_slots não tem — RETURNING
  * id nessa tabela falha a query inteira, incluindo o DELETE. `coluna` é
  * sempre segura porque é a mesma que acabámos de filtrar com .in()).
  */
@@ -225,8 +223,7 @@ async function montarPlano({ timesTambem = false } = {}) {
   const urlsPorBucket = { avatars: [], resenha: [] };
   for (const url of todasUrls) {
     // bucketEcaminho (não parseUrlPublico): feed_post_media/comentario_anexos
-    // guardam a URL do PROXY desde o Tijolo 2, não a crua do Storage — mesmo
-    // achado do item 3 da Rodada 15 (ver utils/apagarUsuario.js).
+    // guardam a URL do PROXY, não a crua do Storage (ver utils/apagarUsuario.js).
     const p = bucketEcaminho(url);
     if (p) urlsPorBucket[p.bucket].push(url);
   }

@@ -1,12 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA DE MODELOS (17-set) — mesmo prompt, motores mais baratos.
+// BANCADA DE MODELOS — mesmo prompt, motores mais baratos.
 //
 // A V6 (gpt-image-1.5/edit + P2 + entrada quadrada) resolveu a SEMELHANÇA e
-// custa US$0,112. A pergunta agora é só de dinheiro: algum motor mais barato
+// custa US$0,112. A pergunta é só de dinheiro: algum motor mais barato
 // entrega a mesma figurinha? O prompt, a entrada e a leitura de custo vêm dos
 // módulos de PRODUÇÃO — se um candidato ganhar, o que muda é uma linha.
 //
-// CANDIDATOS (--so-um corre só a foto do Gui, que é a rodada de triagem):
+// CANDIDATOS (--so-um corre só a foto do Gui, que é a triagem):
 //   1  gpt-image-2.5/flare/edit · low    · foto + kit
 //   2  gpt-image-2.5/flare/edit · medium · foto + kit
 //   3  gpt-image-2.5/flare/edit · low    · SÓ a foto, kit por texto
@@ -56,13 +56,13 @@ const arg = (n, o = null) => {
 };
 const tem = (n) => process.argv.includes(`--${n}`);
 
-// Estimativas para o gate ANTES de gastar (a tabela pública da fal, 17-set). O
+// Estimativas para o gate ANTES de gastar (a tabela pública da fal). O
 // que entra no CSV é o custo REAL, convertido como a tabela abaixo manda.
 const ESTIMATIVA = { 1: 0.045, 2: 0.09, 3: 0.03, 4: 0.035, 5: 0.044, 6: 0.039, 7: 0.047 };
 const CUSTO_BIREFNET = 0.002;
 
 // ┌──────────────────────────────────────────────────────────────────────────┐
-// │ x-fal-billable-units NÃO É SEMPRE DINHEIRO (achado desta bancada).       │
+// │ x-fal-billable-units NÃO É SEMPRE DINHEIRO.                              │
 // │                                                                          │
 // │ No gpt-image (1.5 e 2.5), que a fal cobra por TOKENS, o header traz o    │
 // │ custo em dólares — 0,132 no 1.5, 0,0229 no 2.5 low, sempre com quatro    │

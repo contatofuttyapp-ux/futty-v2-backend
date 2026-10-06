@@ -1,4 +1,4 @@
-// Futty v2.0 — Telemetria ANÔNIMA de velocidade (Rodada 28, bloco E).
+// Futty v2.0 — Telemetria ANÔNIMA de velocidade.
 //
 // Substitui o botão de Diagnóstico para todo mundo: o app manda, no máximo uma vez por tela por
 // sessão, quanto a tela levou para ficar útil e quanto cada chamada ao motor custou. É o número do
@@ -23,7 +23,7 @@ const PALAVRA_DE_ROTA = /^[a-z]+(-[a-z]+)*$/;
 // Onde o segmento SEGUINTE é o slug de um time (app: /time/:slug, /admin/:slug; motor:
 // /api/teams/:slug, /api/equipas/:slug). O slug de time pode ser só letras ("teste-abcde") e
 // passaria por palavra de rota — por isso a posição manda, não a forma.
-const ANTES_DO_SLUG = new Set(['teams', 'equipas', 'equipa', 'time', 'admin']); // 'equipa' = o endereço antigo (29I: /equipa → /time), que ainda chega por link já enviado
+const ANTES_DO_SLUG = new Set(['teams', 'equipas', 'equipa', 'time', 'admin']); // 'equipa' = o endereço antigo (/equipa → /time), que ainda chega por link já enviado
 
 const MS_MAX = 120000; // 2 minutos: acima disso não é tela lenta, é tela abandonada
 const MAX_ROTAS = 20;

@@ -1,19 +1,19 @@
-// Futty v2.0 — Rodada 29B (D): a cidade de um time.
+// Futty v2.0 — A cidade de um time.
 //
 // O app (CampoCidade) deixa a pessoa escolher numa lista estática — 5.570 municípios do Brasil e 308 concelhos de
-// Portugal — e manda { cidade, uf, pais, lat, lng, origem: 'lista' }. Regra completa (dono, 30-set):
+// Portugal — e manda { cidade, uf, pais, lat, lng, origem: 'lista' }. Regra completa (dono):
 //   1. cidade DA LISTA → a coordenada vem da própria lista (arredondada como sempre, ~1 km); nenhuma chamada externa;
 //   2. FORA da lista → tenta o Nominatim como antes; achou → "Encontramos: <nome oficial>" e guarda o ponto;
 //   3. nada achou → guarda o TEXTO mesmo assim e avisa na tela; o Explorar passa a casar por texto normalizado
 //      (sem acento, sem maiúscula, sem espaço sobrando) quando o time não tem coordenada.
 // Este módulo é a parte pura dessa regra: normalizar, ler a escolha da lista, decidir e devolver o que gravar.
 //
-// RODADA 29H (item 12, dono 2-out): o BAIRRO, opcional. Antes o ponto do time era o centro da cidade (todos os times de
-// "São Paulo" no mesmo ponto). Agora o admin pode declarar o bairro ("Pinheiros"; em Portugal, a freguesia) e o motor
+// O BAIRRO, opcional (dono). Sem ele o ponto do time é o centro da cidade (todos os times de
+// "São Paulo" no mesmo ponto). O admin pode declarar o bairro ("Pinheiros"; em Portugal, a freguesia) e o motor
 // geocodifica "bairro, cidade" UMA vez (Nominatim, como a cidade; ver resolverBairro). Achou perto da cidade → o ponto do
 // time passa a ser o do bairro (~1 km); não achou → fica o ponto da cidade e o app avisa. Freguesia escolhida na lista do app
 // (Portugal) vem com a coordenada e dispensa a chamada. Só o bairro e a cidade, nunca o endereço.
-// RODADA 29T-C: o mesmo vale para o bairro/distrito escolhido da lista no Brasil (IBGE) — o ponto da lista vale em qualquer país,
+// O mesmo vale para o bairro/distrito escolhido da lista no Brasil (IBGE) — o ponto da lista vale em qualquer país,
 // desde que perto (RAIO_DO_BAIRRO_KM) do ponto da cidade; o Nominatim não diz "Não achamos" para um bairro que o app ofereceu.
 const { geocodar: geocodarNominatim } = require('./geocode');
 
@@ -112,7 +112,7 @@ function condicaoPorCidade(busca, citar = (v) => v) {
   return procurada ? `,and(cidade_normalizada.eq.${citar(procurada)},geo_lat.is.null)` : '';
 }
 
-// ─── O bairro (29H) ───────────────────────────────────────────────────────────────────────────────────────────────
+// ─── O bairro ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 const RAIO_DO_BAIRRO_KM = 60; // um bairro fica perto do centro da cidade; mais longe que isto é outro lugar com o mesmo nome
 
@@ -135,7 +135,7 @@ const numeroOuNaN = (v) => (typeof v === 'number' || (typeof v === 'string' && v
 
 /**
  * O bairro escolhido na lista do app (freguesia em Portugal, bairro/distrito no Brasil): { lat, lng } arredondado, ou null.
- * 29T-C: vale em qualquer país, desde que o ponto esteja a até RAIO_DO_BAIRRO_KM do ponto da cidade (`cidadeGeo`); longe demais, ou
+ * Vale em qualquer país, desde que o ponto esteja a até RAIO_DO_BAIRRO_KM do ponto da cidade (`cidadeGeo`); longe demais, ou
  * sem ponto da cidade para comparar, não vale como "da lista" — quem chamou cai na geocodificação de sempre.
  */
 function lerPontoDaLista(corpo, cidadeGeo) {

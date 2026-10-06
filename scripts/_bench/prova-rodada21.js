@@ -1,4 +1,4 @@
-// Futty v2.0 — RODADA 21: conta descartável para a cena 'rodada21' do
+// Futty v2.0 — conta descartável para a cena 'rodada21' do
 // ver-iphone.mjs (gerações generosas + uniformes guardados). Uma pessoa com
 // crédito (Minha Figurinha), um kit já pintado (dark-gold) e outro por pintar
 // (dark-purple) — dá para provar, na mesma conta: o contador "N restantes",

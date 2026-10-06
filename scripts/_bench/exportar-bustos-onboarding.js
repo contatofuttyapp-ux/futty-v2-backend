@@ -1,8 +1,9 @@
-// BANCADA — Rodada 29E (1-out): os 6 BUSTOS do mini sorteio do onboarding, a partir dos recortes dos modelos fictícios
-// (saida-modelos-jovens/*-recorte.png, 30-set e 1-out). Cada busto = o recorte sobre o fundo da casa (comum.js fundoSVG,
-// SEM a moldura dourada — a moldura é a .fr do CSS, como no sorteio real), janela 3:4 pelo topo (cabeça + ombros + peito),
-// exportado em WebP 112×150 (2× os 56×75 de exibição) com ≤ 6 KB cada (lei do app leve, 14-set): a qualidade desce de 5 em 5
-// até caber. Saída: FUTTY-V2/frontend/public/onboarding/<nome>.webp (servida do site, fora do pacote nativo).
+// BANCADA — os BUSTOS do mini sorteio do onboarding, a partir dos recortes dos modelos fictícios
+// (saida-modelos-jovens/*-recorte.png). Cada busto = o recorte sobre o fundo da casa
+// (comum.js fundoSVG, SEM a moldura dourada — a moldura é a .fr do CSS, como no sorteio real),
+// janela 3:4 pelo topo (cabeça + ombros + peito), exportado em WebP 112×150 (2× os 56×75 de exibição)
+// com ≤ 6 KB cada (lei do app leve): a qualidade desce de 5 em 5 até caber.
+// Saída: FUTTY-V2/frontend/public/onboarding/<nome>.webp (servida do site, fora do pacote nativo).
 //
 // Uso: node scripts/_bench/exportar-bustos-onboarding.js
 const fs = require('fs');
@@ -19,11 +20,10 @@ const TETO_BYTES = 6 * 1024;
 const FRACAO_ALTURA = 0.62;
 const FOLGA_TOPO = 0.06;
 
-// nome do arquivo (sem acento, é URL) ← recorte do modelo. Rodada 29E2 (2-out): ficam TIAGÃO (j8), PEDRÃO (j4), RAFA (j10), BRUNINHO (j11) e LÉO (j12),
-// aprovados pelo dono; BRUNINHO e LÉO são a 2ª leva (--jovens4); DUDU é a 4ª (--jovens6: gordinho nerd de óculos, cabeça reta e de frente). 3 Brasil, 3 Portugal.
+// nome do arquivo (sem acento, é URL) ← recorte do modelo. 4 por time (8 rolos).
 // Com --so a,b exporta só esses nomes (os aprovados não são tocados).
-// Rodada 29E3 (2-out): 4 por time (8 rolos) — entram NANDO (j16, Brasil, ~39, grisalho) e CAIO (j17, Portugal, ~24, negro, sério), leva --jovens7.
-// Os 8 são FINAIS (dono, 2-out): não re-exportar. Só o NOME do j12 mudou: LÉO virou GONÇALO (arquivo goncalo.webp, mesmos bytes do leo.webp).
+// Os 8 são FINAIS (decisão do dono): não re-exportar.
+// O j12 é GONÇALO (arquivo goncalo.webp, mesmos bytes do antigo leo.webp).
 const BUSTOS = [
   ['bruninho', 'j11-bruninho-br'],
   ['tiagao', 'j8-tiagao-br'],

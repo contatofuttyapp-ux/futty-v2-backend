@@ -1,4 +1,4 @@
-// Futty v2.0 — POST /api/avise-me: "Quero ser avisado quando o Futty chegar nas lojas" (Rodada 29B, F).
+// Futty v2.0 — POST /api/avise-me: "Quero ser avisado quando o Futty chegar nas lojas".
 //
 // Pública DE PROPÓSITO: quem chega das redes não tem conta nem app. Por isso o cuidado é outro:
 //   · limiter por IP real, 10 por hora (middleware/limiters.js#criarLimiteDeAviseMe) — o IP só vive na memória do

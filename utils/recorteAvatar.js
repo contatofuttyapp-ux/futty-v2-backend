@@ -1,4 +1,4 @@
-// Futty v2.0 — Rodada 29B (bloco 3, E): o recorte da MINIATURA do avatar — as contas puras.
+// Futty v2.0 — O recorte da MINIATURA do avatar — as contas puras.
 //
 // A miniatura redonda (Início, ranking, sorteio…) mostra uma JANELA QUADRADA da foto (ou da
 // figurinha), que é 2:3. O recorte escolhido pela pessoa diz onde fica essa janela:

@@ -1,8 +1,8 @@
 // Futty v2.0 — Gabinete do Dono (/gabinete). Rota super-admin exclusiva.
 // Camada de LEITURA agregada (série temporal, pulso, vida, marcos) + store editável
 // (Operação/Publicidade). Lei da casa: o dono é CEGO ao conteúdo — só números.
-// Receita: tabela compras (Pagamentos P1, migração 064). Publicidade (medição de ads) ainda não tem fonte real → "em breve"
-// digno, SEM inventar números. Ver SPEC-GABINETE v3.
+// Receita: tabela compras (migração 064). Publicidade (medição de ads) ainda não tem fonte real →
+// "em breve" digno, SEM inventar números. Ver SPEC-GABINETE v3.
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
 const { LIMITES } = require('../middleware/limiters');
@@ -25,11 +25,9 @@ const router = express.Router();
 const DIA = 86400000;
 const inicioDiaUTC = (d) => { const x = new Date(d); x.setUTCHours(0, 0, 0, 0); return x; };
 
-// 17-set: o custo por geração deixou de ser constante aqui. Ele é MEDIDO na fal
-// a cada chamada (header `x-fal-billable-units`, ver utils/falFila.js) e somado
-// em gasto_ia_diario — o Gabinete passa a dividir custo_cents por geracoes do
-// próprio período. A constante antiga (1,7 cêntimos) mostrava ao dono um número
-// 6,6× abaixo do real.
+// O custo por geração NÃO é uma constante aqui: é MEDIDO na fal a cada chamada (header
+// `x-fal-billable-units`, ver utils/falFila.js) e somado em gasto_ia_diario — o Gabinete divide
+// custo_cents por geracoes do próprio período. Uma constante fixa erra o número mostrado ao dono.
 const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 
 // Rate limiters ativos — manifesto estático (não há API pública do
@@ -92,8 +90,8 @@ router.get(
       supabase.from('users').select('created_at'),
       supabase.from('teams').select('id, nome, created_at'),
       // A coluna de data desta tabela é `criado_em` (migração 026), não `created_at`:
-      // com o nome errado o PostgREST devolvia erro, `camps` caía para [] e o
-      // gráfico de campeonatos ficava eternamente a zero (15-set).
+      // com o nome errado o PostgREST devolve erro, `camps` cai para [] e o
+      // gráfico de campeonatos fica eternamente a zero.
       supabase.from('campeonatos').select('nome, estado, campeao, criado_em'),
       supabase.from('games').select('data, created_at, sorteio_realizado'),
       supabase.from('feed_posts').select('created_at'),
@@ -149,7 +147,7 @@ router.get(
       marcos.push({ ic: '🎉', t: `${marco}+ utilizadores`, d: `total atual: ${users.length}` });
     }
 
-    // Pagamentos P1: a receita existe a partir da primeira compra de loja (sandbox conta —
+    // A receita existe a partir da primeira compra de loja (sandbox conta —
     // é assim que o dono vê o painel acender no teste). Concessões do Gabinete não contam.
     let receitaDisponivel = false;
     try {
@@ -163,7 +161,7 @@ router.get(
       crescimento,
       vida,
       marcos,
-      receita_disponivel: receitaDisponivel, // Pagamentos P1: true depois da 1ª compra de loja
+      receita_disponivel: receitaDisponivel, // true depois da 1ª compra de loja
       publicidade_disponivel: false, // medição de ads (impressão/clique) ainda não existe
     });
   })
@@ -195,8 +193,8 @@ router.get(
   asyncHandler(async (req, res) => {
     const store = await gabineteStore.ler();
     // As impressões vivem num acumulador em memória que só desce ao Storage de
-    // 30 em 30 s (Velocidade 6A). Aqui o dono quer o número certo AGORA, por
-    // isso força o flush antes de ler — é uma tela de dono, não um caminho quente.
+    // 30 em 30 s. Aqui o dono quer o número certo AGORA,
+    // por isso força o flush antes de ler — é uma tela de dono, não um caminho quente.
     await adsStore.descarregar();
     const metricas = await adsStore.ler();
     const hoje = inicioDiaUTC(new Date()).toISOString().slice(0, 10);
@@ -269,7 +267,7 @@ router.get(
     ]);
     const users = usersRes.data || [];
     const teams = teamsRes.data || [];
-    // Pagamentos P1: sem a 064, a receita diz que não sabe (null) em vez de mostrar 0.
+    // Sem a 064, a receita diz que não sabe (null) em vez de mostrar 0.
     const receita = comprasMes.error ? null : resumirReceita(comprasMes.data);
 
     // Denúncias abertas — mesmo agregado do /api/super/gabinete (zero conteúdo).
@@ -329,7 +327,7 @@ router.get(
           custo_por_geracao_etiqueta: 'custo real (fal)',
           freeze: !!iaFreeze,
         },
-        // Pagamentos P1 — US$ das compras de loja creditadas no mês (produção só). Tudo null
+        // US$ das compras de loja creditadas no mês (produção só). Tudo null
         // enquanto a migração 064 não correr.
         receita_mes: receita ? receita.receita_mes : null,
         compras_mes: receita ? receita.compras_mes : null,
@@ -352,7 +350,7 @@ router.get(
 );
 
 // ═══════════════════════════════════════════════════════════════════════════
-// FIGURINHAS BRILHANTES (SPEC-FIGURINHA-3 §7 — bloco 2, 22-set)
+// FIGURINHAS BRILHANTES (SPEC-FIGURINHA-3 §7)
 //
 // Enquanto a compra na loja não existe, é AQUI que o pedido vira produto: a
 // pessoa toca em "Pedir ativação" (Planos/Figurinha), o pedido cai em
@@ -377,7 +375,7 @@ function porId(linhas) {
 }
 
 /**
- * Pagamentos P1 — as últimas 50 compras (loja, Gabinete e ignoradas), com quem e que time.
+ * As últimas 50 compras (loja, Gabinete e ignoradas), com quem e que time.
  * null se a 064 ainda não correu: uma lista vazia afirmaria "ninguém comprou".
  */
 async function ultimasCompras() {
@@ -455,9 +453,9 @@ router.get(
       // Uso e custo REAL por time (a mesma verdade do gasto_ia_diario: o que a
       // fal cobrou, gravado por geração). `sem_custo` conta as linhas antigas
       // sem custo gravado, para o total não se fazer passar por completo.
-      // RODADA 28 (achado da Rodada 22): cada linha é UMA pessoa, com `geracoes` e o custo SOMADO
-      // delas (utils/direitoBrilhante.js#debitar) — `geradas` é a soma das gerações, não das linhas,
-      // e `jogadores` é quantos já gastaram vaga do pacote. O mês sai do log (migração 063).
+      // Cada linha é UMA pessoa, com `geracoes` e o custo SOMADO delas (utils/direitoBrilhante.js#debitar) —
+      // `geradas` é a soma das gerações, não das linhas, e `jogadores` é quantos já gastaram vaga do pacote.
+      // O mês sai do log (migração 063).
       const uso = {};
       const membros = {};
       let custoPorMes = null; // null = migração 063 por correr
@@ -475,7 +473,7 @@ router.get(
           if (l.custo_cents == null) u.sem_custo += 1;
           else u.custo_cents += Number(l.custo_cents) || 0;
         }
-        // Rodada 29B (E): quem só organiza o time não é jogador — não entra na conta dos jogadores do pacote.
+        // Quem só organiza o time não é jogador — não entra na conta dos jogadores do pacote.
         for (const m of equipas || []) if (!organizam.get(m.team_id)?.has(m.user_id)) membros[m.team_id] = (membros[m.team_id] || 0) + 1;
         if (!log.error) custoPorMes = custoDoTimePorMes(log.data);
         else console.warn('[gabinete/brilhantes] custo por mês indisponível (migração 063 aplicada?):', log.error.message);
@@ -594,7 +592,7 @@ router.post(
         return res.json({ ok: true, team_id: teamId, kit_id: kitId, membros_avisados: ids.length });
       }
 
-      // Pagamentos P1: a concessão manual é uma "compra" da loja 'gabinete', preço 0 — fica
+      // A concessão manual é uma "compra" da loja 'gabinete', preço 0 — fica
       // em `compras` e aparece na receita como R$0. O comprador é quem pediu o pacote (ou
       // quem criou o time, sem pedido). Ninguém é gerado aqui (geração preguiçosa).
       const { data: pedido } = await supabase
@@ -625,11 +623,9 @@ router.post(
 
 /**
  * POST /api/super/gabinete/brilhantes/creditos { userId, quantidade } ou
- * { email, quantidade } — soma créditos à pessoa (a "Minha Figurinha" dá 10,
- * Rodada 21), resolve o pedido 'minha' pendente dela e avisa. `email` é para
- * dar crédito a quem AINDA não tem pedido nem crédito nenhum (não aparece em
- * nenhuma das duas listas da aba) — resolvido para userId aqui dentro, nunca
- * no cliente.
+ * { email, quantidade } — soma créditos à pessoa (a "Minha Figurinha" dá 10), resolve o pedido 'minha'
+ * pendente dela e avisa. `email` é para dar crédito a quem AINDA não tem pedido nem crédito nenhum (não
+ * aparece em nenhuma das duas listas da aba) — resolvido para userId aqui dentro, nunca no cliente.
  */
 router.post(
   '/api/super/gabinete/brilhantes/creditos',
@@ -659,7 +655,7 @@ router.post(
       }
       if (!pessoa) throw new HttpError(404, 'Pessoa não encontrada.');
 
-      // Pagamentos P1: a concessão vira linha 'gabinete' (preço 0) em `compras`; a soma é a
+      // A concessão vira linha 'gabinete' (preço 0) em `compras`; a soma é a
       // atómica da 064, o pedido 'minha' é resolvido e a pessoa recebe o push — tudo lá dentro.
       const { creditos: novo } = await aplicarCompra({
         userId,
@@ -726,9 +722,9 @@ router.post(
 );
 
 /**
- * GET /api/super/gabinete/velocidade — aba Velocidade (Rodada 28, bloco E): p50/p95 por tela e por
- * versão nos últimos 7 dias e as 5 rotas mais lentas, da telemetria ANÔNIMA. A conta (percentis) é
- * feita no banco pela função da migração 061; aqui não chega nenhum evento individual.
+ * GET /api/super/gabinete/velocidade — aba Velocidade: p50/p95 por tela e por versão nos últimos 7
+ * dias e as 5 rotas mais lentas, da telemetria ANÔNIMA. A conta (percentis) é feita no banco pela
+ * função da migração 061; aqui não chega nenhum evento individual.
  */
 router.get(
   '/api/super/gabinete/velocidade',
@@ -748,9 +744,9 @@ router.get(
 );
 
 /**
- * GET /api/super/gabinete/avise-me — a lista "Avise-me" (Rodada 29B, F; migração 068): total, por origem e os mais
- * recentes. Com `?formato=csv` devolve o arquivo com TODOS os e-mails (para o dia do lançamento). Só o super-admin.
- * O ENVIO do "chegou nas lojas" não existe ainda: é no dia do lançamento.
+ * GET /api/super/gabinete/avise-me — a lista "Avise-me" (migração 068): total, por origem e os mais
+ * recentes. Com `?formato=csv` devolve o arquivo com TODOS os e-mails (para o dia do lançamento).
+ * Só o super-admin. O ENVIO do "chegou nas lojas" não existe ainda: é no dia do lançamento.
  */
 router.get(
   '/api/super/gabinete/avise-me',

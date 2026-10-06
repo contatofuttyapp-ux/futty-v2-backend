@@ -1,4 +1,4 @@
-// Futty v2.0 — A régua de idade do cadastro (Rodada 29G, 1-out: o Futty é 18+ de ponta a ponta).
+// Futty v2.0 — A régua de idade do cadastro (o Futty é 18+ de ponta a ponta).
 //
 // O Futty é para maiores de 18 anos. A conta não nasce abaixo disso: o app pergunta a data no cadastro
 // (e-mail) e no onboarding (Google/Apple, que não trazem a data), e o motor confere de novo — ver

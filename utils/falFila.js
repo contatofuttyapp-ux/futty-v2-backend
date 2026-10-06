@@ -1,15 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// A FAL PELA FILA REST — e o custo REAL de cada chamada (17-set).
+// A FAL PELA FILA REST — e o custo REAL de cada chamada.
 //
 // Porque não o SDK: o `fal.subscribe` do @fal-ai/serverless-client devolve o
 // resultado e deita fora os headers da resposta. E é num header que vem o que
 // interessa saber: `x-fal-billable-units`, o custo em dólares daquela chamada.
 //
-// Sem isso a casa andou desde julho a acreditar num custo de tabela ($0,015 por
+// Sem isso a casa acreditava num custo de tabela ($0,015 por
 // figurinha) que só contava a imagem de SAÍDA. A fal cobra quatro coisas na
 // mesma chamada — texto do prompt, tokens de imagem de ENTRADA (os caros:
 // $0,008 por 1.000, e uma imagem 1024×1024 em fidelidade alta são 3.050),
-// raciocínio, e a imagem de saída. A receita que estava no ar custava $0,132.
+// raciocínio, e a imagem de saída. A receita de então custava $0,132.
 // Medir é barato; adivinhar custou 9× o previsto.
 //
 // SEGURANÇA (SEGURANCA-REVISAO-10SET.md secção 3): nada aqui loga a chave da

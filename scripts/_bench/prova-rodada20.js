@@ -1,4 +1,4 @@
-// Futty v2.0 — RODADA 20: contas + convite reutilizável para a cena
+// Futty v2.0 — contas + convite reutilizável para a cena
 // "rodada-20" do ver-iphone.mjs. Cria um time descartável com um convite já
 // usado por UMA conta, para a 2ª conta (cuja sessão a cena usa) entrar pelo
 // MESMO link — a prova visual de que o link não morre no 1º uso. Também

@@ -1,4 +1,4 @@
-// Futty v2.0 — Campeonatos (modelo N times). Vaga 11B.
+// Futty v2.0 — Campeonatos (modelo N times).
 // Auto-contido no Storage (utils/campeonatoStore) — DDL nenhum, ranking intocado.
 // A rota antiga (routes/campeonato.js, 026 de 2 times fixos) fica intocada.
 const express = require('express');
@@ -28,8 +28,8 @@ const HONRA_CAMP = { 1: 'CAMPEÃO', 2: 'VICE', 3: '3º LUGAR' };
 const POS = { 1: '1º', 2: '2º', 3: '3º' };
 
 /**
- * GET /api/me/selos — (Vaga 11C) selos de honra do utilizador, lidos do Storage
- * dos campeonatos + do ranking (sem DDL). A faixa antiga morreu.
+ * GET /api/me/selos — selos de honra do utilizador, lidos do Storage dos campeonatos + do ranking
+ * (sem DDL).
  *  - campeonato: pódio 1º/2º/3º de campeonato terminado onde o user está no time —
  *    ATIVO até 30 dias, depois histórico (vitrine).
  *  - ranking: posição atual (1º/2º/3º) na equipa — VIVO (sem prazo; sai se cair).
@@ -41,8 +41,8 @@ async function computeSelos(uid, teamIds) {
   const agora = Date.now();
   if (!teamIds.length) return [];
 
-  // Velocidade 2 (12-set): era 1 query de nome POR equipa, dentro do loop
-  // sequencial abaixo — agora 1 query só, com .in(), para todas as equipas.
+  // Uma query só, com .in(), traz o nome de todas as equipas
+  // (em vez de uma query de nome POR equipa).
   const { data: teamsData } = await supabase.from('teams').select('id, nome').in('id', teamIds);
   const nomePorId = new Map((teamsData || []).map((t) => [t.id, t.nome]));
 
@@ -102,7 +102,7 @@ async function computeSelos(uid, teamIds) {
     })
   );
   const selos = porEquipa.flat();
-  // Achado 12: mesmo tipo + mesmo time só uma vez (ex.: "RANKING 1º" duplicado).
+  // Mesmo tipo + mesmo time só uma vez (ex.: "RANKING 1º" duplicado).
   // `id` já é único por time (rank:<teamId>) ou por campeonato (camp:<campId>).
   const vistos = new Set();
   const semDuplicados = selos.filter((s) => {
@@ -130,8 +130,9 @@ router.get(
       const teamIds = [...new Set((minhas || []).map((m) => m.team_id))];
       return { selos: await computeSelos(uid, teamIds), teamIds };
     });
-    // Rodada 29B (B): os selos mudam poucas vezes por semana (e o motor já os guarda 2 min): o navegador pode reaproveitar a resposta por
-    // 30 s. `private` + `Vary: Authorization` — é de UMA pessoa, e outra conta no mesmo aparelho nunca recebe a de quem saiu.
+    // Os selos mudam poucas vezes por semana (e o motor já os guarda 2 min): o navegador pode reaproveitar a
+    // resposta por 30 s. `private` + `Vary: Authorization` — é de UMA pessoa, e outra conta no mesmo aparelho
+    // nunca recebe a de quem saiu.
     res.set('Cache-Control', 'private, max-age=30');
     res.vary('Authorization');
     res.json({ selos });
@@ -207,7 +208,7 @@ router.post(
       convidado: !!j.convidado,
     })));
 
-    // 29I (achado 83): a data do jogo no nome do campeonato é a do CAMPO (fuso do time), não a do servidor.
+    // A data do jogo no nome do campeonato é a do CAMPO (fuso do time), não a do servidor.
     const dataJogo = game.data ? dataNoFuso(game.data, fusoDoTime(team)) : null;
     const nome = dataJogo ? `Campeonato do sorteio · ${dataJogo}` : 'Campeonato do sorteio';
 
@@ -258,7 +259,7 @@ router.post(
     } else {
       const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, MAX_TIMES);
       if (nomes.length < MIN_TIMES) throw new HttpError(400, `Um campeonato precisa de pelo menos ${MIN_TIMES} times.`);
-      // Composição à mão (Vaga 11C, OPCIONAL): plantel[i] = jogadores do time i
+      // Composição à mão (OPCIONAL): plantel[i] = jogadores do time i
       // (membros por user_id + convidados por nome). Times só com nome continuam
       // válidos. Sanitiza: 22 por time, só campos conhecidos.
       let plantel;
@@ -356,7 +357,7 @@ router.get(
     if (!team) throw new HttpError(404, 'Time não encontrado.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
-    // logo_url (achado 121, 29J): og:image da prévia do link, quando o time tem logo.
+    // logo_url: og:image da prévia do link, quando o time tem logo.
     res.json({ campeonato: enriquecer(camp), equipa: { nome: team.nome, slug: team.slug, logo_url: team.logo_url || null } });
   })
 );

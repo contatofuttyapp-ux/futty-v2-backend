@@ -1,5 +1,5 @@
-// Futty v2.0 — LIMPEZA TOTAL (23-set): contagens finais pós-reconstrução da demo
-// + confirmação do estado das duas contas que ficam.
+// Futty v2.0 — contagens finais pós-reconstrução da demo + confirmação do estado
+// das duas contas que ficam.
 require('dotenv').config();
 const { supabase } = require('../../utils/db');
 

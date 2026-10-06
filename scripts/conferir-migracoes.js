@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-// Futty v2.0 — Confere db/migrations/*.sql contra o ESTADO REAL do banco (build 9,
-// achado real: PATCH /api/me deu 500 "violates check constraint
-// users_fundo_figurinha_check" porque a migração 043 nunca correu — resolve
-// também o item pendente da migração 039, "nunca correu no banco").
+// Futty v2.0 — Confere db/migrations/*.sql contra o ESTADO REAL do banco. Caso real que motivou:
+// PATCH /api/me deu 500 "violates check constraint users_fundo_figurinha_check" porque a
+// migração 043 nunca correu.
 //
 // Como funciona: não há ligação directa ao Postgres nesta máquina (só a API
 // REST do Supabase, via service_role — ver utils/db.js), por isso não se lê o

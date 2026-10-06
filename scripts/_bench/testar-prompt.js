@@ -1,20 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════════
-// BANCADA DO PROMPT (17-set) — só o PROMPT muda. Mesmo modelo, mesma qualidade.
+// BANCADA DO PROMPT — só o PROMPT muda. Mesmo modelo, mesma qualidade.
 //
 // Pergunta do dono: dá para a figurinha ficar MAIS PARECIDA com a pessoa sem
 // mexer no modelo (gpt-image-1.5/edit), na qualidade (low) nem no tamanho
 // (1024×1536)? O kit tem de ficar idêntico e a cabeça inteira.
 //
 // ┌──────────────────────────────────────────────────────────────────────────┐
-// │ RESULTADO (avaliação do dono, 17-set, 49 figurinhas às cegas, 1 a 5):    │
+// │ RESULTADO (avaliação do dono, 49 figurinhas às cegas, 1 a 5):            │
 // │   1 P1 (o prompt antigo) .... 1,6    5 P3 (P2 + STYLE antigo) ..... 3,3  │
 // │   2 P1 + fidelity high ...... 2,0    6 P2 + high + QUADRADA ....... 4,1  │
 // │   3 P2 ...................... 4,0      (melhor em 6/7 fotos, US$0,112)   │
 // │   4 P2 + fidelity high ...... 4,0    7 P2 + fidelity low .......... 2,7  │
 // │                                                                          │
-// │ A VARIANTE 6 É A PRODUÇÃO desde 17-set. O prompt dela vive em            │
-// │ prompts/figurinha.js e a entrada em utils/entradaFigurinha.js — esta      │
-// │ bancada IMPORTA os dois, não os copia. Correr isto outra vez compara      │
+// │ A VARIANTE 6 É A PRODUÇÃO. O prompt dela vive em                         │
+// │ prompts/figurinha.js e a entrada em utils/entradaFigurinha.js — esta     │
+// │ bancada IMPORTA os dois, não os copia. Correr isto outra vez compara     │
 // │ sempre contra o que está mesmo no ar.                                    │
 // └──────────────────────────────────────────────────────────────────────────┘
 //
@@ -46,7 +46,7 @@ const vm = require('vm');
 const sharp = require('sharp');
 const { supabase } = require('../../utils/db');
 // A bancada usa os MESMOS módulos que a produção — se divergirem, o que se mede
-// deixa de ser o que está no ar (17-set: a variante 6 virou produção).
+// deixa de ser o que está no ar.
 const { montarPrompt } = require('../../prompts/figurinha');
 const { comFaixa, topoDaPele, preprocessarQuadrado, preprocessarRetrato } = require('../../utils/entradaFigurinha');
 const { chamarFal, custoDosHeaders, limpar } = require('../../utils/falFila');
@@ -55,10 +55,9 @@ const SAIDA = path.join(__dirname, 'saida-prompt');
 const FOTOS_OMISSAO = 'C:\\Users\\phfer\\Desktop\\FUT\\BANCADA-FOTOS';
 const MODELO = 'fal-ai/gpt-image-1.5/edit';
 const BIREFNET = 'fal-ai/birefnet';
-// ATENÇÃO AO CUSTO (medido nesta bancada, 17-set):
-// A tabela abaixo é só o preço da IMAGEM DE SAÍDA — é o que as bancadas antigas
-// contavam, e é por isso que a casa acredita em "$0,015 por figurinha". A fal
-// cobra MAIS do que isso na mesma chamada:
+// ATENÇÃO AO CUSTO (medido nesta bancada):
+// A tabela abaixo é só o preço da IMAGEM DE SAÍDA, o que dá os "$0,015 por figurinha"
+// das contas antigas. A fal cobra MAIS do que isso na mesma chamada:
 //   $0,005 / 1.000 tokens de texto do prompt
 //   $0,008 / 1.000 tokens de IMAGEM de entrada — e uma imagem 1024×1024 são
 //           135 tokens em fidelidade BAIXA, mas 3.050 em fidelidade ALTA
@@ -67,7 +66,7 @@ const BIREFNET = 'fal-ai/birefnet';
 // Como `input_fidelity` tem omissão ALTA na fal, a produção manda duas imagens
 // em alta fidelidade e paga por isso: o header x-fal-billable-units devolveu
 // $0,132 na receita EXACTA de produção (variante 1). O custo verdadeiro por
-// figurinha é ~9× o que está escrito no CLAUDE.md.
+// figurinha é ~9× os $0,015 da tabela.
 // Aqui o custo de cada linha vem SEMPRE do header quando ele existe; a tabela
 // é o último recurso e a linha do CSV diz "tabela" quando foi usada.
 const PRECO = { low: { '1024x1024': 0.009, '1024x1536': 0.013, '1536x1024': 0.013 } };
@@ -84,11 +83,9 @@ const arg = (n, omissao = null) => {
 
 // ── prompts ───────────────────────────────────────────────────────────────────
 //
-// DEPOIS DA DECISÃO (17-set): a variante 6 É a produção. O que era "P2" nesta
-// bancada é agora `prompts/figurinha.js`, e é de lá que ele vem — a bancada
-// deixou de ter texto de prompt próprio. O prompt ANTIGO (P1), que a produção
-// tinha até 17-set, está arquivado em `prompt-antigo-reprovado.js` só para estas
-// variantes poderem ser repetidas.
+// A variante 6 é a produção: o que é "P2" nesta bancada vem de `prompts/figurinha.js`
+// — a bancada não tem texto de prompt próprio. O prompt ANTIGO (P1) está arquivado
+// em `prompt-antigo-reprovado.js` só para estas variantes poderem ser repetidas.
 
 /** O catálogo de kits REAL, lido de routes/auth.js (url do asset + planos). */
 function lerKits(kitId) {
@@ -104,7 +101,7 @@ function lerKits(kitId) {
   return kit;
 }
 
-/** P1 — o prompt reprovado, montado como a produção o montava até 17-set. */
+/** P1 — o prompt reprovado, montado como a produção o montava antes de ser trocado pelo P2. */
 function montarP1(kitId, acento) {
   const { PROMPT_BASE, kitPrompt, kitChecklist } = require('./prompt-antigo-reprovado');
   const nome = kitId.split('-').map((p) => p[0].toUpperCase() + p.slice(1)).join(' ');
@@ -128,8 +125,7 @@ function montarP3(p2) {
 }
 
 // As peças partilhadas pelas bancadas (medir a coroa, recortar o fundo, vestir
-// a moldura, montar a folha) vivem em comum.js desde que a bancada de MODELOS
-// passou a precisar das mesmas — duas cópias mediriam coisas diferentes.
+// a moldura, montar a folha) vivem em comum.js — duas cópias mediriam coisas diferentes.
 const { baixar, achatamento, montarFigurinha, folhaDeContato, mulberry32, paraCsv } = require('./comum');
 
 // ── principal ─────────────────────────────────────────────────────────────────
@@ -146,7 +142,7 @@ const { baixar, achatamento, montarFigurinha, folhaDeContato, mulberry32, paraCs
   if (!fotos.length) { console.error(`Nenhuma foto em ${pastaFotos}.`); process.exit(1); }
 
   const kit = lerKits('dark-gold');
-  const P2 = montarPrompt('dark-gold');   // o prompt DE PRODUÇÃO desde 17-set
+  const P2 = montarPrompt('dark-gold');   // o prompt DE PRODUÇÃO
   const p1 = montarP1('dark-gold', kit.acento); // o reprovado, para comparação
   const p3 = montarP3(P2);
   const soVariantes = (arg('variantes', '') || '').split(',').map((s) => Number(s)).filter(Boolean);
@@ -157,9 +153,9 @@ const { baixar, achatamento, montarFigurinha, folhaDeContato, mulberry32, paraCs
     { n: 4, nome: 'P2 + fidelity high', prompt: P2, fidelity: 'high', entrada: 'retrato' },
     { n: 5, nome: 'P3 (P2 + STYLE produção) + fidelity high', prompt: p3, fidelity: 'high', entrada: 'retrato' },
     { n: 6, nome: 'P2 + fidelity high · entrada QUADRADA', prompt: P2, fidelity: 'high', entrada: 'quadrada' },
-    // Variante 7 (17-set, achado do custo): a MESMA receita da 4, mas com a
-    // fidelidade de entrada BAIXA — 135 tokens por imagem em vez de 3.050. É a
-    // que mostra quanto da semelhança se perde ao deixar de pagar a entrada cara.
+    // Variante 7: a MESMA receita da 4, mas com a fidelidade de entrada BAIXA —
+    // 135 tokens por imagem em vez de 3.050. É a que mostra quanto da semelhança
+    // se perde ao deixar de pagar a entrada cara.
     { n: 7, nome: 'P2 + fidelity LOW (barata)', prompt: P2, fidelity: 'low', entrada: 'retrato' },
   ].filter((v) => !soVariantes.length || soVariantes.includes(v.n));
 
