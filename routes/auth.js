@@ -820,6 +820,42 @@ async function baixarFotoConferida(caminho, hashEsperado) {
   );
 }
 
+// 6-out (decisão do dono): cabeça cortada nas DUAS tentativas → a FOTO fica recusada. Um pedido novo com a
+// mesma foto é barrado ANTES da fal (FOTO_RECUSADA), sem débito. A identidade é o foto_hash (sha256 dos bytes
+// da foto guardada), não o nome do arquivo: foto nova = hash novo = libera. Migração 080 (fotos_recusadas).
+const MSG_FOTO_RECUSADA = 'Essa foto não deu certo. Escolha outra: de frente, com a cabeça inteira aparecendo e sem nada cortando o topo.';
+
+async function fotoEstaRecusada(userId, fotoHash) {
+  if (!fotoHash) return false;
+  const { data, error } = await supabase
+    .from('fotos_recusadas')
+    .select('foto_hash')
+    .eq('user_id', userId)
+    .eq('foto_hash', fotoHash)
+    .maybeSingle();
+  if (error) {
+    // Migração 080 por correr: sem a tabela não há bloqueio — o pedido segue como antes (fail-safe).
+    if (ehMigracaoEmFalta(error.message)) {
+      console.warn('[avatar-ai] fotos_recusadas indisponível (migração 080 por correr?):', error.message);
+      return false;
+    }
+    throw new HttpError(500, error.message);
+  }
+  return !!data;
+}
+
+async function recusarFoto(userId, fotoHash) {
+  if (!fotoHash) {
+    console.warn('[avatar-ai] foto sem foto_hash: não dá para marcá-la como recusada (contas antes da 048)');
+    return;
+  }
+  const { error } = await supabase
+    .from('fotos_recusadas')
+    .upsert({ user_id: userId, foto_hash: fotoHash }, { onConflict: 'user_id,foto_hash' });
+  // Falhar aqui não muda a resposta à pessoa (a figurinha já foi recusada); só deixa a próxima tentativa passar.
+  if (error) console.error('[avatar-ai] não consegui marcar a foto como recusada:', error.message);
+}
+
 /**
  * A PINTURA em si — era o corpo de POST /api/me/avatar/ai (Rodada 29B, bloco 2, A: passou a rodar em
  * segundo plano, pela fila de utils/geracaoJobs.js). Baixa a foto conferida, pinta (fal), audita a
@@ -830,6 +866,8 @@ async function baixarFotoConferida(caminho, hashEsperado) {
  * a invalidação da sessão.
  */
 async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitId, kit, slot }, { etapa }) {
+  // 6-out: foto já recusada não chega à fal — esta é a última porta antes do dinheiro (a da POST é a primeira).
+  if (await fotoEstaRecusada(userId, perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
   // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
   // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
   // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
@@ -1049,9 +1087,14 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   };
 
   await etapa('pintando');
+  // 6-out: "cabeça cortada" = o topo (borda) OU a coroa achatada. Só as DUAS tentativas com a cabeça cortada
+  // recusam a FOTO; um braço na borda, ou a 2ª tentativa caída por outro motivo, não marcam nada.
+  const cabecaCortada = (v) => v.borda.topo.cortado || v.achatamento.cortada;
   let gen = await gerarERecortar();
   let verif = await verificarQualidade(gen.recorteBuffer);
   console.log('[avatar-ai] verificação de qualidade:', { borda: verif.borda, achatamento: verif.achatamento });
+  const cabecaNaPrimeira = !verif.ok && cabecaCortada(verif);
+  let cabecaNaSegunda = false;
   if (!verif.ok) {
     console.log('[avatar-ai] retry: reprovada na 1ª geração', { borda: verif.borda, achatamento: verif.achatamento });
     try {
@@ -1060,6 +1103,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
       console.log('[avatar-ai] verificação de qualidade (pós-retry):', { borda: verif2.borda, achatamento: verif2.achatamento });
       gen = gen2;
       verif = verif2;
+      cabecaNaSegunda = !verif2.ok && cabecaCortada(verif2);
     } catch (e) {
       console.error('[avatar-ai] retry falhou, mantém 1ª geração:', e.message);
     }
@@ -1069,6 +1113,11 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
     // entrega, não grava slot, não consome quota (o throw acontece antes
     // de qualquer um dos três, mais abaixo neste handler).
     console.error('[avatar-ai] REPROVADA após retry — não entrega:', { borda: verif.borda, achatamento: verif.achatamento });
+    if (cabecaNaPrimeira && cabecaNaSegunda) {
+      // 6-out: a cabeça cortou nas duas → a foto está recusada. O próximo pedido com ela é barrado antes da fal.
+      await recusarFoto(userId, perfil.foto_hash);
+      throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
+    }
     throw new HttpError(422, 'Não conseguimos gerar uma figurinha à altura com esta foto. Tente outra: de frente e bem iluminada.', 'FIGURINHA_DEFEITUOSA');
   }
 
@@ -1288,6 +1337,10 @@ router.post(
         'SEM_DIREITO',
       );
     }
+
+    // 6-out: foto já recusada (cabeça cortada nas duas tentativas) não gera de novo — nem fal, nem débito, nem job.
+    // Vem depois do slot-reuse de propósito: vestir uma figurinha que já existe continua de graça.
+    if (await fotoEstaRecusada(userId, perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
 
     // Figurinha automática (12-set): marca 'gerando' AQUI — depois de kit/plano/
     // slot-reuse/quota (validações de uso normal do endpoint, não específicas do

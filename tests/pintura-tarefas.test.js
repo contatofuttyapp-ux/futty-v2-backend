@@ -389,12 +389,13 @@ test('cabeça cortada nas duas tentativas: o pedido da tarefa responde 200 (não
   assert.equal(m.fal.chamadas, 2, 'a 1ª reprovada refaz UMA vez, como sempre');
   const visto = await consultar(m, r.json.jobId);
   assert.equal(visto.json.estado, 'falhou');
-  assert.equal(visto.json.code, 'FIGURINHA_DEFEITUOSA');
-  assert.match(visto.json.erro, /Tente outra: de frente e bem iluminada/);
+  assert.equal(visto.json.code, 'FOTO_RECUSADA');
+  assert.match(visto.json.erro, /Escolha outra: de frente, com a cabeça inteira/);
   assert.equal(m.usuario().brilhante_creditos, 2);
   assert.equal(m.usuario().figurinha_status, 'falhou');
   assert.equal(m.tabelas.user_avatar_slots.length, 0);
   assert.equal(m.notificacoes.length, 0);
+  assert.equal(m.tabelas.fotos_recusadas.length, 1, 'a foto ficou recusada');
   // E a tarefa repetida não tenta de novo.
   assert.equal((await pintar(m, r.json.jobId)).json.repintou, false);
   assert.equal(m.fal.chamadas, 2);
@@ -409,6 +410,19 @@ test('o direito sumiu entre o POST e a tarefa: 200 "falhou" com a mensagem de se
   assert.equal(resp.json.estado, 'falhou');
   assert.equal(m.fal.chamadas, 0);
   assert.equal((await consultar(m, r.json.jobId)).json.code, 'SEM_DIREITO');
+});
+
+test('a foto foi recusada entre o POST e a tarefa (segunda barreira, dentro da pintura): 200 "falhou" FOTO_RECUSADA, sem chamar a fal, sem débito', async (t) => {
+  const m = mundo(t);
+  const r = await gerar(m, { assincrono: true }); // enfileirada com a foto ainda aceita
+  m.tabelas.fotos_recusadas = [{ user_id: USUARIO, foto_hash: m.usuario().foto_hash }];
+  const resp = await pintar(m, r.json.jobId);
+  assert.equal(resp.status, 200);
+  assert.equal(resp.json.estado, 'falhou');
+  assert.equal(m.fal.chamadas, 0, 'a fal não é chamada para uma foto recusada');
+  const visto = await consultar(m, r.json.jobId);
+  assert.equal(visto.json.code, 'FOTO_RECUSADA');
+  assert.equal(m.usuario().brilhante_creditos, 2, 'nada debitado');
 });
 
 // ── 5: o Cloud Tasks não aceita / sem a tabela ───────────────────────────────

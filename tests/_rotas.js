@@ -105,7 +105,8 @@ function subir(routers, t) {
   const app = express();
   app.use(express.json());
   for (const r of routers) app.use(r);
-  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message }));
+  // Igual ao server.js: o código de um HttpError vai no corpo (é por ele que o app escolhe a mensagem).
+  app.use((err, _req, res, _next) => res.status(err.status || 500).json({ error: err.message, ...(err.code ? { code: err.code } : {}) }));
   const servidor = app.listen(0);
   t.after(() => servidor.close());
   const base = `http://127.0.0.1:${servidor.address().port}`;
