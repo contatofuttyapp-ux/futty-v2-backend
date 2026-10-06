@@ -822,15 +822,14 @@ async function baixarFotoConferida(caminho, hashEsperado) {
 
 // 6-out (decisão do dono): cabeça cortada nas DUAS tentativas → a FOTO fica recusada. Um pedido novo com a
 // mesma foto é barrado ANTES da fal (FOTO_RECUSADA), sem débito. A identidade é o foto_hash (sha256 dos bytes
-// da foto guardada), não o nome do arquivo: foto nova = hash novo = libera. Migração 080 (fotos_recusadas).
+// da foto guardada), não o nome do arquivo nem a conta: foto nova = hash novo = libera. Migração 080 (fotos_recusadas).
 const MSG_FOTO_RECUSADA = 'Essa foto não deu certo. Escolha outra: de frente, com a cabeça inteira aparecendo e sem nada cortando o topo.';
 
-async function fotoEstaRecusada(userId, fotoHash) {
+async function fotoEstaRecusada(fotoHash) {
   if (!fotoHash) return false;
   const { data, error } = await supabase
     .from('fotos_recusadas')
     .select('foto_hash')
-    .eq('user_id', userId)
     .eq('foto_hash', fotoHash)
     .maybeSingle();
   if (error) {
@@ -849,9 +848,10 @@ async function recusarFoto(userId, fotoHash) {
     console.warn('[avatar-ai] foto sem foto_hash: não dá para marcá-la como recusada (contas antes da 048)');
     return;
   }
+  // ignoreDuplicates: a foto já recusada por outra conta fica com a primeira recusa (quem a recusou primeiro).
   const { error } = await supabase
     .from('fotos_recusadas')
-    .upsert({ user_id: userId, foto_hash: fotoHash }, { onConflict: 'user_id,foto_hash' });
+    .upsert({ user_id: userId, foto_hash: fotoHash }, { onConflict: 'foto_hash', ignoreDuplicates: true });
   // Falhar aqui não muda a resposta à pessoa (a figurinha já foi recusada); só deixa a próxima tentativa passar.
   if (error) console.error('[avatar-ai] não consegui marcar a foto como recusada:', error.message);
 }
@@ -867,7 +867,7 @@ async function recusarFoto(userId, fotoHash) {
  */
 async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitId, kit, slot }, { etapa }) {
   // 6-out: foto já recusada não chega à fal — esta é a última porta antes do dinheiro (a da POST é a primeira).
-  if (await fotoEstaRecusada(userId, perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
+  if (await fotoEstaRecusada(perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
   // ETAPA 0 — a foto que vai à IA (17-set, variante 6 da bancada): faixa de
   // 18% no topo + corte QUADRADO 1024×1024 com a cabeça a 12% do topo.
   // A receita vive em utils/entradaFigurinha.js e a bancada usa a MESMA.
@@ -1340,7 +1340,7 @@ router.post(
 
     // 6-out: foto já recusada (cabeça cortada nas duas tentativas) não gera de novo — nem fal, nem débito, nem job.
     // Vem depois do slot-reuse de propósito: vestir uma figurinha que já existe continua de graça.
-    if (await fotoEstaRecusada(userId, perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
+    if (await fotoEstaRecusada(perfil.foto_hash)) throw new HttpError(422, MSG_FOTO_RECUSADA, 'FOTO_RECUSADA');
 
     // Figurinha automática (12-set): marca 'gerando' AQUI — depois de kit/plano/
     // slot-reuse/quota (validações de uso normal do endpoint, não específicas do

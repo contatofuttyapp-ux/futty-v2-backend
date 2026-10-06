@@ -291,6 +291,17 @@ test('foto nova (outros bytes, outro hash): libera e passa — cobra uma vez', a
   assert.equal(m.usuario().brilhante_creditos, 1, 'um crédito, uma vez');
 });
 
+test('a mesma foto recusada noutra conta também é barrada: a identidade é a FOTO, não a conta', async (t) => {
+  const m = mundo(t);
+  // A recusa foi gravada numa conta de outra pessoa (a linha que a migração 080 guarda); esta conta manda a mesma foto.
+  m.tabelas.fotos_recusadas = [{ foto_hash: m.usuario().foto_hash, user_id: OUTRO, criado_em: new Date().toISOString() }];
+  const r = await gerar(m, { assincrono: true });
+  assert.equal(r.status, 422);
+  assert.equal(r.json.code, 'FOTO_RECUSADA');
+  assert.equal(m.fal.chamadas, 0, 'a fal não é chamada');
+  assert.equal(m.usuario().brilhante_creditos, 2, 'nada debitado');
+});
+
 test('uma cabeça cortada e a 2ª tentativa caída por outro motivo: a foto NÃO fica recusada, e o pedido seguinte passa', async (t) => {
   const m = mundo(t);
   m.fal.recortes = [cortado];
