@@ -73,14 +73,14 @@ function proximoDomingo() {
 // forca = nota média que os colegas dão (0,5 a 5). gr = goleiro. cabeca = cabeça de chave.
 const JOGADORES = [
   { apelido: 'Bruninho', nome: 'Bruno Henrique Santos', slug: '', posicao: 'MEI', avatar: 'm1', forca: 4.2, nasc: '1994-03-12', cabeca: true },
-  { apelido: 'Tiãozinho', nome: 'Sebastião Ferreira', slug: 'tiaozinho', posicao: 'ATA', avatar: 'm2', forca: 4.0, nasc: '1990-07-01', cabeca: true },
-  { apelido: 'Careca', nome: 'Carlos Eduardo Lima', slug: 'careca', posicao: 'DEF', avatar: 'm3', forca: 3.5, nasc: '1988-11-23' },
+  { apelido: 'Tiago', nome: 'Sebastião Ferreira', slug: 'tiaozinho', posicao: 'ATA', avatar: 'm2', forca: 4.0, nasc: '1990-07-01', cabeca: true },
+  { apelido: 'Carlos', nome: 'Carlos Eduardo Lima', slug: 'careca', posicao: 'DEF', avatar: 'm3', forca: 3.5, nasc: '1988-11-23' },
   { apelido: 'Paredão', nome: 'Anderson Souza', slug: 'indio', posicao: 'GL', avatar: 'm1', forca: 3.8, nasc: '1992-05-30', gr: true },
-  { apelido: 'Zé Gordo', nome: 'José Roberto Alves', slug: 'ze-gordo', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1986-09-09' },
+  { apelido: 'Roberto', nome: 'José Roberto Alves', slug: 'ze-gordo', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1986-09-09' },
   { apelido: 'Marquinhos', nome: 'Marcos Vinícius Rocha', slug: 'marquinhos', posicao: 'MEI', avatar: 'm3', forca: 3.8, nasc: '1997-01-17' },
-  { apelido: 'Paulinho Gaúcho', nome: 'Paulo Ricardo Machado', slug: 'paulinho-gaucho', posicao: 'ATA', avatar: 'm1', forca: 3.9, nasc: '1995-12-05' },
+  { apelido: 'Paulinho', nome: 'Paulo Ricardo Machado', slug: 'paulinho-gaucho', posicao: 'ATA', avatar: 'm1', forca: 3.9, nasc: '1995-12-05' },
   { apelido: 'Dudu', nome: 'Eduardo Nascimento', slug: 'dudu', posicao: 'MEI', avatar: 'm2', forca: 3.4, nasc: '1999-04-21' },
-  { apelido: 'Cabeção', nome: 'Rafael Oliveira', slug: 'cabecao', posicao: 'GL', avatar: 'm3', forca: 3.4, nasc: '1991-08-14', gr: true },
+  { apelido: 'Gonçalo', nome: 'Rafael Oliveira', slug: 'cabecao', posicao: 'GL', avatar: 'm3', forca: 3.4, nasc: '1991-08-14', gr: true },
   { apelido: 'Diguinho', nome: 'Diego Silva', slug: 'nego-di', posicao: 'ATA', avatar: 'm1', forca: 3.5, nasc: '1998-02-27' },
   { apelido: 'Fabinho', nome: 'Fábio Costa', slug: 'fabinho', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1993-06-18' },
   { apelido: 'Renatinho', nome: 'Renato Pereira', slug: 'renatinho', posicao: 'MEI', avatar: 'm3', forca: 2.6, nasc: '2001-10-02' },
@@ -102,9 +102,9 @@ const TIME = {
 // Times públicos: são o que o Explorar mostra. Criados por outros jogadores do
 // demo (o Bruninho não é membro, para a tela mostrar "Entrar" e "Pedir entrada").
 const TIMES_PUBLICOS = [
-  { nome: 'Pelada do Guará', slug: 'pelada-do-guara-demo', cor: 'azul', modo: 'publico_aberto', localizacao: 'Guará I, Brasília, DF', geo: [-15.82, -47.97], descricao: 'Quarta e sábado à noite, society sintético. Tem colete, traz só a chuteira.', admin: 'Tiãozinho', membros: ['Careca', 'Dudu', 'Fabinho', 'Diguinho'] },
-  { nome: 'Racha da Asa Norte', slug: 'racha-da-asa-norte-demo', cor: 'vermelho', modo: 'publico_aprovacao', localizacao: 'Asa Norte, Brasília, DF', geo: [-15.77, -47.88], descricao: 'Sábado 16h no campo da 410 Norte. Nível intermediário, sem carrinho.', admin: 'Marquinhos', membros: ['Renatinho', 'Paulinho Gaúcho'] },
-  { nome: 'Society Lago Sul', slug: 'society-lago-sul-demo', cor: 'preto', modo: 'publico_aberto', localizacao: 'Lago Sul, Brasília, DF', geo: [-15.84, -47.87], descricao: 'Domingo 17h, campo com iluminação. Churrasco depois é tradição.', admin: 'Zé Gordo', membros: ['Paredão', 'Cabeção', 'Careca', 'Dudu', 'Tiãozinho'] },
+  { nome: 'Pelada do Guará', slug: 'pelada-do-guara-demo', cor: 'azul', modo: 'publico_aberto', localizacao: 'Guará I, Brasília, DF', geo: [-15.82, -47.97], descricao: 'Quarta e sábado à noite, society sintético. Tem colete, traz só a chuteira.', admin: 'Tiago', membros: ['Carlos', 'Dudu', 'Fabinho', 'Diguinho'] },
+  { nome: 'Racha da Asa Norte', slug: 'racha-da-asa-norte-demo', cor: 'vermelho', modo: 'publico_aprovacao', localizacao: 'Asa Norte, Brasília, DF', geo: [-15.77, -47.88], descricao: 'Sábado 16h no campo da 410 Norte. Nível intermediário, sem carrinho.', admin: 'Marquinhos', membros: ['Renatinho', 'Paulinho'] },
+  { nome: 'Society Lago Sul', slug: 'society-lago-sul-demo', cor: 'preto', modo: 'publico_aberto', localizacao: 'Lago Sul, Brasília, DF', geo: [-15.84, -47.87], descricao: 'Domingo 17h, campo com iluminação. Churrasco depois é tradição.', admin: 'Roberto', membros: ['Paredão', 'Gonçalo', 'Carlos', 'Dudu', 'Tiago'] },
 ];
 
 // placar = [gols do time do Bruninho, gols do outro]: o time dele ganha 4, perde 1 e
@@ -118,16 +118,16 @@ const JOGOS_PASSADOS = [
   { data: brt(2026, 9, 6), placar: [4, 3] },
 ];
 const PROXIMO_JOGO = { data: proximoDomingo(), local: 'Society do Guará II', porTime: 4 };
-const CONFIRMADOS_PROXIMO = ['Bruninho', 'Tiãozinho', 'Careca', 'Paredão', 'Marquinhos', 'Paulinho Gaúcho', 'Dudu', 'Cabeção', 'Diguinho'];
+const CONFIRMADOS_PROXIMO = ['Bruninho', 'Tiago', 'Carlos', 'Paredão', 'Marquinhos', 'Paulinho', 'Dudu', 'Gonçalo', 'Diguinho'];
 const RECUSARAM_PROXIMO = ['Fabinho', 'Renatinho'];
 
 const POSTS = [
   // O post com foto é o mais recente, para a foto aparecer na primeira tela da Resenha.
   // Os comentários aparecem do mais novo para o mais antigo: cada um tem de fazer sentido sozinho.
-  { autor: 'Paulinho Gaúcho', horasAtras: 5, texto: 'Campo liberado pra domingo! Gramado tá um tapete. Zé Gordo, sem desculpa de buraco dessa vez.', foto: true, reacoes: { Bruninho: '❤️', Paredão: '👍', Renatinho: '😮', Dudu: '❤️', 'Diguinho': '👍', Marquinhos: '👍' }, comentarios: [{ autor: 'Zé Gordo', texto: 'O buraco era real. Tinha até placa.' }] },
-  { autor: 'Bruninho', horasAtras: 27, texto: 'Sorteio domingo às 8h45 em ponto. Quem chegar atrasado entra no time do Cabeção e ainda paga a água.', reacoes: { Tiãozinho: '😂', Careca: '😂', Dudu: '👍', Cabeção: '😡', 'Diguinho': '🍿' }, comentarios: [{ autor: 'Cabeção', texto: 'Meu time tá invicto há dois domingos, respeita.' }, { autor: 'Tiãozinho', texto: '8h30 eu já tô lá, com o colete escolhido.' }] },
-  { autor: 'Tiãozinho', horasAtras: 50, texto: 'Domingo tem clássico. Quem perder paga o churrasco, e o Careca já tá devendo dois.', reacoes: { Bruninho: '😂', 'Zé Gordo': '👍', Marquinhos: '😂', Fabinho: '🍿' }, comentarios: [{ autor: 'Careca', texto: 'Devo um. O outro foi empate e empate não paga.' }] },
-  { autor: 'Paredão', horasAtras: 120, texto: 'Três jogos sem tomar gol de fora da área. O Diguinho chuta pra fora desde 2019 e ainda pede pênalti.', reacoes: { 'Diguinho': '😡', Bruninho: '😂', Tiãozinho: '😂', Careca: '😂', Cabeção: '👍' }, comentarios: [{ autor: 'Diguinho', texto: 'Foi pênalti sim. Vou levar pro VAR do grupo.' }] },
+  { autor: 'Paulinho', horasAtras: 5, texto: 'Campo liberado pra domingo! Gramado tá um tapete. Roberto, sem desculpa de buraco dessa vez.', foto: true, reacoes: { Bruninho: '❤️', Paredão: '👍', Renatinho: '😮', Dudu: '❤️', 'Diguinho': '👍', Marquinhos: '👍' }, comentarios: [{ autor: 'Roberto', texto: 'O buraco era real. Tinha até placa.' }] },
+  { autor: 'Bruninho', horasAtras: 27, texto: 'Sorteio domingo às 8h45 em ponto. Quem chegar atrasado entra no time do Gonçalo e ainda paga a água.', reacoes: { Tiago: '😂', Carlos: '😂', Dudu: '👍', Gonçalo: '😡', 'Diguinho': '🍿' }, comentarios: [{ autor: 'Gonçalo', texto: 'Meu time tá invicto há dois domingos, respeita.' }, { autor: 'Tiago', texto: '8h30 eu já tô lá, com o colete escolhido.' }] },
+  { autor: 'Tiago', horasAtras: 50, texto: 'Domingo tem clássico. Quem perder paga o churrasco, e o Carlos já tá devendo dois.', reacoes: { Bruninho: '😂', Roberto: '👍', Marquinhos: '😂', Fabinho: '🍿' }, comentarios: [{ autor: 'Carlos', texto: 'Devo um. O outro foi empate e empate não paga.' }] },
+  { autor: 'Paredão', horasAtras: 120, texto: 'Três jogos sem tomar gol de fora da área. O Diguinho chuta pra fora desde 2019 e ainda pede pênalti.', reacoes: { 'Diguinho': '😡', Bruninho: '😂', Tiago: '😂', Carlos: '😂', Gonçalo: '👍' }, comentarios: [{ autor: 'Diguinho', texto: 'Foi pênalti sim. Vou levar pro VAR do grupo.' }] },
 ];
 
 // ---------------------------------------------------------------------------
