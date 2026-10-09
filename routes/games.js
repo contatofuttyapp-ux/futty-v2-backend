@@ -13,7 +13,7 @@ const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
 const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
-const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico } = require('../utils/registroDoSorteio');
+const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico, chaveDoJogador } = require('../utils/registroDoSorteio');
 
 const router = express.Router();
 
@@ -186,13 +186,14 @@ router.get(
       supabase.from('team_members').select('user_id').eq('team_id', game.teams.id).eq('ativo', false),
       // Gols por jogador (só relevante no nível 3 do resultado).
       game.resultado_nivel === 3
-        ? supabase.from('gols_jogadores').select('user_id, time, gols, users ( id, nome )').eq('game_id', game.id)
+        ? supabase.from('gols_jogadores').select('user_id, time, gols, convidado_nome, users ( id, nome )').eq('game_id', game.id)
         : Promise.resolve({ data: [] }),
       supabase.from('votes').select('id', { count: 'exact', head: true }).eq('game_id', game.id).eq('de_user_id', req.user.id),
     ]);
     const gp = gpResult.data;
     const inativos = new Set((inativosResult.data || []).map((m) => m.user_id));
-    const gols = (golsResult.data || []).map((g) => ({ user_id: g.user_id, time: g.time, gols: g.gols || 0, nome: g.users?.nome || null }));
+    // Convidado sem app não tem users (sem conta): o nome vem de convidado_nome, gravado no PATCH /resultado.
+    const gols = (golsResult.data || []).map((g) => ({ user_id: g.user_id || null, time: g.time, gols: g.gols || 0, nome: g.users?.nome || g.convidado_nome || null }));
     const votosCount = votosResult.count;
 
     // computeRatings precisa dos userIds vindos de gp — este fica sequencial.
@@ -426,12 +427,20 @@ router.patch(
     await supabase.from('gols_jogadores').delete().eq('game_id', game.id);
     if (nivel === 3 && Array.isArray(b.gols)) {
       const times = game.times_resultado?.times || [];
+      // Mesma chave do motor (id de quem tem conta, nome de quem é convidado sem app):
+      // os dois times caem no mesmo objeto sem um sobrescrever o outro.
       const timeDe = {};
-      (times[0]?.jogadores || []).forEach((j) => { timeDe[j.user_id] = 'A'; });
-      (times[1]?.jogadores || []).forEach((j) => { timeDe[j.user_id] = 'B'; });
+      (times[0]?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = 'A'; });
+      (times[1]?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = 'B'; });
       const rows = b.gols
-        .filter((g) => g && g.user_id)
-        .map((g) => ({ game_id: game.id, user_id: g.user_id, gols: Math.max(0, Number(g.gols) || 0), time: timeDe[g.user_id] || null }));
+        .map((g) => {
+          if (!g) return null;
+          const convidadoNome = g.user_id ? null : String(g.convidado_nome || '').trim();
+          if (!g.user_id && !convidadoNome) return null;
+          const chave = chaveDoJogador({ user_id: g.user_id || null, nome: convidadoNome });
+          return { game_id: game.id, user_id: g.user_id || null, convidado_nome: convidadoNome || null, gols: Math.max(0, Number(g.gols) || 0), time: timeDe[chave] || null };
+        })
+        .filter(Boolean);
       if (rows.length) {
         const { error: gErr } = await supabase.from('gols_jogadores').insert(rows);
         if (gErr) throw new HttpError(500, gErr.message);
