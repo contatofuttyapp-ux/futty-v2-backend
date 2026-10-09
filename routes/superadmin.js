@@ -32,10 +32,14 @@ router.get(
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const off = (page - 1) * limit;
 
+    // Ordem alfabética pelo nome (Rodada 30E, item 2): a colação do Postgres não é exatamente a do
+    // Intl.Collator('pt-BR') do frontend, por isso a página final é reordenada lá; aqui a ordem só
+    // precisa ser TOTAL (com 'id' de desempate) para nenhuma pessoa repetir ou pular entre páginas.
     const { data, count, error } = await supabase
       .from('users')
       .select('id, nome, email, brilhante_creditos, avatar_url, is_super_admin, created_at', { count: 'exact' })
-      .order('created_at', { ascending: false })
+      .order('nome', { ascending: true })
+      .order('id', { ascending: true })
       .range(off, off + limit - 1);
     if (error) throw new HttpError(500, error.message);
 
