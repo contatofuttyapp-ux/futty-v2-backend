@@ -41,8 +41,13 @@ function aplicarRostoPublico(tr, usersById, base) {
       j.avatar_url = ''; // sem 18 confirmados / sem dob / sem consentimento / convidado → silhueta
     }
   };
-  (tr.times || []).forEach((t) => (t.jogadores || []).forEach(resolver));
-  (tr.reservas || []).forEach(resolver);
+  const aplicar = (r) => {
+    (r.times || []).forEach((t) => (t.jogadores || []).forEach(resolver));
+    (r.reservas || []).forEach(resolver);
+  };
+  aplicar(tr);
+  // O sorteio original de um jogo ajustado (utils/registroDoSorteio.js) também sai no link público: mesma regra.
+  if (tr.registro?.original) aplicar(tr.registro.original);
   return tr;
 }
 

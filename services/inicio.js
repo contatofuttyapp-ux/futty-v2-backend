@@ -281,7 +281,9 @@ async function obterTeams(userId) {
 const ULTIMOS_POR_TIME = 3;
 // Margem para os encerrados que a tela descarta (cancelados) não comerem as vagas dos 3 que ela mostra.
 const MARGEM_ULTIMOS = 8;
-const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, game_players ( user_id, confirmado )';
+// `seed` sai do JSON do resultado (só ela, não os times inteiros): sem seed, os times foram montados à mão e o card
+// diz "Ver times", não "Ver sorteio".
+const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, seed:times_resultado->seed, game_players ( user_id, confirmado )';
 
 async function jogosDoInicio(teamIds) {
   const agoraIso = new Date().toISOString();
@@ -373,6 +375,7 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
       fuso: normalizarFuso(team.fuso),
       ausente_proximo: ausenteByTeam[g.team_id] || false,
       eu_jogo: !soOrganiza.has(g.team_id),
+      montado_a_mao: !!g.sorteio_realizado && g.seed == null,
     };
   });
 

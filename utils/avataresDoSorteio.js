@@ -21,11 +21,15 @@ function comAvataresAtuais(tr, avatarPorUsuario) {
     const hoje = avatarPorUsuario.get(j.user_id);
     return hoje ? { ...j, avatar_url: hoje } : j;
   };
-  return {
-    ...tr,
-    times: (tr.times || []).map((t) => ({ ...t, jogadores: (t.jogadores || []).map(atualizar) })),
-    ...(Array.isArray(tr.reservas) ? { reservas: tr.reservas.map(atualizar) } : {}),
-  };
+  const trocar = (r) => ({
+    ...r,
+    times: (r.times || []).map((t) => ({ ...t, jogadores: (t.jogadores || []).map(atualizar) })),
+    ...(Array.isArray(r.reservas) ? { reservas: r.reservas.map(atualizar) } : {}),
+  });
+  const novo = trocar(tr);
+  // O que a roleta deu antes de um ajuste (utils/registroDoSorteio.js) é a mesma gente: a mesma foto de hoje.
+  if (tr.registro?.original) novo.registro = { ...tr.registro, original: trocar(tr.registro.original) };
+  return novo;
 }
 
 module.exports = { comAvataresAtuais };

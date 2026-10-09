@@ -13,8 +13,15 @@ const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
 const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
+const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico } = require('../utils/registroDoSorteio');
 
 const router = express.Router();
+
+/** Quem fez a ação, com o nome de guerra DE AGORA — o selo grava este nome e não muda se a pessoa o trocar depois. */
+async function quemFez(userId) {
+  const { data } = await supabase.from('users').select('nome, nome_jogador').eq('id', userId).maybeSingle();
+  return { id: userId, nome: data?.nome_jogador || data?.nome || null };
+}
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const NOMES_TIMES = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
@@ -310,6 +317,9 @@ router.get(
       const colher = (j) => { if (j && j.user_id) ids.add(j.user_id); };
       (game.times_resultado.times || []).forEach((t) => (t.jogadores || []).forEach(colher));
       (game.times_resultado.reservas || []).forEach(colher);
+      const original = game.times_resultado.registro?.original;
+      (original?.times || []).forEach((t) => (t.jogadores || []).forEach(colher));
+      (original?.reservas || []).forEach(colher);
       const usersById = new Map();
       if (ids.size) {
         // Se a coluna mostrar_rosto_publico ainda não existir (DDL por correr), a query
@@ -324,6 +334,7 @@ router.get(
       // privacidade abaixo decide depois se ela pode aparecer.
       game.times_resultado = comAvataresAtuais(game.times_resultado, new Map([...usersById].map(([id, u]) => [id, u.avatar_url || null])));
       aplicarRostoPublico(game.times_resultado, usersById, `${req.protocol}://${req.get('host')}`);
+      if (game.times_resultado.registro) game.times_resultado = { ...game.times_resultado, registro: registroPublico(game.times_resultado.registro) };
     }
 
     res.json({
@@ -598,6 +609,7 @@ router.post(
       manual: true, // sem seed → sem cerimónia/replay (o frontend gateia por seed)
       times: times.map(nomear),
       reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
+      registro: registroDeMontagem(await quemFez(req.user.id), new Date().toISOString()),
     };
 
     // Status só vira "em_curso" se a hora do jogo já passou — sorteio
@@ -740,6 +752,7 @@ router.post(
       avisos,
       times,
       reservas: sorteio.reservas,
+      registro: registroDeSorteio(await quemFez(req.user.id), new Date().toISOString()),
     };
 
     // Status só vira "em_curso" se a hora do jogo já passou — sorteio
@@ -816,9 +829,14 @@ router.patch(
       if (!confirmados.has(id)) throw new HttpError(400, 'Todos os jogadores devem estar confirmados no jogo.');
     }
 
+    // Do corpo só valem os times e as reservas: o registro (quem sorteou, o original, os ajustes) é do motor —
+    // um app que mandasse o resultado sem ele apagaria a marca do ajuste.
+    const novo = resultadoAjustado(game.times_resultado, { times: tr.times, reservas }, await quemFez(req.user.id), new Date().toISOString());
+    novo.total_jogadores = tr.times.reduce((s, t) => s + (t.jogadores || []).length, 0);
+
     const { data: updated, error } = await supabase
       .from('games')
-      .update({ times_resultado: tr, num_times: tr.times.length })
+      .update({ times_resultado: novo, num_times: novo.times.length })
       .eq('id', game.id)
       .select('times_resultado')
       .single();
