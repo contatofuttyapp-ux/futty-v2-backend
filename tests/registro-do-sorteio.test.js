@@ -170,6 +170,24 @@ test('POST /times-manuais grava "montado à mão por" quem montou', async (t) =>
   assert.deepEqual(tr.registro.por, { id: DONO, nome: 'Chavo' });
 });
 
+test('montar à mão por cima de um sorteio com convidados: grava e serve só o que foi escolhido (jogo e link público)', async (t) => {
+  const g = (nome) => ({ user_id: null, convidado: true, nome, rating: 3 });
+  const comConvidados = { ...sorteado(), times: [{ nome: 'Time A', jogadores: [j(A, 'Magrão'), j(B, 'Canhotinha')] }, { nome: 'Time B', jogadores: [j(C, 'Zé'), g('Convidado Teste'), g('Convidado Dois')] }], reservas: [j(D, 'Gonçalo')] };
+  const { carregados, tabelas } = cenario({ sorteio_realizado: true, times_resultado: comConvidados });
+  const pedir = subir([carregados['routes/games']], t);
+  const corpo = { times: [{ nome: 'Time Ouro', jogadores: [{ user_id: A, nome: 'Magrão' }, { user_id: B, nome: 'Canhotinha' }] }, { nome: 'Time Roxo', jogadores: [{ user_id: C, nome: 'Zezinho' }, { user_id: D, nome: 'Gonçalo' }] }] };
+  const r = await pedir('POST', `/api/games/${JOGO}/times-manuais`, corpo, DONO);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const semConvidado = (tr) => ![...tr.times.flatMap((x) => x.jogadores), ...(tr.reservas || [])].some((p) => !p.user_id || p.convidado);
+  assert.ok(semConvidado(tabelas.games[0].times_resultado), 'o gravado não herda convidado do resultado anterior');
+  assert.deepEqual(tabelas.games[0].times_resultado.reservas, [], 'nem reserva herdada');
+  const jogo = await pedir('GET', `/api/games/${JOGO}`, null, DONO);
+  assert.ok(semConvidado(jogo.json.game.times_resultado), 'a tela do jogo recebe 2 x 2, sem convidado');
+  const publico = await pedir('GET', `/api/p/${JOGO}`, null);
+  assert.ok(semConvidado(publico.json.times_resultado), 'o link público também');
+  assert.equal(publico.json.times_resultado.registro.origem, 'manual');
+});
+
 test('GET /api/p/: o registro sai sem ids e o rosto do ORIGINAL segue a mesma regra (sem consentimento → silhueta)', async (t) => {
   const comFoto = (id, nome) => ({ ...j(id, nome), avatar_url: 'https://x.supabase.co/storage/v1/object/public/avatars/public/a.webp' });
   const tr = sorteado();
