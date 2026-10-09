@@ -609,7 +609,7 @@ router.post(
       manual: true, // sem seed → sem cerimónia/replay (o frontend gateia por seed)
       times: times.map(nomear),
       reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
-      registro: registroDeMontagem(await quemFez(req.user.id), new Date().toISOString()),
+      registro: registroDeMontagem(await quemFez(req.user.id), new Date().toISOString(), game.times_resultado),
     };
 
     // Status só vira "em_curso" se a hora do jogo já passou — sorteio
@@ -752,7 +752,7 @@ router.post(
       avisos,
       times,
       reservas: sorteio.reservas,
-      registro: registroDeSorteio(await quemFez(req.user.id), new Date().toISOString()),
+      registro: registroDeSorteio(await quemFez(req.user.id), new Date().toISOString(), game.times_resultado),
     };
 
     // Status só vira "em_curso" se a hora do jogo já passou — sorteio

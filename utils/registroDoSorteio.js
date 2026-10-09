@@ -44,14 +44,25 @@ function registroDe(tr) {
   return { origem: tr.seed != null ? 'sorteio' : 'manual', por: null, em: null, ajustes: [] };
 }
 
-/** Registro de um sorteio novo, feito por `quem` agora. */
-function registroDeSorteio(quem, agora) {
-  return { origem: 'sorteio', por: quem || null, em: agora, ajustes: [] };
+/**
+ * Quantos sorteios este jogo já teve. "Sortear de novo" apaga os times de antes; sem esta conta, o 2º sorteio
+ * (feito porque o 1º não agradou) passaria pelo 1º. A conta atravessa montagens à mão e ajustes. Resultado antigo,
+ * sem a conta: com seed foi 1 sorteio, sem seed nenhum.
+ */
+function quantosSorteios(tr) {
+  if (Number.isInteger(tr?.registro?.sorteios)) return tr.registro.sorteios;
+  return tr?.seed != null ? 1 : 0;
 }
 
-/** Registro de times montados à mão desde o início (sem roleta), por `quem` agora. */
-function registroDeMontagem(quem, agora) {
-  return { origem: 'manual', por: quem || null, em: agora, ajustes: [] };
+/** Registro de um sorteio novo, feito por `quem` agora; `anterior` é o resultado que ele substitui. */
+function registroDeSorteio(quem, agora, anterior = null) {
+  const numero = quantosSorteios(anterior) + 1;
+  return { origem: 'sorteio', por: quem || null, em: agora, ajustes: [], sorteio_numero: numero, sorteios: numero };
+}
+
+/** Registro de times montados à mão desde o início (sem roleta), por `quem` agora. A conta dos sorteios fica. */
+function registroDeMontagem(quem, agora, anterior = null) {
+  return { origem: 'manual', por: quem || null, em: agora, ajustes: [], sorteios: quantosSorteios(anterior) };
 }
 
 /**
@@ -87,5 +98,5 @@ function registroPublico(registro) {
 }
 
 module.exports = {
-  chaveDoJogador, mesmaDistribuicao, registroDe, registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico,
+  chaveDoJogador, mesmaDistribuicao, quantosSorteios, registroDe, registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico,
 };

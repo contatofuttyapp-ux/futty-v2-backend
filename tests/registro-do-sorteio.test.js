@@ -169,6 +169,37 @@ test('GET /api/p/: o registro sai sem ids e o rosto do ORIGINAL segue a mesma re
   assert.equal(reg.original.times[0].jogadores[0].avatar_url, '', 'Magrão não liberou o rosto: silhueta também no original');
 });
 
+// ─── o contador de sorteios ("2º sorteio deste jogo") ─────────────────────────
+test('contador: o 1º sorteio é o nº 1; sortear de novo vira o nº 2; resultado antigo com seed conta como 1', () => {
+  const { quantosSorteios } = require('../utils/registroDoSorteio');
+  const primeiro = registroDeSorteio({ id: DONO, nome: 'Chavo' }, AGORA, null);
+  assert.equal(primeiro.sorteio_numero, 1);
+  const segundo = registroDeSorteio({ id: DONO, nome: 'Chavo' }, AGORA, { seed: 1, registro: primeiro });
+  assert.equal(segundo.sorteio_numero, 2);
+  assert.equal(registroDeSorteio(null, AGORA, { seed: 9, times: [] }).sorteio_numero, 2, 'antigo com seed = já houve 1');
+  assert.equal(registroDeSorteio(null, AGORA, { manual: true, times: [] }).sorteio_numero, 1, 'antigo sem seed = nenhum sorteio antes');
+  assert.equal(quantosSorteios(null), 0);
+});
+
+test('contador: montar à mão e ajustar não zeram a conta — o sorteio seguinte continua dela', () => {
+  const s2 = { seed: 1, times: sorteado().times, reservas: [], registro: registroDeSorteio(null, AGORA, { seed: 1 }) };
+  const mao = registroDeMontagem(null, AGORA, s2);
+  assert.equal(mao.sorteios, 2);
+  const ajustado = resultadoAjustado(s2, { times: [{ nome: 'Time A', jogadores: [j(A, 'Magrão')] }, { nome: 'Time B', jogadores: [j(B, 'Canhotinha'), j(C, 'Zé'), j(D, 'Gonçalo')] }], reservas: [] }, null, AGORA);
+  assert.equal(ajustado.registro.sorteio_numero, 2, 'ajustar não muda o número do sorteio');
+  assert.equal(registroDeSorteio(null, AGORA, { times: [], registro: mao }).sorteio_numero, 3);
+});
+
+test('POST /sortear duas vezes: o segundo resultado diz que é o 2º sorteio', async (t) => {
+  const { carregados } = cenario();
+  const pedir = subir([carregados['routes/games']], t);
+  const um = await pedir('POST', `/api/games/${JOGO}/sortear`, {}, DONO);
+  assert.equal(um.json.game.times_resultado.registro.sorteio_numero, 1);
+  const dois = await pedir('POST', `/api/games/${JOGO}/sortear`, {}, DONO);
+  assert.equal(dois.status, 200, JSON.stringify(dois.json));
+  assert.equal(dois.json.game.times_resultado.registro.sorteio_numero, 2);
+});
+
 test('Início: sem seed no resultado (times à mão) o card sabe — é o "Ver times"', async () => {
   const { carregados } = carregar({
     teams: [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc' }],
