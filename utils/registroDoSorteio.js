@@ -1,6 +1,6 @@
 // Futty v2.0 — O registro de quem fez os times de um jogo, dentro de `times_resultado.registro`.
 //
-// "Sorteio justo, na frente de todo mundo" só é verdade se a tela disser quando os times NÃO saíram
+// O sorteio "na frente de todo mundo" só é verdade se a tela disser quando os times NÃO saíram
 // (só) da roleta. Por isso o motor anota, no momento de cada ação, quem a fez — e só o motor escreve
 // aqui: o que o app manda no corpo de um ajuste é ignorado (senão bastava apagar o registro ao salvar).
 //
