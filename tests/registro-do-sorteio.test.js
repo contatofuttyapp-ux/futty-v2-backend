@@ -144,6 +144,21 @@ test('PATCH /times: o registro que o app manda é ignorado — o motor guarda o 
   assert.deepEqual(tabelas.games[0].times_resultado.registro.original.times, sorteado().times, 'gravado no banco, não só na resposta');
 });
 
+test('PATCH /times: convidado sem app repetido (mesmo nome, sem id) é recusado; dois convidados diferentes passam', async (t) => {
+  const g = (nome) => ({ user_id: null, convidado: true, nome, rating: 3 });
+  const comConvidados = { ...sorteado(), times: [{ nome: 'Time A', jogadores: [j(A, 'Magrão'), g('Convidado Teste')] }, { nome: 'Time B', jogadores: [j(C, 'Zé'), g('Convidado Dois')] }] };
+  const { carregados } = cenario({ sorteio_realizado: true, times_resultado: comConvidados });
+  const pedir = subir([carregados['routes/games']], t);
+  const repetido = await pedir('PATCH', `/api/games/${JOGO}/times`, { times_resultado: { times: [{ nome: 'Time A', jogadores: [j(A, 'Magrão'), g('Convidado Dois')] }, { nome: 'Time B', jogadores: [j(C, 'Zé'), g(' convidado dois ')] }], reservas: [] } }, DONO);
+  assert.equal(repetido.status, 400);
+  assert.match(repetido.json.error, /O convidado "Convidado Dois" aparece duas vezes nos times\./);
+  const trocou = await pedir('PATCH', `/api/games/${JOGO}/times`, { times_resultado: { times: [{ nome: 'Time A', jogadores: [j(A, 'Magrão'), g('Convidado Dois')] }, { nome: 'Time B', jogadores: [j(C, 'Zé'), g('Convidado Teste')] }], reservas: [] } }, DONO);
+  assert.equal(trocou.status, 200, JSON.stringify(trocou.json));
+  const nomes = trocou.json.times_resultado.times.map((x) => x.jogadores.map((p) => p.nome));
+  assert.deepEqual(nomes, [['Magrão', 'Convidado Dois'], ['Zé', 'Convidado Teste']], 'os dois convidados, cada um num time — nenhum some, nenhum duplica');
+  assert.equal(trocou.json.times_resultado.registro.ajustes.length, 1, 'a troca dos convidados conta como ajuste');
+});
+
 test('POST /times-manuais grava "montado à mão por" quem montou', async (t) => {
   const { carregados } = cenario();
   const corpo = { times: [{ nome: 'Time Ouro', jogadores: [{ user_id: A, nome: 'Magrão' }, { user_id: B, nome: 'Canhotinha' }] }, { nome: 'Time Roxo', jogadores: [{ user_id: C, nome: 'Zezinho' }, { user_id: null, nome: 'Beto', convidado: true }] }] };

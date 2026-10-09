@@ -813,10 +813,18 @@ router.patch(
       }
     }
 
-    // Recolhe todos os jogadores (times + reservas) e valida duplicados.
+    // Recolhe todos os jogadores (times + reservas) e valida duplicados. Quem tem conta, pelo id; o convidado sem app
+    // (sem id), pelo nome — é por ele que o registro do ajuste o reconhece (utils/registroDoSorteio.js), e dois "Beto"
+    // no mesmo resultado viram uma pessoa só nas trocas.
     const todos = [...tr.times.flatMap((t) => t.jogadores || []), ...reservas];
     const ids = todos.map((j) => j.user_id).filter(Boolean);
     if (new Set(ids).size !== ids.length) throw new HttpError(400, 'Há jogadores repetidos entre os times.');
+    const nomesDeConvidados = todos.filter((j) => j && !j.user_id).map((j) => String(j.nome || '').trim().toLowerCase());
+    const repetido = nomesDeConvidados.find((n, i) => nomesDeConvidados.indexOf(n) !== i);
+    if (repetido != null) {
+      const nome = todos.find((j) => j && !j.user_id && String(j.nome || '').trim().toLowerCase() === repetido)?.nome || repetido;
+      throw new HttpError(400, `O convidado "${String(nome).trim()}" aparece duas vezes nos times.`);
+    }
 
     // Todos têm de ser confirmados deste jogo.
     const { data: gp } = await supabase
