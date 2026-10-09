@@ -6,6 +6,8 @@
 // (mulberry32) semeado — a MESMA seed reproduz o MESMO resultado e a MESMA sequência
 // de picks. A seed persiste dentro de times_resultado → replay EXACTO da animação.
 
+const { RATING_DEFAULT } = require('./helpers');
+
 /** RNG determinístico (mulberry32) — pequeno, rápido e suficiente para o sorteio. */
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -108,12 +110,14 @@ function executarSorteio(confirmados, jogadoresPorTime, opts = {}) {
   const seed = Number.isInteger(opts.seed) ? opts.seed : Math.floor(Math.random() * 2147483647);
   const rng = mulberry32(seed);
 
-  // Convidados sem app: só nome, sem conta — vivem apenas neste resultado.
+  // Convidados sem app: só nome, sem conta — vivem apenas neste resultado. Sem histórico nenhum, entram com a
+  // MESMA nota de quem tem conta e ainda não recebeu voto (RATING_DEFAULT): com 0 caíam quase sempre na reserva,
+  // e o convidado não é pior do que um membro novo só por não ter o app.
   const convidados = (opts.convidados || [])
     .map((n) => String(n).trim())
     .filter(Boolean)
     .slice(0, 28)
-    .map((nome, i) => ({ user_id: null, convidado: true, nome, rating: 0, goleiro: false, cabeca_chave: false, avatar_url: null }));
+    .map((nome) => ({ user_id: null, convidado: true, nome, rating: RATING_DEFAULT, goleiro: false, cabeca_chave: false, avatar_url: null }));
   const todos = confirmados.concat(convidados);
 
   // VARIEDADE (modo B) — ruído derivado da SEED: cada rating leva uma perturbação
