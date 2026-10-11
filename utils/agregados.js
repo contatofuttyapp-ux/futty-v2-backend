@@ -1,15 +1,16 @@
 // Futty v2.0 — Agregados VIVOS de desempenho, calculados SEMPRE da fonte.
-// UMA só verdade no app: golos (gols_jogadores) · vitórias (times_resultado A/B ×
-// time_vencedor) · artilharia (games.artilheiro_user_id) · destaques (games.destaque_user_id).
+// UMA só verdade no app: golos (gols_jogadores) · vitórias (times_resultado ×
+// campeao_time_index) · artilharia (games.artilheiro_user_id) · destaques (games.destaque_user_id).
 // Conta jogos NORMAIS, MANUAIS e HISTÓRICOS por igual. As colunas legado em team_members
 // (gols/vitorias/artilharia/destaque) são VESTIGIAIS — ninguém as lê (ver SPEC-EQUIPAS).
 const { supabase } = require('./db');
+const { jogadoresDoCampeao } = require('./resultadoDoJogo');
 
 // Colunas de `games` que estes agregados precisam. Exportadas porque quem já lê a
 // tabela (o perfil do jogador lê-a para o histórico) manda as linhas em `opts.jogos`
 // em vez de deixar a mesma leitura acontecer duas vezes — `times_resultado` é JSON
 // gordo e viajava a dobrar.
-const COLUNAS_JOGOS = 'id, times_resultado, resultado_nivel, time_vencedor, artilheiro_user_id, destaque_user_id';
+const COLUNAS_JOGOS = 'id, times_resultado, resultado_nivel, campeao_time_index, time_vencedor, artilheiro_user_id, destaque_user_id';
 
 /** Mapas {user_id: n} dos 4 eixos, para um time. Devolve também os gameIds.
  * @param {object} [opts]
@@ -28,11 +29,8 @@ async function agregadosDaEquipa(teamId, { jogos } = {}) {
   for (const g of gameRows || []) {
     if (g.artilheiro_user_id) artilhariaMap[g.artilheiro_user_id] = (artilhariaMap[g.artilheiro_user_id] || 0) + 1;
     if (g.destaque_user_id) destaquesMap[g.destaque_user_id] = (destaquesMap[g.destaque_user_id] || 0) + 1;
-    if (g.resultado_nivel >= 1 && (g.time_vencedor === 'A' || g.time_vencedor === 'B') && g.times_resultado) {
-      const idx = g.time_vencedor === 'A' ? 0 : 1;
-      const js = g.times_resultado.times?.[idx]?.jogadores || [];
-      for (const j of js) if (j.user_id) vitoriasMap[j.user_id] = (vitoriasMap[j.user_id] || 0) + 1;
-    }
+    // Vitória = estar no time campeão (campeao_time_index), com 2, 3 ou 4 times — o mesmo dado que a Resenha e o perfil leem.
+    for (const j of jogadoresDoCampeao(g)) if (j.user_id) vitoriasMap[j.user_id] = (vitoriasMap[j.user_id] || 0) + 1;
   }
   return { golsMap, vitoriasMap, artilhariaMap, destaquesMap, gameIds };
 }

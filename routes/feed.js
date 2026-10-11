@@ -18,6 +18,7 @@ const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
 const { fusoDoTime, horaNoFuso, lerComFuso } = require('../utils/fuso');
+const { quantosTimes, escolhaDoCorpo, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 
 const router = express.Router();
 
@@ -635,13 +636,12 @@ router.patch(
     const b = req.body || {};
     const patch = {};
 
-    if ('campeao_time_index' in b) {
-      if (b.campeao_time_index === null) patch.campeao_time_index = null;
-      else {
-        const idx = parseInt(b.campeao_time_index, 10);
-        if (!Number.isFinite(idx) || idx < 0) throw new HttpError(400, 'campeao_time_index inválido.');
-        patch.campeao_time_index = idx;
-      }
+    if ('campeao_time_index' in b || b.empate === true) {
+      // Quem ganhou passa pela MESMA regra do PATCH /api/games/:id/resultado: o campeão é a verdade e o `time_vencedor` sai dele.
+      // Dizer o campeão por aqui desfaz o placar de antes — placar e vencedor nunca são escolhas separadas.
+      const escolha = escolhaDoCorpo(b);
+      const decisao = decidirResultado({ nTimes: quantosTimes(game.times_resultado), campeaoIdx: escolha.campeaoIdx, empate: escolha.empate });
+      Object.assign(patch, { campeao_time_index: decisao.campeao_time_index, time_vencedor: decisao.time_vencedor, resultado_nivel: decisao.resultado_nivel, placar_a: null, placar_b: null });
     }
     if ('campeao_foto_url' in b) {
       if (b.campeao_foto_url && !urlDeMidiaValida(b.campeao_foto_url, req)) {

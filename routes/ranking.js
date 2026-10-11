@@ -13,6 +13,7 @@ const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
+const { jogadoresDoCampeao } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 
 const router = express.Router();
 
@@ -152,9 +153,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
 
 /** O jogador esteve no time campeão deste jogo? (times_resultado + campeao_time_index) */
 function noTimeCampeao(g, userId) {
-  if (g.campeao_time_index == null) return false;
-  const t = g.times_resultado?.times?.[g.campeao_time_index];
-  return !!t && Array.isArray(t.jogadores) && t.jogadores.some((j) => j.user_id === userId);
+  return jogadoresDoCampeao(g).some((j) => j.user_id === userId);
 }
 
 /**
@@ -246,7 +245,7 @@ router.get(
     const jogosP = Promise.resolve(
       supabase
         .from('games')
-        .select(`${COLUNAS_JOGOS}, data, status, cancelado, campeao_time_index, rodada_user_id`)
+        .select(`${COLUNAS_JOGOS}, data, status, cancelado, rodada_user_id`)
         .eq('team_id', team.id)
     );
     // O ranking atravessa as ondas 2 e 3 (é a parte mais pesada) — daí a medida própria.
