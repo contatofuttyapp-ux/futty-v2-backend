@@ -69,6 +69,28 @@ test('o calendário: 3, 4 e 8 times = 3, 6 e 28 jogos de grupo, cada par uma vez
   }
 });
 
+test('3 e 8 times, do primeiro ao último jogo: a final nasce no último jogo e o campeão sai dela', () => {
+  for (const n of [3, 8]) {
+    const nomes = Array.from({ length: n }, (_, i) => `Time ${i + 1}`);
+    const camp = campeonato(nomes);
+    const forca = (id) => n - camp.times.findIndex((t) => t.id === id); // o Time 1 é o mais forte
+    const grupos = camp.confrontos.filter((c) => c.fase === 'grupos');
+    grupos.forEach((c, i) => {
+      assert.equal(final(camp).time_a_id, null, `${n} times: a final espera até o último jogo (jogo ${i + 1} de ${grupos.length})`);
+      const [pa, pb] = forca(c.time_a_id) > forca(c.time_b_id) ? [1, 0] : [0, 1];
+      store.aplicarResultado(camp, c.id, pa, pb);
+    });
+    assert.equal(grupos.length, (n * (n - 1)) / 2);
+    assert.deepEqual(finalistas(camp), ['Time 1', 'Time 2'], `${n} times: 1º × 2º da tabela`);
+    assert.equal(store.enriquecer(camp).pendencia, null);
+    assert.deepEqual(ordem(camp), nomes, 'a tabela segue a força, sem empate');
+    store.aplicarResultado(camp, final(camp).id, 0, 1); // o 2º ganha a final
+    assert.equal(camp.estado, 'terminado');
+    assert.equal(nomeDe(camp, camp.campeao_time_id), 'Time 2');
+    assert.deepEqual(store.podio(camp).map((p) => [p.pos, p.time.nome]), [[1, 'Time 2'], [2, 'Time 1'], [3, 'Time 3']]);
+  }
+});
+
 test('com 2 times o formato não existe: o motor recusa; formato desconhecido cai nos pontos corridos', () => {
   assert.throws(() => campeonato(['A', 'B']), /pelo menos 3 times/);
   assert.equal(store.lerFormato('pontos_final'), 'pontos_final');
