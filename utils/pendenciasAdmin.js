@@ -7,12 +7,14 @@
 // "Jogo sem presença aberta" só é pendência quando o jogo está perto: com o jogo daqui a três semanas, presença fechada é o normal.
 const JANELA_DA_PRESENCA_MS = 7 * 24 * 3600 * 1000;
 
+const { temResultado, resultadoJaAbriu } = require('./resultadoDoJogo');
+
 const cancelado = (g) => !!g?.cancelado || g?.status === 'cancelado';
 
 /**
  * As pendências de UM time, a partir do que o motor leu dele:
  *   pedidos    nº de pedidos de entrada pendentes
- *   jogos      os jogos do time (futuros e passados recentes): { id, data, status, cancelado, resultado_nivel, rsvp_aberto, rsvp_fechado }
+ *   jogos      os jogos do time (futuros e passados recentes): { id, data, status, cancelado, campeao_time_index, time_vencedor, rsvp_aberto, rsvp_fechado }
  *   denuncias  nº de denúncias à espera do admin (fila + escaladas)
  * Devolve { pedidos, presenca: { game_id, data } | null, resultado: { game_id, data } | null, denuncias, total }.
  */
@@ -26,9 +28,10 @@ function pendenciasDoTime({ pedidos = 0, jogos = [], denuncias = 0 }, agora = Da
     ? { game_id: proximo.id, data: proximo.data }
     : null;
 
-  // O ÚLTIMO jogo que já aconteceu, sem resultado nenhum lançado.
+  // O ÚLTIMO jogo que já começou, sem campeão nem empate marcado — o mesmo critério do card "Quem ganhou?" do Início (nível, placar e gols
+  // sozinhos não são resultado). Só vale depois que o resultado abre (5 minutos depois do início): antes disso não há o que lançar.
   const ultimo = validos.filter((g) => ms(g) < agora).sort((a, b) => ms(b) - ms(a))[0] || null;
-  const resultado = ultimo && !(ultimo.resultado_nivel > 0) ? { game_id: ultimo.id, data: ultimo.data } : null;
+  const resultado = ultimo && resultadoJaAbriu(ultimo, agora) && !temResultado(ultimo) ? { game_id: ultimo.id, data: ultimo.data } : null;
 
   const p = Math.max(0, pedidos | 0);
   const d = Math.max(0, denuncias | 0);

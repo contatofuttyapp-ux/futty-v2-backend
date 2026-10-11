@@ -24,8 +24,8 @@ const em = (dias, base = Date.now()) => new Date(base + dias * DIA).toISOString(
 
 test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo em dia', () => {
   const jogos = [
-    { id: 'passado-1', data: em(-10, AGORA), resultado_nivel: 2 },
-    { id: 'passado-2', data: em(-3, AGORA), resultado_nivel: 0 },
+    { id: 'passado-1', data: em(-10, AGORA), campeao_time_index: 1 },
+    { id: 'passado-2', data: em(-3, AGORA), campeao_time_index: null },
     { id: 'cancelado', data: em(-1, AGORA), cancelado: true },
     { id: 'proximo', data: em(2, AGORA), rsvp_aberto: false },
   ];
@@ -35,7 +35,7 @@ test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo
     presenca: { game_id: 'proximo', data: em(2, AGORA) },
     resultado: { game_id: 'passado-2', data: em(-3, AGORA) },
   });
-  const emDia = pendenciasDoTime({ jogos: [{ id: 'a', data: em(-3, AGORA), resultado_nivel: 1 }, { id: 'b', data: em(2, AGORA), rsvp_aberto: true }] }, AGORA);
+  const emDia = pendenciasDoTime({ jogos: [{ id: 'a', data: em(-3, AGORA), campeao_time_index: 0 }, { id: 'b', data: em(2, AGORA), rsvp_aberto: true }] }, AGORA);
   assert.equal(emDia.total, 0);
   assert.equal(pendenciasDoTime({}, AGORA).total, 0, 'time sem jogo nenhum: nada pendente');
 });
@@ -67,7 +67,7 @@ function mundoInicio(t, tabelasExtra = {}) {
     ],
     team_join_requests: [{ team_id: T1, user_id: FORA, status: 'pending' }],
     games: [
-      { id: 'g-passado', team_id: T1, data: em(-2), status: 'agendado', resultado_nivel: 0 },
+      { id: 'g-passado', team_id: T1, data: em(-2), status: 'agendado', campeao_time_index: null, resultado_nivel: 0 },
       { id: 'g-proximo', team_id: T1, data: em(3), status: 'agendado', rsvp_aberto: false },
     ],
     ...tabelasExtra,

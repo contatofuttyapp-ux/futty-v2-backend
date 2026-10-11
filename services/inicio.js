@@ -229,7 +229,7 @@ async function contarPedidosPendentes(teams) {
 // Para cada time em que a pessoa é admin: as pendências (utils/pendenciasAdmin.js) — pedidos de entrada, o próximo jogo sem
 // presença aberta, o último sem resultado, denúncias à espera. Três leituras em paralelo (pedidos, jogos, denúncias), fora do
 // caminho crítico do Início. Sem time de admin, lista vazia (a tela não mostra o card).
-const JOGO_PENDENCIA_COLS = 'id, team_id, data, status, cancelado, resultado_nivel, rsvp_aberto, rsvp_fechado';
+const JOGO_PENDENCIA_COLS = 'id, team_id, data, status, cancelado, campeao_time_index, time_vencedor, sorteio_realizado, rsvp_aberto, rsvp_fechado, local';
 const ULTIMOS_PARA_PENDENCIA = 4; // o último que aconteceu, com folga para os cancelados
 
 async function obterSeuTime(teams) {
@@ -246,17 +246,34 @@ async function obterSeuTime(teams) {
   ]);
   const pedidosPorTime = {};
   for (const p of pedidos.data || []) pedidosPorTime[p.team_id] = (pedidosPorTime[p.team_id] || 0) + 1;
-  return admin.map((t, i) => {
+  const montados = admin.map((t, i) => {
     const jogos = [...(proximos.data || []).filter((g) => g.team_id === t.id), ...(passados[i]?.data || [])];
     const casos = (denuncias[i] || []).filter((c) => c.estado === 'fila' || c.estado === 'escalada');
+    const pendencias = pendenciasDoTime({ pedidos: pedidosPorTime[t.id] || 0, jogos, denuncias: casos.length });
     return {
       team_id: t.id,
       slug: t.slug,
       nome: t.nome,
       fuso: normalizarFuso(t.fuso),
-      pendencias: pendenciasDoTime({ pedidos: pedidosPorTime[t.id] || 0, jogos, denuncias: casos.length }),
+      pendencias,
+      // O card "Quem ganhou?" (preenchido abaixo): o jogo sorteado, já com o resultado aberto, sem campeão nem empate.
+      quem_ganhou: null,
+      _jogoDoResultado: jogos.find((g) => g.id === pendencias.resultado?.game_id && g.sorteio_realizado) || null,
     };
   });
+  // Os nomes dos times só se leem (uma ida, sem as listas de jogadores) para quem tem o card: o JSON dos times do sorteio é gordo.
+  const comCard = montados.filter((m) => m._jogoDoResultado);
+  if (comCard.length) {
+    const { data: linhas } = await supabase.from('games').select('id, times_resultado').in('id', comCard.map((m) => m._jogoDoResultado.id));
+    const timesDe = new Map((linhas || []).map((l) => [l.id, l.times_resultado?.times || []]));
+    for (const m of comCard) {
+      const times = timesDe.get(m._jogoDoResultado.id) || [];
+      if (times.length >= 2) {
+        m.quem_ganhou = { game_id: m._jogoDoResultado.id, data: m._jogoDoResultado.data, local: m._jogoDoResultado.local || null, times: times.map((tm) => ({ nome: tm?.nome || null })) };
+      }
+    }
+  }
+  return montados.map(({ _jogoDoResultado, ...resto }) => resto);
 }
 
 async function obterTeams(userId) {
