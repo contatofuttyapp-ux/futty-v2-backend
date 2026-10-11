@@ -15,13 +15,14 @@ const router = express.Router();
 const MIN_TIMES = 2;
 const MAX_TIMES = 8;
 
-// Anexa a classificação (pontos) e o campeão resolvido ao payload.
-function enriquecer(camp) {
-  const campeao = camp.campeao_time_id ? camp.times.find((t) => t.id === camp.campeao_time_id) || null : null;
-  const out = { ...camp, campeao };
-  if (camp.formato === 'pontos') out.classificacao = store.classificacao(camp);
-  return out;
-}
+// O mínimo muda com o formato: "Todos contra todos + final" pede 3 times (com 2 ele nem aparece nas telas).
+const minTimesDe = (formato) => store.MIN_TIMES_DO_FORMATO[formato] || MIN_TIMES;
+const mensagemMinTimes = (formato) => (formato === 'pontos_final'
+  ? `Este formato precisa de pelo menos ${minTimesDe(formato)} times.`
+  : `Um campeonato precisa de pelo menos ${MIN_TIMES} times.`);
+
+// Anexa a classificação (pontos), a pendência de empate (todos contra todos + final) e o campeão resolvido ao payload.
+const enriquecer = (camp) => store.enriquecer(camp);
 
 const SELO_DIAS = 30;
 const HONRA_CAMP = { 1: 'CAMPEÃO', 2: 'VICE', 3: '3º LUGAR' };
@@ -187,13 +188,13 @@ router.post(
 
     const gameId = String(req.body?.game_id || '');
     if (!gameId) throw new HttpError(400, 'game_id em falta.');
-    const formato = req.body?.formato === 'mata' ? 'mata' : 'pontos';
+    const formato = store.lerFormato(req.body?.formato);
 
     const { data: game } = await supabase.from('games').select('id, team_id, data, times_resultado').eq('id', gameId).maybeSingle();
     if (!game || game.team_id !== team.id) throw new HttpError(404, 'Jogo não encontrado neste time.');
     const timesSorteio = game.times_resultado?.times || [];
-    if (timesSorteio.length < MIN_TIMES) {
-      throw new HttpError(400, `Este jogo não tem times sorteados suficientes (mínimo ${MIN_TIMES}).`);
+    if (timesSorteio.length < minTimesDe(formato)) {
+      throw new HttpError(400, `Este jogo não tem times sorteados suficientes (mínimo ${minTimesDe(formato)}).`);
     }
 
     // Cap 2-8 (limite do campeonato) — corta o excesso se o sorteio tiver mais.
@@ -228,13 +229,13 @@ router.post(
     const b = req.body || {};
     const nome = String(b.nome || '').trim();
     if (!nome) throw new HttpError(400, 'Dê um nome ao campeonato.');
-    const formato = b.formato === 'mata' ? 'mata' : 'pontos';
+    const formato = store.lerFormato(b.formato);
     const modo = b.modo === 'sorteio' ? 'sorteio' : 'manual';
 
     let opts;
     if (modo === 'sorteio') {
       const numTimes = Math.floor(Number(b.num_times) || 0);
-      if (numTimes < MIN_TIMES || numTimes > MAX_TIMES) throw new HttpError(400, `Escolha entre ${MIN_TIMES} e ${MAX_TIMES} times.`);
+      if (numTimes < minTimesDe(formato) || numTimes > MAX_TIMES) throw new HttpError(400, `Escolha entre ${minTimesDe(formato)} e ${MAX_TIMES} times.`);
       // plantel = membros da equipa + convidados sem app (só nome; zero users).
       const { data: membros } = await supabase
         .from('team_members')
@@ -258,7 +259,7 @@ router.post(
       };
     } else {
       const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, MAX_TIMES);
-      if (nomes.length < MIN_TIMES) throw new HttpError(400, `Um campeonato precisa de pelo menos ${MIN_TIMES} times.`);
+      if (nomes.length < minTimesDe(formato)) throw new HttpError(400, mensagemMinTimes(formato));
       // Composição à mão (OPCIONAL): plantel[i] = jogadores do time i
       // (membros por user_id + convidados por nome). Times só com nome continuam
       // válidos. Sanitiza: 22 por time, só campos conhecidos.
@@ -302,20 +303,51 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só o admin lança resultados.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
-    if (camp.estado === 'terminado') throw new HttpError(400, 'Campeonato já terminou.');
+    // Com a final jogada o campeão já foi coroado (e os selos já saíram): corrigir a fase de grupos agora mexeria no pódio.
+    if (camp.estado === 'terminado') {
+      throw camp.formato === 'pontos_final'
+        ? new HttpError(409, store.MSG_FINAL_JOGADA)
+        : new HttpError(400, 'Campeonato já terminou.');
+    }
 
     const pa = Math.max(0, Math.floor(Number(req.body?.placar_a)));
     const pb = Math.max(0, Math.floor(Number(req.body?.placar_b)));
     if (!Number.isFinite(pa) || !Number.isFinite(pb)) throw new HttpError(400, 'Placar inválido.');
 
+    const avisos = [];
     try {
-      store.aplicarResultado(camp, req.params.cid, pa, pb);
+      store.aplicarResultado(camp, req.params.cid, pa, pb, avisos);
     } catch (e) {
       throw new HttpError(400, e.message);
     }
     await store.guardar(camp);
     if (camp.estado === 'terminado') selosCache.invalidarEquipa(team.id); // o último resultado coroou alguém
-    res.json({ campeonato: enriquecer(camp) });
+    res.json({ campeonato: enriquecer(camp), avisos });
+  })
+);
+
+/**
+ * POST /api/equipas/:slug/campeonatos/:id/desempate — só admin. Todos contra todos + final: a tabela empatou na vaga da final
+ * e nem o confronto direto separa; o admin toca no time que passa na frente. Body: { time_id }.
+ */
+router.post(
+  '/api/equipas/:slug/campeonatos/:id/desempate',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin decide o empate.');
+    const camp = await store.obter(team.id, req.params.id);
+    if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
+    if (camp.estado === 'terminado') throw new HttpError(400, 'Campeonato já terminou.');
+
+    const avisos = [];
+    try {
+      store.decidirEmpate(camp, String(req.body?.time_id || ''), avisos);
+    } catch (e) {
+      throw new HttpError(400, e.message);
+    }
+    await store.guardar(camp);
+    res.json({ campeonato: enriquecer(camp), avisos });
   })
 );
 
@@ -328,6 +360,8 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só o admin termina o campeonato.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
+    // Quem coroa o campeão aqui é a final, não o líder da tabela.
+    if (camp.formato === 'pontos_final') throw new HttpError(400, 'Neste formato o campeão sai da final.');
     store.terminarPontos(camp);
     await store.guardar(camp);
     selosCache.invalidarEquipa(team.id);
