@@ -53,13 +53,33 @@ function jogadoresDoCampeao(g) {
   return Array.isArray(t?.jogadores) ? t.jogadores : [];
 }
 
-/** Como o jogador saiu do jogo: 'vitoria' (no time campeão), 'empate', 'derrota' (qualquer outro), ou null quando o jogo não tem resultado. */
-function resultadoDoJogador(g, userId) {
+/**
+ * Como cada jogador saiu do jogo, por user_id (convidado sem app não tem conta e fica de fora): quem esteve no time campeão
+ * venceu e os dos outros times perderam; no empate, todos os que jogaram empataram. Reserva e quem não estava nos times não
+ * ganha nem perde. Sem resultado, as três listas vêm vazias.
+ * @returns {{ venceram: string[], empataram: string[], perderam: string[] }}
+ */
+function desfechoDoJogo(g) {
+  const saida = { venceram: [], empataram: [], perderam: [] };
   const r = resultadoGravado(g);
-  if (!r) return null;
-  if (r.tipo === 'empate') return 'empate';
-  if (jogadoresDoCampeao(g).some((j) => j.user_id === userId)) return 'vitoria';
-  return 'derrota';
+  if (!r) return saida;
+  const times = Array.isArray(g.times_resultado?.times) ? g.times_resultado.times : [];
+  times.forEach((t, i) => {
+    const ids = (Array.isArray(t?.jogadores) ? t.jogadores : []).map((x) => x.user_id).filter(Boolean);
+    if (r.tipo === 'empate') saida.empataram.push(...ids);
+    else if (i === r.idx) saida.venceram.push(...ids);
+    else saida.perderam.push(...ids);
+  });
+  return saida;
+}
+
+/** Como o jogador saiu do jogo: 'vitoria' | 'empate' | 'derrota', ou null (jogo sem resultado, ou ele não esteve em nenhum time). */
+function resultadoDoJogador(g, userId) {
+  const d = desfechoDoJogo(g);
+  if (d.venceram.includes(userId)) return 'vitoria';
+  if (d.empataram.includes(userId)) return 'empate';
+  if (d.perderam.includes(userId)) return 'derrota';
+  return null;
 }
 
 /**
@@ -106,6 +126,6 @@ function decidirResultado({ nTimes, campeaoIdx = null, empate = false }) {
 }
 
 module.exports = {
-  quantosTimes, vencedorDerivado, resultadoGravado, temResultado, jogadoresDoCampeao, resultadoDoJogador,
+  quantosTimes, vencedorDerivado, resultadoGravado, temResultado, jogadoresDoCampeao, desfechoDoJogo, resultadoDoJogador,
   escolhaDoCorpo, decidirResultado,
 };

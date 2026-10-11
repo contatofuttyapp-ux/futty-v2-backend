@@ -401,15 +401,17 @@ router.patch(
     }
 
     const b = req.body || {};
-    const nivel = Number(b.nivel);
-    if (![0, 1, 2, 3].includes(nivel)) throw new HttpError(400, 'Nível de resultado inválido.');
+    // `nivel` é do app antigo (4 níveis de detalhe escolhidos à mão); o app novo não manda e o motor deduz.
+    const nivelPedido = b.nivel === undefined ? null : Number(b.nivel);
+    if (nivelPedido !== null && ![0, 1, 2, 3].includes(nivelPedido)) throw new HttpError(400, 'Nível de resultado inválido.');
+    const nivel = nivelPedido ?? 0;
 
     // Quem ganhou: o campeão é a verdade e `time_vencedor` sai dele (utils/resultadoDoJogo.js). Os apps que ainda mandam só
     // `time_vencedor` ('A' | 'B' | 'empate') dizem a mesma coisa pelo outro nome.
-    const escolha = escolhaDoCorpo(nivel >= 1 ? b : { time_vencedor: null });
+    const escolha = escolhaDoCorpo(nivelPedido === 0 ? { time_vencedor: null } : b);
     if (nivel >= 1 && !escolha.informado) throw new HttpError(400, 'Indique quem venceu.');
     const decisao = decidirResultado({ nTimes: quantosTimes(game.times_resultado), campeaoIdx: escolha.campeaoIdx, empate: escolha.empate });
-    const patch = { resultado_nivel: nivel, campeao_time_index: decisao.campeao_time_index, time_vencedor: decisao.time_vencedor, placar_a: null, placar_b: null };
+    const patch = { resultado_nivel: nivelPedido ?? decisao.resultado_nivel, campeao_time_index: decisao.campeao_time_index, time_vencedor: decisao.time_vencedor, placar_a: null, placar_b: null };
 
     if (nivel >= 2) {
       const pa = Number(b.placar_a);

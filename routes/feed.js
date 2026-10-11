@@ -246,12 +246,13 @@ router.get(
     let consultaJogos = supabase
       .from('games')
       .select(
-        'id, team_id, data, local, times_resultado, campeao_time_index, campeao_foto_url, ' +
+        'id, team_id, data, local, times_resultado, campeao_time_index, time_vencedor, placar_a, placar_b, campeao_foto_url, ' +
           'artilheiro_user_id, artilheiro_gols, destaque_user_id, destaque_titulo, ' +
           'rodada_user_id, rodada_foto_url, created_at'
       )
       .in('team_id', teamIds)
-      .not('campeao_time_index', 'is', null)
+      // Entra na Resenha o jogo que tem resultado: campeão marcado OU empate explícito (`>= 0` é "não nulo" para o índice).
+      .or('campeao_time_index.gte.0,time_vencedor.eq.empate')
       .order('created_at', { ascending: false })
       .limit(quantos);
     let consultaPosts = supabase
@@ -367,6 +368,10 @@ router.get(
         team_slug: team.slug || null,
         times_resultado: g.times_resultado,
         campeao_time_index: g.campeao_time_index,
+        // Empate: sem campeão, `time_vencedor` = 'empate' e o placar (se houve) para o post dizer "Ouro 2 × 2 Roxo".
+        time_vencedor: g.time_vencedor ?? null,
+        placar_a: g.placar_a ?? null,
+        placar_b: g.placar_b ?? null,
         campeao_foto_url: g.campeao_foto_url,
         artilheiro_user_id: g.artilheiro_user_id,
         artilheiro_gols: g.artilheiro_gols,

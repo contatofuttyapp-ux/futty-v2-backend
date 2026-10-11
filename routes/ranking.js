@@ -13,7 +13,7 @@ const selosCache = require('../utils/selosCache');
 const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
-const { jogadoresDoCampeao } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { jogadoresDoCampeao, resultadoDoJogador } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 
 const router = express.Router();
 
@@ -54,7 +54,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
 
   // Os golos (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
   // vez de em série.
-  const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap }, { data: gps }] = await Promise.all([
+  const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap }, { data: gps }] = await Promise.all([
     // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
     agregadosDaEquipa(teamId, { jogos: jogos || [] }),
     // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
@@ -89,11 +89,13 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     const notaInterna = total >= MIN_VOTOS ? a.sum / a.count : null;
     const jogos = jogosMap[u.id] || 0;
     const vitorias = vitoriasMap[u.id] || 0;
+    const empates = empatesMap[u.id] || 0;
+    const derrotas = derrotasMap[u.id] || 0;
     const gols = golsMap[u.id] || 0;
     const artilharia = artilhariaMap[u.id] || 0;
     const destaques = destaquesMap[u.id] || 0;
     return {
-      u, m, total, notaInterna, jogos, vitorias, gols, artilharia, destaques,
+      u, m, total, notaInterna, jogos, vitorias, empates, derrotas, gols, artilharia, destaques,
       ehGR: m.categoria === 'GR',
       nota: notaInterna || 0, // 0 se ainda sem 3 votos (não pontua no eixo nota)
       winrate: jogos ? vitorias / jogos : 0,
@@ -134,6 +136,8 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
       total_votos: p.total,
       minha_nota: minhaNota[u.id] ?? null,
       vitorias: p.vitorias,
+      empates: p.empates,
+      derrotas: p.derrotas,
       gols: p.gols,
       artilharia: p.artilharia,
       destaques: p.destaques,
@@ -165,10 +169,10 @@ function noTimeCampeao(g, userId) {
  * (`score: null`) — e sem mexer na lista nem nas posições dos outros.
  */
 async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosRecebidos }) {
-  const [{ data: u }, { data: m }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap }] = await Promise.all([
+  const [{ data: u }, { data: m }, { golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap }] = await Promise.all([
     supabase.from('users').select('id, nome, nome_jogador, avatar_url, foto_url, avatar_generico, cor_frame').eq('id', userId).maybeSingle(),
     supabase.from('team_members').select('categoria').eq('team_id', teamId).eq('user_id', userId).maybeSingle(),
-    // Os mesmos agregados do ranking (uma verdade só): vitórias, gols, artilharia e destaques da fonte.
+    // Os mesmos agregados do ranking (uma verdade só): vitórias, empates, derrotas, gols, artilharia e destaques da fonte.
     agregadosDaEquipa(teamId, { jogos: games }),
   ]);
   const agora = Date.now();
@@ -194,6 +198,8 @@ async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosR
     total_votos: notas.length,
     minha_nota: null,
     vitorias: vitoriasMap[userId] || 0,
+    empates: empatesMap[userId] || 0,
+    derrotas: derrotasMap[userId] || 0,
     gols: golsMap[userId] || 0,
     artilharia: artilhariaMap[userId] || 0,
     destaques: destaquesMap[userId] || 0,
@@ -351,8 +357,8 @@ router.get(
       if (p.confirmado && encerrado) jogosConfirmados += 1;
     }
 
-    // Sem campeão definido → 'empate' (resultado neutro).
-    const resultadoDe = (g) => (g.campeao_time_index == null ? 'empate' : noTimeCampeao(g, userId) ? 'vitoria' : 'derrota');
+    // 'vitoria' | 'empate' | 'derrota' pelo campeão; null quando o jogo não tem resultado (ou ele não esteve nos times) — nunca "empate" por falta de dado.
+    const resultadoDe = (g) => resultadoDoJogador(g, userId);
 
     // Conquistas (carreira — todos os jogos do time).
     const conquistas = {
@@ -363,6 +369,8 @@ router.get(
       jogos_total: jogosConfirmados,
       gols_total: jogador.gols || 0,
       vitorias_total: jogador.vitorias || 0,
+      empates_total: jogador.empates || 0,
+      derrotas_total: jogador.derrotas || 0,
     };
 
     // Histórico: últimos 10 jogos em que participou (não cancelados), data DESC.
