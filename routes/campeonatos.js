@@ -213,12 +213,48 @@ router.post(
     const dataJogo = game.data ? dataNoFuso(game.data, fusoDoTime(team)) : null;
     const nome = dataJogo ? `Campeonato do sorteio · ${dataJogo}` : 'Campeonato do sorteio';
 
-    const camp = await store.criar(team.id, req.user.id, { nome, formato, usar_sorteio: false, nomes, plantel });
+    const origem = { game_id: game.id, assinatura: store.assinaturaDosTimes(timesSorteio) };
+    const camp = await store.criar(team.id, req.user.id, { nome, formato, nomes, plantel, origem });
     res.status(201).json({ campeonato: enriquecer(camp) });
   })
 );
 
-/** POST /api/equipas/:slug/campeonatos — cria (só admin). */
+/**
+ * GET /api/equipas/:slug/campeonatos/jogos-sorteados — só admin. Os jogos que "Pelo sorteio de um jogo" oferece (ver
+ * store.jogosElegiveisParaCampeonato). Tem de vir ANTES do GET /:id, senão "jogos-sorteados" seria lido como um id.
+ */
+router.get(
+  '/api/equipas/:slug/campeonatos/jogos-sorteados',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só o admin do time cria campeonatos.');
+    const desde = new Date(Date.now() - store.JOGO_RECENTE_DIAS * 86400000).toISOString();
+    const [{ data: jogos, error }, campeonatos] = await Promise.all([
+      supabase
+        .from('games')
+        .select('id, data, local, status, cancelado, sorteio_realizado, times_resultado')
+        .eq('team_id', team.id)
+        .eq('sorteio_realizado', true)
+        .gte('data', desde),
+      store.listar(team.id),
+    ]);
+    if (error) throw new HttpError(500, error.message);
+    const jogosElegiveis = store.jogosElegiveisParaCampeonato(jogos, campeonatos).slice(0, 10).map((g) => {
+      const times = g.times_resultado.times;
+      return {
+        id: g.id, data: g.data, local: g.local || null, n_times: Math.min(times.length, MAX_TIMES),
+        por_time: Math.max(...times.map((t) => (t.jogadores || []).length)),
+      };
+    });
+    res.json({ jogos: jogosElegiveis });
+  })
+);
+
+/**
+ * POST /api/equipas/:slug/campeonatos — cria um campeonato com os times montados à mão (só admin). O "sortear direto" saiu: ele
+ * pegava todos os membros do time (inclusive quem não vai) e sorteava sem as notas; o sorteio do jogo já faz isso direito.
+ */
 router.post(
   '/api/equipas/:slug/campeonatos',
   requireAuth,
@@ -227,57 +263,31 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só o admin do time cria campeonatos.');
 
     const b = req.body || {};
+    if (b.modo === 'sorteio') {
+      throw new HttpError(400, 'Para sortear, marque um jogo e sorteie por lá; no resultado do sorteio, toque em Criar campeonato.');
+    }
     const nome = String(b.nome || '').trim();
     if (!nome) throw new HttpError(400, 'Dê um nome ao campeonato.');
     const formato = store.lerFormato(b.formato);
-    const modo = b.modo === 'sorteio' ? 'sorteio' : 'manual';
 
-    let opts;
-    if (modo === 'sorteio') {
-      const numTimes = Math.floor(Number(b.num_times) || 0);
-      if (numTimes < minTimesDe(formato) || numTimes > MAX_TIMES) throw new HttpError(400, `Escolha entre ${minTimesDe(formato)} e ${MAX_TIMES} times.`);
-      // plantel = membros da equipa + convidados sem app (só nome; zero users).
-      const { data: membros } = await supabase
-        .from('team_members')
-        .select('user_id, users ( nome_jogador, nome, avatar_url )')
-        .eq('team_id', team.id);
-      const participantes = (membros || []).map((m) => ({
-        user_id: m.user_id,
-        nome: m.users?.nome_jogador || m.users?.nome || 'Jogador',
-        avatar_url: m.users?.avatar_url || null,
-        rating: 3, convidado: false,
-      }));
-      const convidados = (Array.isArray(b.convidados) ? b.convidados : [])
-        .map((x) => String(x || '').trim()).filter(Boolean).slice(0, 40)
-        .map((nomeC) => ({ user_id: null, nome: nomeC.slice(0, 40), avatar_url: null, rating: 3, convidado: true }));
-      const todos = participantes.concat(convidados);
-      if (todos.length < numTimes) throw new HttpError(400, 'Poucos jogadores para tantos times.');
-      opts = {
-        nome, formato, usar_sorteio: true, num_times: numTimes,
-        participantes: todos, seed: b.seed ? Math.floor(Number(b.seed)) : undefined,
-        nomes: Array.isArray(b.nomes) ? b.nomes.map((x) => String(x || '').slice(0, 40)) : undefined,
-      };
-    } else {
-      const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, MAX_TIMES);
-      if (nomes.length < minTimesDe(formato)) throw new HttpError(400, mensagemMinTimes(formato));
-      // Composição à mão (OPCIONAL): plantel[i] = jogadores do time i
-      // (membros por user_id + convidados por nome). Times só com nome continuam
-      // válidos. Sanitiza: 22 por time, só campos conhecidos.
-      let plantel;
-      if (Array.isArray(b.plantel)) {
-        plantel = nomes.map((_, i) => (Array.isArray(b.plantel[i]) ? b.plantel[i] : [])
-          .slice(0, 22)
-          .map((p) => ({
-            user_id: p && p.user_id ? String(p.user_id) : null,
-            nome: String((p && p.nome) || '').trim().slice(0, 40) || 'Jogador',
-            avatar_url: p && p.avatar_url ? String(p.avatar_url) : null,
-            convidado: !!(p && p.convidado),
-          })));
-      }
-      opts = { nome, formato, usar_sorteio: false, nomes, plantel };
+    const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, MAX_TIMES);
+    if (nomes.length < minTimesDe(formato)) throw new HttpError(400, mensagemMinTimes(formato));
+    // Composição à mão (OPCIONAL): plantel[i] = jogadores do time i
+    // (membros por user_id + convidados por nome). Times só com nome continuam
+    // válidos. Sanitiza: 22 por time, só campos conhecidos.
+    let plantel;
+    if (Array.isArray(b.plantel)) {
+      plantel = nomes.map((_, i) => (Array.isArray(b.plantel[i]) ? b.plantel[i] : [])
+        .slice(0, 22)
+        .map((p) => ({
+          user_id: p && p.user_id ? String(p.user_id) : null,
+          nome: String((p && p.nome) || '').trim().slice(0, 40) || 'Jogador',
+          avatar_url: p && p.avatar_url ? String(p.avatar_url) : null,
+          convidado: !!(p && p.convidado),
+        })));
     }
 
-    const camp = await store.criar(team.id, req.user.id, opts);
+    const camp = await store.criar(team.id, req.user.id, { nome, formato, nomes, plantel });
     res.status(201).json({ campeonato: enriquecer(camp) });
   })
 );

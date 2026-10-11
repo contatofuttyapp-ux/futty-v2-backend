@@ -10,7 +10,6 @@
 // team_members — o campeonato é auto-contido no seu JSON.
 const crypto = require('crypto');
 const { supabase } = require('./db');
-const { mulberry32, fisherYates } = require('./sorteio');
 const { comPrazo } = require('./comPrazo');
 
 const BUCKET = 'campeonatos';
@@ -89,32 +88,6 @@ async function apagar(teamId, id) {
 }
 
 // ─── Montagem dos times ──────────────────────────────────────────────────────
-
-// Sorteio: distribui membros + convidados por N times (snake sobre baralho
-// semeado). Reutiliza o RNG do sorteio de jogo — a MESMA semente reproduz.
-function gerarTimesSorteio(participantes, numTimes, seed, nomes) {
-  const rng = mulberry32(seed);
-  const baralho = fisherYates([...participantes], rng);
-  const times = Array.from({ length: numTimes }, (_, i) => ({
-    id: crypto.randomUUID(),
-    nome: (nomes && nomes[i]) || `Time ${i + 1}`,
-    kit: KITS[i % KITS.length].kit,
-    cor: KITS[i % KITS.length].cor,
-    jogadores: [],
-  }));
-  // snake: 0..N-1, N-1..0, ...
-  let dir = 1;
-  let t = 0;
-  for (const p of baralho) {
-    times[t].jogadores.push(p);
-    if (dir === 1) {
-      if (t === numTimes - 1) dir = -1;
-      else t += 1;
-    } else if (t === 0) dir = 1;
-    else t -= 1;
-  }
-  return times;
-}
 
 // Manual: o admin dá os nomes; kit por índice; plantel opcional (pode vir vazio).
 function gerarTimesManual(nomes, plantelPorTime) {
@@ -463,14 +436,7 @@ function podio(camp) {
 // O campeonato novo, montado em memória (times, calendário, vaga da final). `criar` só acrescenta o gravar no Storage.
 function montar(teamId, criadoPor, opts) {
   const { nome, formato } = opts;
-  let times;
-  let seed = null;
-  if (opts.usar_sorteio) {
-    seed = opts.seed || (Math.floor((mulberry32(Date.now() % 2 ** 31)()) * 2 ** 31));
-    times = gerarTimesSorteio(opts.participantes || [], opts.num_times, seed, opts.nomes);
-  } else {
-    times = gerarTimesManual(opts.nomes || [], opts.plantel);
-  }
+  const times = gerarTimesManual(opts.nomes || [], opts.plantel);
   const formatoLido = lerFormato(formato);
   if (formatoLido === 'pontos_final' && times.length < MIN_TIMES_DO_FORMATO.pontos_final) {
     throw new Error('Este formato precisa de pelo menos 3 times.');
@@ -483,7 +449,7 @@ function montar(teamId, criadoPor, opts) {
     nome: String(nome).slice(0, 60),
     formato: formatoLido,
     estado: 'em_curso',
-    seed,
+    seed: null, // só os campeonatos antigos, criados pelo "sortear direto" (que saiu), têm semente
     criado_por: criadoPor,
     criado_em: new Date().toISOString(),
     times,
@@ -492,7 +458,50 @@ function montar(teamId, criadoPor, opts) {
   };
   // As escolhas do admin nos empates da tabela (ver decidirEmpate): só este formato tem empate para decidir.
   if (formatoLido === 'pontos_final') camp.desempates = [];
+  // De que sorteio nasceu (campeonato criado pelo resultado do sorteio de um jogo): a lista "Pelo sorteio de um jogo" não oferece
+  // de novo um sorteio que já virou campeonato.
+  if (opts.origem) {
+    camp.origem_game_id = opts.origem.game_id;
+    camp.origem_assinatura = opts.origem.assinatura;
+  }
   return camp;
+}
+
+// ─── Campeonato a partir do sorteio de um jogo: quais jogos oferecer ──────────────────────────────────────────────────────
+
+// Jogo sorteado há mais tempo que isto não é oferecido: o campeonato é do dia (ou da semana) do jogo.
+const JOGO_RECENTE_DIAS = 14;
+const MAX_TIMES_DO_CAMPEONATO = 8;
+const MAX_JOGADORES_POR_TIME = 22;
+
+const chaveDoJogador = (j) => (j && j.user_id ? String(j.user_id) : `c:${String((j && j.nome) || '').trim().toLowerCase()}`);
+
+/** O "retrato" de um sorteio: quem está em cada time (a ordem dentro do time não conta, a ordem dos times sim). */
+function assinaturaDosTimes(times) {
+  return (times || []).slice(0, MAX_TIMES_DO_CAMPEONATO)
+    .map((t) => (t.jogadores || []).slice(0, MAX_JOGADORES_POR_TIME).map(chaveDoJogador).sort().join(','))
+    .join('|');
+}
+
+/** Este campeonato já nasceu deste sorteio? Os criados antes de gravar a origem são reconhecidos pelo elenco, que é copiado do sorteio. */
+function campeonatoVemDoSorteio(camp, jogo) {
+  const assinatura = assinaturaDosTimes(jogo.times_resultado?.times);
+  if (camp.origem_game_id) return camp.origem_game_id === jogo.id && camp.origem_assinatura === assinatura;
+  return assinaturaDosTimes(camp.times) === assinatura;
+}
+
+/**
+ * Os jogos que a escolha "Pelo sorteio de um jogo" oferece: sorteio feito (ou times montados à mão) com 2+ times, jogo não cancelado,
+ * de até JOGO_RECENTE_DIAS atrás em diante, e que ainda não virou campeonato. O mais recente primeiro.
+ */
+function jogosElegiveisParaCampeonato(jogos, campeonatos, agora = Date.now()) {
+  const limite = agora - JOGO_RECENTE_DIAS * 86400000;
+  return (jogos || [])
+    .filter((g) => g.sorteio_realizado && (g.times_resultado?.times || []).length >= 2)
+    .filter((g) => !g.cancelado && g.status !== 'cancelado')
+    .filter((g) => g.data && new Date(g.data).getTime() >= limite)
+    .filter((g) => !(campeonatos || []).some((c) => campeonatoVemDoSorteio(c, g)))
+    .sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
 }
 
 async function criar(teamId, criadoPor, opts) {
@@ -557,6 +566,9 @@ module.exports = {
   MIN_TIMES_DO_FORMATO,
   MSG_FINAL_JOGADA,
   lerFormato,
+  assinaturaDosTimes,
+  jogosElegiveisParaCampeonato,
+  JOGO_RECENTE_DIAS,
   enriquecer,
   tabelaDaFase1,
   decidirEmpate,

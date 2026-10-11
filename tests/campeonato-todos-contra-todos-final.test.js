@@ -1,5 +1,6 @@
 // Futty v2.0 — RODADA 30K, parte 1: o campeonato "Todos contra todos + final" (formato `pontos_final`).
 //
+// (O "sortear direto" do campeonato saiu na 30L: ver tests/campeonato-do-sorteio-do-jogo.test.js.)
 // Fase 1: todos contra todos (vitória 3, empate 1). Classificação: PTS → SG → GP → confronto direto; se ainda empatar na briga
 // pela vaga na final, QUEM DECIDE É O ADMIN (nunca o alfabeto). Fase 2: a final 1º × 2º nasce sozinha no último jogo da fase 1;
 // não tem empate (a regra do mata-mata). Pódio: campeão, vice (perdedor da final), 3º da tabela. Corrigir a fase 1 depois da final
@@ -454,21 +455,6 @@ test('rotas — criação manual: 4 times viram 6 jogos + a vaga da final; com 2
   const pontos = await pedir('POST', base, { nome: 'Copa', formato: 'pontos', modo: 'manual', nomes: ['Ouro', 'Roxo'] }, DONO);
   assert.equal(pontos.status, 201);
   assert.equal(pontos.json.campeonato.formato, 'pontos');
-});
-
-test('rotas — sorteio próprio: 3 a 8 times; 2 é recusado neste formato', async (t) => {
-  const { carregados } = cenario();
-  const pedir = subir([carregados['routes/campeonatos']], t);
-  const quatro = await pedir('POST', base, { nome: 'Copa', formato: 'pontos_final', modo: 'sorteio', num_times: 4, nomes: ['A', 'B', 'C', 'D'] }, DONO);
-  assert.equal(quatro.status, 201);
-  assert.equal(quatro.json.campeonato.formato, 'pontos_final');
-  assert.equal(quatro.json.campeonato.times.length, 4);
-  assert.ok(quatro.json.campeonato.seed);
-  const dois = await pedir('POST', base, { nome: 'Copa', formato: 'pontos_final', modo: 'sorteio', num_times: 2 }, DONO);
-  assert.equal(dois.status, 400);
-  assert.match(dois.json.error, /entre 3 e 8/);
-  const nove = await pedir('POST', base, { nome: 'Copa', formato: 'pontos_final', modo: 'sorteio', num_times: 9 }, DONO);
-  assert.equal(nove.status, 400);
 });
 
 test('rotas — a partir do sorteio de um jogo: 4 times entram; só o admin cria', async (t) => {
