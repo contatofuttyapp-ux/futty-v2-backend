@@ -15,6 +15,7 @@ const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('.
 const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
 const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico, chaveDoJogador } = require('../utils/registroDoSorteio');
 const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { anunciarResultado } = require('../utils/avisoDoResultado');
 
 const router = express.Router();
 
@@ -112,7 +113,7 @@ router.get(
 
     const { data: games, error } = await supabase
       .from('games')
-      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, cancelado, motivo_cancelamento, max_jogadores, rsvp_aberto, rsvp_fechado, created_at')
+      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, time_vencedor, cancelado, motivo_cancelamento, max_jogadores, rsvp_aberto, rsvp_fechado, created_at')
       .eq('team_id', team.id)
       .order('data', { ascending: false });
     if (error) throw new HttpError(500, error.message);
@@ -443,6 +444,9 @@ router.patch(
     }
 
     res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
+
+    // Avisa o time (fire-and-forget) — só quando o jogo ganha o primeiro resultado; corrigir o que já foi anunciado não avisa de novo.
+    anunciarResultado({ antes: game, depois: updated, local: game.local, membros: () => membrosDaEquipa(game.teams.id), enviar: enviarNotificacao });
   })
 );
 

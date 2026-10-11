@@ -19,6 +19,7 @@ const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
 const { fusoDoTime, horaNoFuso, lerComFuso } = require('../utils/fuso');
 const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { anunciarResultado } = require('../utils/avisoDoResultado');
 
 const router = express.Router();
 
@@ -707,18 +708,17 @@ router.patch(
       },
     });
 
-    // Notifica todos os membros da equipa (fire-and-forget).
-    supabase
-      .from('team_members')
-      .select('user_id')
-      .eq('team_id', game.teams.id)
-      .then(({ data }) =>
-        enviarNotificacao((data || []).map((m) => m.user_id), {
-          title: '🏆 Resultado registrado!',
-          body: `Veja quem foi o destaque em ${game.local || 'Jogo'}`,
-          url: '/feed',
-        }, { categoria: 'resenha' }) // o tipo "Resenha" do Perfil → Notificações
-      );
+    // Avisa o time (fire-and-forget) — só quando o jogo ganha o primeiro resultado ou prêmio; corrigir o que já foi anunciado não avisa de novo.
+    anunciarResultado({
+      antes: game,
+      depois: updated,
+      local: game.local,
+      membros: async () => {
+        const { data } = await supabase.from('team_members').select('user_id').eq('team_id', game.teams.id);
+        return (data || []).map((m) => m.user_id);
+      },
+      enviar: enviarNotificacao,
+    });
   })
 );
 
