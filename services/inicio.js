@@ -18,6 +18,7 @@ const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { normalizarFuso, lerComFuso } = require('../utils/fuso');
+const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo no rótulo e na lista: uma regra só
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
 const PERFIL_COLS_BASE =
@@ -300,7 +301,8 @@ const ULTIMOS_POR_TIME = 3;
 const MARGEM_ULTIMOS = 8;
 // `seed` sai do JSON do resultado (só ela, não os times inteiros): sem seed, os times foram montados à mão e o card
 // diz "Ver times", não "Ver sorteio".
-const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, seed:times_resultado->seed, game_players ( user_id, confirmado )';
+// `campeao_time_index` e `time_vencedor` entram só para o estado do jogo ("Em andamento" acaba quando o resultado é lançado).
+const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, campeao_time_index, time_vencedor, seed:times_resultado->seed, game_players ( user_id, confirmado )';
 
 async function jogosDoInicio(teamIds) {
   const agoraIso = new Date().toISOString();
@@ -314,7 +316,10 @@ async function jogosDoInicio(teamIds) {
   return { data: [...porId.values()] };
 }
 
-/** Do que a tela guarda dos encerrados: os ULTIMOS_POR_TIME mais recentes de cada time, sem os cancelados. */
+/**
+ * Do que a tela guarda dos encerrados: os ULTIMOS_POR_TIME mais recentes de cada time, sem os cancelados. O jogo "em curso" fica
+ * na lista de cima da tela (com o selo "Em andamento"), então não ocupa vaga dos terminados.
+ */
 function aparar(listaFormatada) {
   // Sem data = o fim da fila (o Postgres põe NULL por último na ordem ascendente, e a lista sempre veio assim).
   const quando = (g) => (g.date ? new Date(g.date).getTime() : Infinity);
@@ -322,7 +327,7 @@ function aparar(listaFormatada) {
   const porTime = new Map();
   const mantidos = [];
   for (const g of [...listaFormatada].sort((a, b) => cmp(quando(b), quando(a)))) {
-    if (g.status !== 'finished') { mantidos.push(g); continue; }
+    if (g.status !== 'finished' || g.estado === 'em_curso') { mantidos.push(g); continue; }
     if (g.cancelado) continue;
     const n = porTime.get(g.team_id) || 0;
     if (n < ULTIMOS_POR_TIME) { porTime.set(g.team_id, n + 1); mantidos.push(g); }
@@ -382,7 +387,10 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
       date: g.data,
       location: g.local || null,
       confirmed_count: counts[g.id] || 0,
+      // `status` segue sendo o de sempre (finished = já começou, terminou ou foi cancelado): é ele que decide presença, "próximo jogo" e
+      // "Sortear". `estado` é só para o rótulo e a lista: agendado · em_curso · terminado · cancelado (utils/estadoDoJogo.js).
       status,
+      estado: estadoDoJogo(g, now),
       cancelado,
       user_status: myStatus[g.id] ?? null,
       team_id: g.team_id,

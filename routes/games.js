@@ -16,6 +16,7 @@ const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // 
 const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico, chaveDoJogador } = require('../utils/registroDoSorteio');
 const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
+const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo: uma regra só
 
 const router = express.Router();
 
@@ -30,15 +31,9 @@ async function quemFez(userId) {
 const round1 = (n) => Math.round(n * 10) / 10;
 const NOMES_TIMES = ['Time A', 'Time B', 'Time C', 'Time D', 'Time E', 'Time F'];
 
-// Estado efetivo do jogo: "em_curso" só quando a hora do jogo já
-// chegou e ainda não há resultado — nunca por causa do sorteio ter sido feito
-// cedo. Calculado a cada leitura, não depende de um write acertar a hora certa.
-function statusEfetivoJogo(game) {
-  if (game.cancelado || game.status === 'cancelado') return 'cancelado';
-  if ((game.resultado_nivel || 0) > 0) return 'terminado';
-  const comecou = !!game.data && new Date(game.data).getTime() <= Date.now();
-  return comecou ? 'em_curso' : 'agendado';
-}
+// Estado efetivo do jogo: a regra única em utils/estadoDoJogo.js (agendado · em curso · terminado · cancelado).
+// Calculado a cada leitura, não depende de um write acertar a hora certa, nem de o sorteio ter sido feito cedo.
+const statusEfetivoJogo = (game) => estadoDoJogo(game);
 
 // Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do
 // time), não no do servidor (o Cloud Run roda em UTC: "20:30" de São Paulo saía como "23:30").

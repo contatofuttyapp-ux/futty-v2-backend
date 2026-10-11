@@ -93,12 +93,12 @@ function mundo(t, { atrasoMs = 0, tabelas = tabelasPesadas() } = {}) {
   return { pedir, obs, servico: carregados['services/inicio'], tabelas: vivas };
 }
 
-/** O que a TELA faz com a lista (pages/Inicio.jsx): próximos = não encerrados; últimos = os 3 mais recentes encerrados, não cancelados. */
+/** O que a TELA faz com a lista (pages/Inicio.jsx): próximos = agendados e em andamento; últimos = os 3 mais recentes terminados (cancelado fora). */
 function comoATelaVe(games, selectedTeam = 'all') {
   const filtrados = games.filter((g) => selectedTeam === 'all' || g.team_id === selectedTeam);
   return {
-    proximos: filtrados.filter((g) => g.status !== 'finished').map((g) => g.id),
-    ultimos: filtrados.filter((g) => g.status === 'finished' && !g.cancelado).slice(-3).reverse().map((g) => g.id),
+    proximos: filtrados.filter((g) => g.estado === 'agendado' || g.estado === 'em_curso').map((g) => g.id),
+    ultimos: filtrados.filter((g) => g.estado === 'terminado').slice(-3).reverse().map((g) => g.id),
   };
 }
 
