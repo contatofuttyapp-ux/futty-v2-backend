@@ -90,5 +90,5 @@ test('o script é seco por padrão: só --sim grava (e só o utils tem a escrita
   assert.match(script, /executarConserto\(supabase, \{ sim: SIM \}\)/);
   assert.doesNotMatch(script, /\.update\(|\.insert\(|\.delete\(|\.upsert\(/, 'o script em si nunca escreve: quem escreve é executarConserto, e só com sim');
   const util = fs.readFileSync(require.resolve('../utils/consertoDoCampeao.js'), 'utf8');
-  assert.match(util, /if \(!sim\) return resultado;\n\s*for \(const j of plano\.conserta\)/);
+  assert.match(util, /if \(!sim\) return resultado;\r?\n\s*for \(const j of plano\.conserta\)/);
 });
