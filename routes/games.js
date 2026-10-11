@@ -14,10 +14,12 @@ const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soO
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
 const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
 const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico, chaveDoJogador } = require('../utils/registroDoSorteio');
-const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 
 const router = express.Router();
+
+const MSG_RESULTADO_FECHADO = 'O resultado abre 5 minutos depois do início do jogo.';
 
 /** Quem fez a ação, com o nome de guerra DE AGORA — o selo grava este nome e não muda se a pessoa o trocar depois. */
 async function quemFez(userId) {
@@ -394,12 +396,8 @@ router.patch(
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir o resultado.');
 
-    // Sem resultado antes do jogo acontecer — exceto jogo histórico/retroativo
-    // (criado como "Já aconteceu"), que não tem essa trava.
-    const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
-    if (!jaComecou && !game.historico) {
-      throw new HttpError(400, 'O resultado só pode ser registrado depois do início do jogo.');
-    }
+    // O resultado abre 5 minutos depois do início do jogo — exceto jogo histórico/retroativo (criado como "Já aconteceu"), que não tem essa trava.
+    if (!resultadoJaAbriu(game)) throw new HttpError(400, MSG_RESULTADO_FECHADO);
 
     const b = req.body || {};
     // `nivel` é do app antigo (4 níveis de detalhe escolhidos à mão); o app novo não manda e o motor deduz do que veio. `nivel: 0` é "limpar".

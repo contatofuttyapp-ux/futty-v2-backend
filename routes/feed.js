@@ -18,7 +18,7 @@ const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
 const { fusoDoTime, horaNoFuso, lerComFuso } = require('../utils/fuso');
-const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 
 const router = express.Router();
@@ -638,6 +638,8 @@ router.patch(
 
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem editar o resultado.');
+    // A mesma trava do PATCH /api/games/:id/resultado: o resultado (e os prêmios do dia) abrem 5 minutos depois do início; jogo histórico não tem.
+    if (!resultadoJaAbriu(game)) throw new HttpError(400, 'O resultado abre 5 minutos depois do início do jogo.');
 
     const b = req.body || {};
     const patch = {};
