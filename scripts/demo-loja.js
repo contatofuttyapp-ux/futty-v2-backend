@@ -357,6 +357,8 @@ async function criarJogosPassados(ids, teamId) {
       times_resultado: resultado,
       resultado_nivel: 3,
       time_vencedor: vencedor,
+      // O campeão é a verdade (utils/resultadoDoJogo.js): A → 0, B → 1, empate → nulo (empate explícito: time_vencedor 'empate').
+      campeao_time_index: vencedor === 'A' ? 0 : vencedor === 'B' ? 1 : null,
       placar_a: pa,
       placar_b: pb,
       artilheiro_user_id: artilheiroId,

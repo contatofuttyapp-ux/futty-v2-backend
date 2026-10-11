@@ -490,8 +490,8 @@ async function criarJogosPassados(ids, teamId, donos) {
       resultado_nivel: 3, time_vencedor: vencedor, placar_a: pa, placar_b: pb,
       artilheiro_user_id: artilheiroId, artilheiro_gols: artilheiroGols,
       destaque_user_id: destaque.user_id, destaque_titulo: vencedor === 'empate' ? 'Muralha da rodada' : 'Craque da pelada',
-      // campeao_time_index != null é o que faz o jogo APARECER na Resenha (routes/feed.js).
-      campeao_time_index: vencedor === 'empate' ? 0 : (vencedor === 'A' ? 0 : 1),
+      // O jogo aparece na Resenha com campeão marcado OU empate explícito (routes/feed.js): A → 0, B → 1, empate → campeão nulo + time_vencedor 'empate'.
+      campeao_time_index: vencedor === 'A' ? 0 : vencedor === 'B' ? 1 : null,
       created_at: dias(-jp.diasAtras - 5),
     }).select().single();
     if (error) throw new Error(`games[${i}]: ${error.message}`);
