@@ -162,6 +162,8 @@ function placarDoCorpo(b = {}) {
  *   2. o PLACAR digitado, que define o vencedor (ou o empate);
  *   3. o vencedor tocado (campeaoIdx / empate), sem placar.
  * Nada informado = sem resultado.
+ * Com 3 ou 4 times (rodízio) não há placar nem empate: só o campeão tocado. Os gols por jogador continuam valendo (artilheiro, nível 3), mas
+ * não decidem nada — o rodízio não tem placar que some.
  * @param {{ nTimes: number, campeaoIdx?: number|null, empate?: boolean, placar?: {a:number,b:number}|null, golsPorTime?: number[]|null, temGols?: boolean }} entrada
  * @returns {{ campeao_time_index: number|null, time_vencedor: string|null, placar_a: number|null, placar_b: number|null, resultado_nivel: number }}
  * @throws {HttpError} 400, com a frase pronta para o usuário
@@ -179,6 +181,11 @@ function decidirResultado({ nTimes, campeaoIdx = null, empate = false, placar = 
       eEmpate = placarFinal.a === placarFinal.b;
     }
   }
+  if (nTimes >= 3) {
+    if (eEmpate) throw new HttpError(400, 'Com 3 ou 4 times não há empate: escolha o campeão.');
+    if (placar) throw new HttpError(400, 'Com 3 ou 4 times não há placar: escolha só o campeão.');
+  }
+  if (placar && nTimes < 2) throw new HttpError(400, 'Sorteie ou monte os times antes de dizer quem ganhou.');
   const escolheu = idx !== null || eEmpate;
   if (escolheu && !nTimes) throw new HttpError(400, 'Sorteie ou monte os times antes de dizer quem ganhou.');
   if (idx !== null && idx >= nTimes) throw new HttpError(400, 'Esse time não existe neste jogo.');
