@@ -14,7 +14,7 @@ const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soO
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
 const { codigoDoSorteio, jogoDoCodigo } = require('../utils/sorteioCodigo'); // o link curto /s/<código>
 const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublico, chaveDoJogador } = require('../utils/registroDoSorteio');
-const { quantosTimes, escolhaDoCorpo, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 
 const router = express.Router();
 
@@ -401,25 +401,33 @@ router.patch(
     }
 
     const b = req.body || {};
-    // `nivel` é do app antigo (4 níveis de detalhe escolhidos à mão); o app novo não manda e o motor deduz.
+    // `nivel` é do app antigo (4 níveis de detalhe escolhidos à mão); o app novo não manda e o motor deduz do que veio. `nivel: 0` é "limpar".
     const nivelPedido = b.nivel === undefined ? null : Number(b.nivel);
     if (nivelPedido !== null && ![0, 1, 2, 3].includes(nivelPedido)) throw new HttpError(400, 'Nível de resultado inválido.');
-    const nivel = nivelPedido ?? 0;
+    const limpar = nivelPedido === 0;
 
     // Quem ganhou: o campeão é a verdade e `time_vencedor` sai dele (utils/resultadoDoJogo.js). Os apps que ainda mandam só
-    // `time_vencedor` ('A' | 'B' | 'empate') dizem a mesma coisa pelo outro nome.
-    const escolha = escolhaDoCorpo(nivelPedido === 0 ? { time_vencedor: null } : b);
-    if (nivel >= 1 && !escolha.informado) throw new HttpError(400, 'Indique quem venceu.');
-    const decisao = decidirResultado({ nTimes: quantosTimes(game.times_resultado), campeaoIdx: escolha.campeaoIdx, empate: escolha.empate });
-    const patch = { resultado_nivel: nivelPedido ?? decisao.resultado_nivel, campeao_time_index: decisao.campeao_time_index, time_vencedor: decisao.time_vencedor, placar_a: null, placar_b: null };
-
-    if (nivel >= 2) {
-      const pa = Number(b.placar_a);
-      const pb = Number(b.placar_b);
-      if (!Number.isInteger(pa) || pa < 0 || !Number.isInteger(pb) || pb < 0) throw new HttpError(400, 'Placar inválido.');
-      patch.placar_a = pa;
-      patch.placar_b = pb;
-    }
+    // `time_vencedor` ('A' | 'B' | 'empate') dizem a mesma coisa pelo outro nome. Com gols lançados, os gols decidem (a soma por time é o
+    // placar e o placar define o vencedor); sem gols, vale o placar digitado; sem placar, o vencedor tocado.
+    const escolha = limpar ? { campeaoIdx: null, empate: false, informado: false } : escolhaDoCorpo(b);
+    if (nivelPedido >= 1 && !escolha.informado) throw new HttpError(400, 'Indique quem venceu.');
+    const linhas = limpar ? [] : linhasDeGols(game.times_resultado, b.gols);
+    const { porTime, temGols } = somaDeGols(linhas);
+    const decisao = decidirResultado({
+      nTimes: quantosTimes(game.times_resultado),
+      campeaoIdx: escolha.campeaoIdx,
+      empate: escolha.empate,
+      placar: limpar || nivelPedido === 1 ? null : placarDoCorpo(b),
+      golsPorTime: porTime,
+      temGols,
+    });
+    const patch = {
+      resultado_nivel: decisao.resultado_nivel,
+      campeao_time_index: decisao.campeao_time_index,
+      time_vencedor: decisao.time_vencedor,
+      placar_a: decisao.placar_a,
+      placar_b: decisao.placar_b,
+    };
 
     const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
     if (error) throw new HttpError(500, error.message);
@@ -427,28 +435,11 @@ router.patch(
     // O jogo passou → reset das ausências antecipadas (para o próximo jogo).
     await supabase.from('team_members').update({ ausente_proximo: false }).eq('team_id', game.teams.id).eq('ausente_proximo', true);
 
-    // Gols só existem no nível 3 — limpa sempre e reinsere se for o caso.
+    // Os gols mandados substituem os de antes: limpa sempre e reinsere o que veio.
     await supabase.from('gols_jogadores').delete().eq('game_id', game.id);
-    if (nivel === 3 && Array.isArray(b.gols)) {
-      const times = game.times_resultado?.times || [];
-      // Mesma chave do motor (id de quem tem conta, nome de quem é convidado sem app):
-      // os dois times caem no mesmo objeto sem um sobrescrever o outro.
-      const timeDe = {};
-      (times[0]?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = 'A'; });
-      (times[1]?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = 'B'; });
-      const rows = b.gols
-        .map((g) => {
-          if (!g) return null;
-          const convidadoNome = g.user_id ? null : String(g.convidado_nome || '').trim();
-          if (!g.user_id && !convidadoNome) return null;
-          const chave = chaveDoJogador({ user_id: g.user_id || null, nome: convidadoNome });
-          return { game_id: game.id, user_id: g.user_id || null, convidado_nome: convidadoNome || null, gols: Math.max(0, Number(g.gols) || 0), time: timeDe[chave] || null };
-        })
-        .filter(Boolean);
-      if (rows.length) {
-        const { error: gErr } = await supabase.from('gols_jogadores').insert(rows);
-        if (gErr) throw new HttpError(500, gErr.message);
-      }
+    if (linhas.length) {
+      const { error: gErr } = await supabase.from('gols_jogadores').insert(linhas.map((l) => ({ game_id: game.id, ...l })));
+      if (gErr) throw new HttpError(500, gErr.message);
     }
 
     res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });

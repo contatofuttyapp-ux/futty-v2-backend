@@ -14,6 +14,7 @@ function quantosTimes(timesResultado) {
 }
 
 const { HttpError } = require('./http');
+const { chaveDoJogador } = require('./registroDoSorteio');
 
 const indiceValido = (n) => Number.isInteger(n) && n >= 0;
 
@@ -109,23 +110,88 @@ function escolhaDoCorpo(b = {}) {
 }
 
 /**
- * A decisão do resultado: dado o número de times e a escolha, os campos que o jogo grava.
- * @param {{ nTimes: number, campeaoIdx?: number|null, empate?: boolean }} entrada
- * @returns {{ campeao_time_index: number|null, time_vencedor: string|null, resultado_nivel: number }}
+ * As linhas de gols_jogadores (sem game_id) a partir dos gols que o app mandou, cada uma com o time A/B de quem marcou. A chave é a do motor
+ * (id de quem tem conta, nome de quem é convidado sem app): os dois times caem no mesmo objeto sem um sobrescrever o outro. Quem não está
+ * nos dois primeiros times fica com `time: null` (a coluna só conhece A e B) — o gol vale para o artilheiro, não para o placar.
+ */
+function linhasDeGols(timesResultado, gols) {
+  const times = Array.isArray(timesResultado?.times) ? timesResultado.times : [];
+  const timeDe = {};
+  times.slice(0, 2).forEach((t, i) => (t?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = i === 0 ? 'A' : 'B'; }));
+  return (Array.isArray(gols) ? gols : [])
+    .map((g) => {
+      if (!g) return null;
+      const convidadoNome = g.user_id ? null : String(g.convidado_nome || '').trim();
+      if (!g.user_id && !convidadoNome) return null;
+      const chave = chaveDoJogador({ user_id: g.user_id || null, nome: convidadoNome });
+      return { user_id: g.user_id || null, convidado_nome: convidadoNome || null, gols: Math.max(0, Math.floor(Number(g.gols)) || 0), time: timeDe[chave] || null };
+    })
+    .filter(Boolean);
+}
+
+/** O que as linhas de gols dizem: os gols de cada time (A, B) e se algum gol foi marcado. */
+function somaDeGols(linhas) {
+  const soma = { porTime: [0, 0], temGols: false };
+  for (const l of linhas || []) {
+    if (l.gols > 0) soma.temGols = true;
+    if (l.time === 'A') soma.porTime[0] += l.gols;
+    else if (l.time === 'B') soma.porTime[1] += l.gols;
+  }
+  return soma;
+}
+
+/**
+ * O placar que o corpo do pedido digitou, ou null se não digitou nenhum. Os dois campos vêm juntos (um vazio é 0 só se o outro foi
+ * preenchido); número que não é inteiro não negativo é recusado.
+ * @returns {{ a: number, b: number }|null}
+ * @throws {HttpError} 400 'Placar inválido.'
+ */
+function placarDoCorpo(b = {}) {
+  const vazio = (v) => v === undefined || v === null || v === '';
+  if (vazio(b.placar_a) && vazio(b.placar_b)) return null;
+  const a = vazio(b.placar_a) ? 0 : Number(b.placar_a);
+  const c = vazio(b.placar_b) ? 0 : Number(b.placar_b);
+  if (!Number.isInteger(a) || a < 0 || !Number.isInteger(c) || c < 0) throw new HttpError(400, 'Placar inválido.');
+  return { a, b: c };
+}
+
+/**
+ * A decisão do resultado: dado o número de times e o que foi informado, os campos que o jogo grava. Placar e vencedor nunca são escolhas
+ * separadas — com 2 times quem manda é, nesta ordem:
+ *   1. os GOLS por jogador, se algum foi lançado: o placar é a soma por time e ele define o vencedor (ou o empate);
+ *   2. o PLACAR digitado, que define o vencedor (ou o empate);
+ *   3. o vencedor tocado (campeaoIdx / empate), sem placar.
+ * Nada informado = sem resultado.
+ * @param {{ nTimes: number, campeaoIdx?: number|null, empate?: boolean, placar?: {a:number,b:number}|null, golsPorTime?: number[]|null, temGols?: boolean }} entrada
+ * @returns {{ campeao_time_index: number|null, time_vencedor: string|null, placar_a: number|null, placar_b: number|null, resultado_nivel: number }}
  * @throws {HttpError} 400, com a frase pronta para o usuário
  */
-function decidirResultado({ nTimes, campeaoIdx = null, empate = false }) {
-  const escolheu = campeaoIdx !== null || empate;
+function decidirResultado({ nTimes, campeaoIdx = null, empate = false, placar = null, golsPorTime = null, temGols = false }) {
+  let idx = campeaoIdx;
+  let eEmpate = empate;
+  let placarFinal = null;
+  if (nTimes === 2) {
+    const [golsA, golsB] = golsPorTime || [0, 0];
+    if (golsA + golsB > 0) placarFinal = { a: golsA, b: golsB };
+    else if (placar) placarFinal = { a: placar.a, b: placar.b };
+    if (placarFinal) {
+      idx = placarFinal.a > placarFinal.b ? 0 : placarFinal.a < placarFinal.b ? 1 : null;
+      eEmpate = placarFinal.a === placarFinal.b;
+    }
+  }
+  const escolheu = idx !== null || eEmpate;
   if (escolheu && !nTimes) throw new HttpError(400, 'Sorteie ou monte os times antes de dizer quem ganhou.');
-  if (campeaoIdx !== null && campeaoIdx >= nTimes) throw new HttpError(400, 'Esse time não existe neste jogo.');
+  if (idx !== null && idx >= nTimes) throw new HttpError(400, 'Esse time não existe neste jogo.');
   return {
-    campeao_time_index: campeaoIdx,
-    time_vencedor: vencedorDerivado({ nTimes, campeaoIdx, empate }),
-    resultado_nivel: escolheu ? 1 : 0,
+    campeao_time_index: idx,
+    time_vencedor: vencedorDerivado({ nTimes, campeaoIdx: idx, empate: eEmpate }),
+    placar_a: placarFinal ? placarFinal.a : null,
+    placar_b: placarFinal ? placarFinal.b : null,
+    resultado_nivel: temGols ? 3 : placarFinal ? 2 : escolheu ? 1 : 0,
   };
 }
 
 module.exports = {
   quantosTimes, vencedorDerivado, resultadoGravado, temResultado, jogadoresDoCampeao, desfechoDoJogo, resultadoDoJogador,
-  escolhaDoCorpo, decidirResultado,
+  escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado,
 };

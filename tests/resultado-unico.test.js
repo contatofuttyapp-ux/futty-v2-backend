@@ -79,9 +79,9 @@ test('o corpo do pedido diz quem ganhou do jeito novo (campeão) ou do antigo (A
 });
 
 test('decidirResultado: o campeão tem de existir no jogo e o jogo tem de ter times', () => {
-  assert.deepEqual(decidirResultado({ nTimes: 2, campeaoIdx: 1 }), { campeao_time_index: 1, time_vencedor: 'B', resultado_nivel: 1 });
-  assert.deepEqual(decidirResultado({ nTimes: 3, campeaoIdx: 2 }), { campeao_time_index: 2, time_vencedor: null, resultado_nivel: 1 });
-  assert.deepEqual(decidirResultado({ nTimes: 2 }), { campeao_time_index: null, time_vencedor: null, resultado_nivel: 0 });
+  assert.deepEqual(decidirResultado({ nTimes: 2, campeaoIdx: 1 }), { campeao_time_index: 1, time_vencedor: 'B', placar_a: null, placar_b: null, resultado_nivel: 1 });
+  assert.deepEqual(decidirResultado({ nTimes: 3, campeaoIdx: 2 }), { campeao_time_index: 2, time_vencedor: null, placar_a: null, placar_b: null, resultado_nivel: 1 });
+  assert.deepEqual(decidirResultado({ nTimes: 2 }), { campeao_time_index: null, time_vencedor: null, placar_a: null, placar_b: null, resultado_nivel: 0 });
   assert.throws(() => decidirResultado({ nTimes: 2, campeaoIdx: 2 }), /não existe/);
   assert.throws(() => decidirResultado({ nTimes: 0, campeaoIdx: 0 }), /times/);
   assert.equal(quantosTimes(tres), 3);
