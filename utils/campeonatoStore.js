@@ -284,11 +284,30 @@ function ordenarEmpatados(ids, ctx) {
   return [[...ids].sort((x, y) => ctx.ordem[x] - ctx.ordem[y])];
 }
 
+const VAGAS_NA_FINAL = 2;
+const PONTOS_POR_VITORIA = 3;
+
+// Quem já está GARANTIDO na final enquanto ainda há jogos por fazer. Conta só pontos e é prudente de propósito: cada rival ainda pode
+// somar 3 pontos por jogo que lhe falta, e quem pode igualar os pontos de hoje conta como rival (o desempate seria incerto). Um time
+// está garantido quando no máximo UM rival ainda consegue chegar aos pontos dele — então ele termina, no pior caso, em 2º.
+function garantidosNaFinal(linhas, grupos) {
+  const faltam = {};
+  grupos.filter((c) => !c.jogado).forEach((c) => {
+    faltam[c.time_a_id] = (faltam[c.time_a_id] || 0) + 1;
+    faltam[c.time_b_id] = (faltam[c.time_b_id] || 0) + 1;
+  });
+  const maximo = (l) => l.PTS + PONTOS_POR_VITORIA * (faltam[l.id] || 0);
+  return new Set(linhas
+    .filter((l) => linhas.filter((x) => x.id !== l.id && maximo(x) >= l.PTS).length < VAGAS_NA_FINAL)
+    .map((l) => l.id));
+}
+
 /**
  * A tabela da fase de grupos e o que falta para a final.
- * `linhas` ganham `pos` (posição; times ainda empatados dividem o número) e `empatado`. Enquanto a fase não acaba a tabela é só
- * provisória (posição = ordem da lista, sem empate declarado). `pendencia` existe quando, com a fase completa, um empate sem
- * solução cruza a linha da final: `vagas` = quantos dos `candidatos` entram na final.
+ * `linhas` ganham `pos` (posição; times ainda empatados dividem o número), `empatado` e `classificado` (garantido na final: durante a
+ * fase só quem a matemática já põe lá; com a fase completa, os dois finalistas — e nunca só um de dois times empatados). Enquanto a fase
+ * não acaba a tabela é só provisória (posição = ordem da lista, sem empate declarado). `pendencia` existe quando, com a fase completa,
+ * um empate sem solução cruza a linha da final: `vagas` = quantos dos `candidatos` entram na final.
  */
 function tabelaDaFase1(camp) {
   const grupos = confrontosDoGrupo(camp);
@@ -297,7 +316,8 @@ function tabelaDaFase1(camp) {
   const ordem = Object.fromEntries(camp.times.map((t, i) => [t.id, i]));
   linhas.sort((x, y) => y.PTS - x.PTS || y.SG - x.SG || y.GP - x.GP); // estável: empatado mantém a ordem dos times
   if (!completa) {
-    linhas.forEach((l, i) => { l.pos = i + 1; l.empatado = false; });
+    const garantidos = garantidosNaFinal(linhas, grupos);
+    linhas.forEach((l, i) => { l.pos = i + 1; l.empatado = false; l.classificado = garantidos.has(l.id); });
     return { linhas, completa, pendencia: null };
   }
   const ctx = { confrontos: grupos, escolhas: camp.desempates || [], ordem };
@@ -321,6 +341,10 @@ function tabelaDaFase1(camp) {
     bloco.forEach((id) => ordenadas.push({ ...porId[id], pos, empatado: bloco.length > 1 }));
     pos += bloco.length;
   });
+  // Fase completa: finalista é quem fica nas duas primeiras posições. Com um empate sem solução na linha da final, só entram já
+  // os que estão ACIMA dos empatados (os empatados esperam a escolha do admin: marcar um dos dois seria escolher por ele).
+  const inicioDoEmpate = pendencia ? Math.min(...ordenadas.filter((l) => pendencia.candidatos.includes(l.id)).map((l) => l.pos)) : Infinity;
+  ordenadas.forEach((l) => { l.classificado = l.pos <= VAGAS_NA_FINAL && l.pos < inicioDoEmpate; });
   return { linhas: ordenadas, completa, pendencia };
 }
 
@@ -370,10 +394,28 @@ function decidirEmpate(camp, timeId, avisos = []) {
   return camp;
 }
 
-/** O campeonato como as telas o recebem: campeão resolvido e, nos formatos de tabela, a classificação já calculada. */
+/**
+ * O próximo jogo: o primeiro ainda sem placar, na ordem da lista de jogos (rodada, depois a ordem dentro dela), com os dois times já
+ * conhecidos — por isso a vaga da final, sem nomes, só entra quando a fase de grupos fecha. Some quando o campeonato termina.
+ * `final` diz que é a decisão (a final, ou a última rodada do mata-mata).
+ */
+function proximoJogo(camp) {
+  if (camp.estado === 'terminado') return null;
+  const porId = Object.fromEntries((camp.times || []).map((t) => [t.id, t]));
+  const ultimaRonda = Math.max(0, ...(camp.confrontos || []).map((c) => c.ronda));
+  const proximo = [...(camp.confrontos || [])]
+    .sort((x, y) => x.ronda - y.ronda || x.ordem - y.ordem)
+    .find((c) => !c.bye && !c.jogado && porId[c.time_a_id] && porId[c.time_b_id]);
+  if (!proximo) return null;
+  const cartao = (t) => ({ nome: t.nome, cor: t.cor });
+  const ehFinal = camp.formato === 'pontos_final' ? proximo.fase === 'final' : camp.formato === 'mata' && proximo.ronda === ultimaRonda;
+  return { a: cartao(porId[proximo.time_a_id]), b: cartao(porId[proximo.time_b_id]), final: ehFinal };
+}
+
+/** O campeonato como as telas o recebem: campeão resolvido, o próximo jogo e, nos formatos de tabela, a classificação já calculada. */
 function enriquecer(camp) {
   const campeao = camp.campeao_time_id ? camp.times.find((t) => t.id === camp.campeao_time_id) || null : null;
-  const out = { ...camp, campeao };
+  const out = { ...camp, campeao, proximo_jogo: proximoJogo(camp) };
   if (camp.formato === 'pontos') out.classificacao = classificacao(camp);
   if (camp.formato === 'pontos_final') {
     const { linhas, completa, pendencia } = tabelaDaFase1(camp);
@@ -547,7 +589,7 @@ function resumoParaInicio(camp, userId) {
   const cartao = (t) => (t ? { nome: t.nome, cor: t.cor } : null);
   const out = {
     id: camp.id, nome: camp.nome, formato: camp.formato, estado: camp.estado, fase: faseDoCampeonato(camp),
-    jogos_lancados: lancados, jogos_total: jogos.length, primeiros: [], final: null, campeao: null, voce_e_campeao: false,
+    jogos_lancados: lancados, jogos_total: jogos.length, primeiros: [], final: null, proximo: proximoJogo(camp), campeao: null, voce_e_campeao: false,
     terminado_em: camp.terminado_em || null, origem_data: camp.origem_data || null,
   };
   if ((camp.formato === 'pontos' || camp.formato === 'pontos_final') && lancados > 0) {
@@ -594,7 +636,7 @@ async function campeonatosRecentes(teamId, max = 3) {
 // ─── O post do campeão na Resenha ────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * O que o post "campeão do campeonato" guarda: o time campeão com os jogadores, o pódio e o placar da final (com o vencedor dos
+ * O que o post do campeão do campeonato guarda: o time campeão com os jogadores, o pódio e o placar da final (com o vencedor dos
  * pênaltis, se houve). Vai em `feed_posts.conteudo` (jsonb que já existe) com `conteudo.tipo = 'campeao_campeonato'`; o `tipo` da
  * linha fica 'post' (o CHECK da coluna só aceita post, anuncio, jogo e voto).
  */
@@ -617,7 +659,8 @@ function conteudoDoPostDoCampeao(camp) {
     podio: podio(camp).map((p) => ({ pos: p.pos, nome: p.time.nome, cor: p.time.cor })),
     final,
   };
-  return { body: `🏆 ${campeao.nome} campeão do ${camp.nome}`.slice(0, 2000), conteudo };
+  // "<Time> é campeão · <campeonato>": sem preposição, para o nome do campeonato ("Copa…", "Taça…", "Liga…") nunca errar o gênero.
+  return { body: `🏆 ${campeao.nome} é campeão · ${camp.nome}`.slice(0, 2000), conteudo };
 }
 
 // Aplica um resultado (só admin, validado na rota). Recalcula bracket/estado. `avisos` recebe o que o admin precisa saber
@@ -705,6 +748,7 @@ module.exports = {
   enriquecer,
   tabelaDaFase1,
   confrontoDaFinal,
+  proximoJogo,
   resumoParaInicio,
   resumoDoInicio,
   campeonatosRecentes,

@@ -1,5 +1,5 @@
 // Futty v2.0 — O post do campeão na Resenha: quando o campeonato (novo, do Storage) termina, a Resenha do time ganha UM post
-// "campeão do <campeonato>" com os jogadores do time campeão, o pódio e o placar da final. Um post só por campeonato: corrigir a
+// "<Time> é campeão · <campeonato>" com os jogadores do time campeão, o pódio e o placar da final. Um post só por campeonato: corrigir a
 // final depois atualiza o MESMO post (as reações e os comentários ficam, porque o id é o mesmo).
 //
 // Sem migração: é uma linha de `feed_posts` (tipo 'post', que o CHECK da coluna aceita) com o retrato em `conteudo` (jsonb que já

@@ -265,7 +265,7 @@ test('rota: terminar o campeonato cria UM post do campeão; corrigir a final atu
   assert.equal(post.team_id, TIME);
   assert.equal(post.tipo, 'post', 'o CHECK da coluna só aceita post, anuncio, jogo e voto: sem migração');
   assert.equal(post.author_id, DONO);
-  assert.equal(post.body, `🏆 ${nome(fin.time_a_id)} campeão do Copa da Resenha`);
+  assert.equal(post.body, `🏆 ${nome(fin.time_a_id)} é campeão · Copa da Resenha`);
   assert.equal(post.conteudo.tipo, 'campeao_campeonato');
   assert.equal(post.conteudo.campeonato_id, camp.id);
   assert.equal(post.conteudo.campeao.nome, nome(fin.time_a_id));
