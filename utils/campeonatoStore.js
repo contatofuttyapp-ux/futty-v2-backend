@@ -56,6 +56,7 @@ async function guardar(camp) {
     .from(BUCKET)
     .upload(caminho(camp.team_id, camp.id), body, { contentType: 'application/json', upsert: true, cacheControl: '0' });
   if (error) throw new Error(error.message);
+  esquecerCacheDoInicio(camp.team_id);
   return camp;
 }
 
@@ -85,6 +86,7 @@ async function listar(teamId) {
 
 async function apagar(teamId, id) {
   await supabase.storage.from(BUCKET).remove([caminho(teamId, id)]);
+  esquecerCacheDoInicio(teamId);
 }
 
 // ─── Montagem dos times ──────────────────────────────────────────────────────
@@ -463,6 +465,7 @@ function montar(teamId, criadoPor, opts) {
   if (opts.origem) {
     camp.origem_game_id = opts.origem.game_id;
     camp.origem_assinatura = opts.origem.assinatura;
+    camp.origem_data = opts.origem.data || null; // a data do jogo: aparece como subtítulo do campeonato
   }
   return camp;
 }
@@ -508,37 +511,167 @@ async function criar(teamId, criadoPor, opts) {
   return guardar(montar(teamId, criadoPor, opts));
 }
 
+// ─── O campeonato no Início de quem é do time ──────────────────────────────────────────────────────────────────────────────
+
+// O campeão fica no Início de todo o time por uma semana.
+const DIAS_DO_CAMPEAO_NO_INICIO = 7;
+
+// Os jogos que contam no "X de N jogos": os de verdade (sem bye) e, em "todos contra todos + final", só os da fase de grupos.
+const jogosReais = (camp) => (camp.confrontos || []).filter((c) => !c.bye && (camp.formato !== 'pontos_final' || faseDe(c) === 'grupos'));
+
+const nomeDaRodada = (tamanho) => ({ 2: 'Final', 4: 'Semifinais', 8: 'Quartas', 16: 'Oitavas' }[tamanho] || 'Fase');
+
+/** Em que fase o campeonato está agora, no nome que a tela usa. */
+function faseDoCampeonato(camp) {
+  if (camp.estado === 'terminado') return 'Terminado';
+  if (camp.formato === 'pontos_final') {
+    const final = confrontoFinal(camp);
+    return final && final.time_a_id ? 'Final' : 'Fase de grupos';
+  }
+  if (camp.formato === 'pontos') return 'Pontos corridos';
+  const porRonda = {};
+  camp.confrontos.forEach((c) => { (porRonda[c.ronda] ||= []).push(c); });
+  const aberta = Object.keys(porRonda).map(Number).sort((x, y) => x - y).find((r) => porRonda[r].some((c) => !c.jogado));
+  return nomeDaRodada((porRonda[aberta]?.length || 1) * 2);
+}
+
+/**
+ * O que o card do Início mostra de um campeonato: a fase, quantos jogos já foram lançados, os 2 primeiros da tabela (só depois do
+ * 1º jogo: com a tabela zerada o "1º" seria só o primeiro da lista), a final quando está definida e o campeão — com `voce_e_campeao`
+ * para quem é do time campeão.
+ */
+function resumoParaInicio(camp, userId) {
+  const jogos = jogosReais(camp);
+  const lancados = jogos.filter((c) => c.jogado).length;
+  const porId = Object.fromEntries(camp.times.map((t) => [t.id, t]));
+  const cartao = (t) => (t ? { nome: t.nome, cor: t.cor } : null);
+  const out = {
+    id: camp.id, nome: camp.nome, formato: camp.formato, estado: camp.estado, fase: faseDoCampeonato(camp),
+    jogos_lancados: lancados, jogos_total: jogos.length, primeiros: [], final: null, campeao: null, voce_e_campeao: false,
+    terminado_em: camp.terminado_em || null, origem_data: camp.origem_data || null,
+  };
+  if ((camp.formato === 'pontos' || camp.formato === 'pontos_final') && lancados > 0) {
+    out.primeiros = classificacao(camp).slice(0, 2).map((l, i) => ({ nome: l.nome, cor: l.cor, PTS: l.PTS, pos: l.pos ?? i + 1 }));
+  }
+  const final = camp.formato === 'pontos_final' ? confrontoFinal(camp) : null;
+  if (final && final.time_a_id && !final.jogado) out.final = { a: cartao(porId[final.time_a_id]), b: cartao(porId[final.time_b_id]) };
+  const campeao = camp.campeao_time_id ? porId[camp.campeao_time_id] : null;
+  if (campeao) {
+    out.campeao = cartao(campeao);
+    out.voce_e_campeao = !!userId && (campeao.jogadores || []).some((j) => j.user_id && String(j.user_id) === String(userId));
+  }
+  return out;
+}
+
+/** Qual campeonato o Início mostra: o que está em andamento (o mais novo) ou, se não há, o que terminou há menos de uma semana. */
+function resumoDoInicio(campeonatos, userId, agora = Date.now()) {
+  const emCurso = (campeonatos || []).filter((c) => c.estado !== 'terminado').sort((a, b) => String(b.criado_em || '').localeCompare(String(a.criado_em || '')))[0];
+  if (emCurso) return resumoParaInicio(emCurso, userId);
+  const limite = agora - DIAS_DO_CAMPEAO_NO_INICIO * 86400000;
+  const recente = (campeonatos || [])
+    .filter((c) => c.estado === 'terminado' && c.terminado_em && Date.parse(c.terminado_em) >= limite)
+    .sort((a, b) => String(b.terminado_em).localeCompare(String(a.terminado_em)))[0];
+  return recente ? resumoParaInicio(recente, userId) : null;
+}
+
+// O Início é a tela mais pedida do app: ler os campeonatos do Storage a cada pedido seria pesado. Fica guardado 30 s por time, e
+// qualquer gravação (guardar/apagar) o esquece na hora. Só os 3 documentos mexidos mais recentemente são lidos.
+const CACHE_DO_INICIO_MS = 30000;
+const cacheDoInicio = new Map();
+const esquecerCacheDoInicio = (teamId) => { cacheDoInicio.delete(teamId); };
+
+async function campeonatosRecentes(teamId, max = 3) {
+  const guardado = cacheDoInicio.get(teamId);
+  if (guardado && Date.now() - guardado.em < CACHE_DO_INICIO_MS) return guardado.camps;
+  const { data } = await comPrazo(supabase.storage.from(BUCKET).list(`t/${teamId}`, { limit: 200 }), 3000, 'campeonatos/recentes');
+  const quando = (f) => String(f.updated_at || f.created_at || '');
+  const arquivos = (data || []).filter((f) => f.name.endsWith('.json')).sort((a, b) => quando(b).localeCompare(quando(a))).slice(0, max);
+  const camps = (await Promise.all(arquivos.map((f) => obter(teamId, f.name.replace(/\.json$/, ''))))).filter(Boolean);
+  cacheDoInicio.set(teamId, { em: Date.now(), camps });
+  return camps;
+}
+
+// ─── O post do campeão na Resenha ────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * O que o post "campeão do campeonato" guarda: o time campeão com os jogadores, o pódio e o placar da final (com o vencedor dos
+ * pênaltis, se houve). Vai em `feed_posts.conteudo` (jsonb que já existe) com `conteudo.tipo = 'campeao_campeonato'`; o `tipo` da
+ * linha fica 'post' (o CHECK da coluna só aceita post, anuncio, jogo e voto).
+ */
+function conteudoDoPostDoCampeao(camp) {
+  const porId = Object.fromEntries(camp.times.map((t) => [t.id, t]));
+  const campeao = porId[camp.campeao_time_id];
+  if (!campeao) return null;
+  const f = confrontoDaFinal(camp);
+  const final = f && f.jogado ? {
+    a: { nome: porId[f.time_a_id]?.nome || '—', gols: f.placar_a },
+    b: { nome: porId[f.time_b_id]?.nome || '—', gols: f.placar_b },
+    penaltis: f.penaltis_vencedor_id ? porId[f.penaltis_vencedor_id]?.nome || null : null,
+  } : null;
+  const conteudo = {
+    tipo: 'campeao_campeonato', campeonato_id: camp.id, campeonato_nome: camp.nome, formato: camp.formato,
+    campeao: {
+      nome: campeao.nome, cor: campeao.cor,
+      jogadores: (campeao.jogadores || []).map((j) => ({ user_id: j.user_id || null, nome: j.nome, avatar_url: j.avatar_url || null, convidado: !!j.convidado })),
+    },
+    podio: podio(camp).map((p) => ({ pos: p.pos, nome: p.time.nome, cor: p.time.cor })),
+    final,
+  };
+  return { body: `🏆 ${campeao.nome} campeão do ${camp.nome}`.slice(0, 2000), conteudo };
+}
+
 // Aplica um resultado (só admin, validado na rota). Recalcula bracket/estado. `avisos` recebe o que o admin precisa saber
 // (hoje: a final que foi refeita porque uma correção mudou quem são o 1º e o 2º).
-function aplicarResultado(camp, confrontoId, pa, pb, avisos = []) {
+// O último jogo do campeonato: a final de "todos contra todos + final" ou o confronto da última rodada do mata-mata. Pontos
+// corridos não tem final (o líder da tabela é o campeão).
+function confrontoDaFinal(camp) {
+  if (camp.formato === 'pontos_final') return confrontoFinal(camp);
+  if (camp.formato === 'mata') {
+    const ultima = Math.max(...camp.confrontos.map((x) => x.ronda));
+    return camp.confrontos.find((x) => x.ronda === ultima) || null;
+  }
+  return null;
+}
+
+// Placar empatado não decide jogo eliminatório (a final e o mata-mata): o placar fica como foi digitado e quem passou/levantou a
+// taça é o vencedor dos pênaltis.
+const ehEliminatoria = (camp, c) => camp.formato === 'mata' || (camp.formato === 'pontos_final' && c.fase === 'final');
+
+// `penaltisVencedorId` só vale (e só é exigido) quando o placar de um jogo eliminatório empata. Depois do campeão só a FINAL pode
+// ser corrigida (um placar digitado errado na decisão não pode ficar para sempre); os jogos de antes mexeriam em quem chegou lá.
+function aplicarResultado(camp, confrontoId, pa, pb, avisos = [], penaltisVencedorId = null) {
   const c = camp.confrontos.find((x) => x.id === confrontoId);
   if (!c) throw new Error('Confronto não encontrado.');
-  const ehFinal = camp.formato === 'pontos_final' && c.fase === 'final';
+  const final = confrontoDaFinal(camp);
+  const ehFinal = !!final && final.id === c.id;
+  if (camp.estado === 'terminado' && !ehFinal) throw new Error(camp.formato === 'pontos_final' ? MSG_FINAL_JOGADA : 'Campeonato já terminou.');
   if (!c.time_a_id || !c.time_b_id) {
-    throw new Error(ehFinal ? 'A final só abre depois do último jogo da fase de grupos.' : 'Confronto ainda não tem os dois times.');
+    throw new Error(ehFinal && camp.formato === 'pontos_final' ? 'A final só abre depois do último jogo da fase de grupos.' : 'Confronto ainda não tem os dois times.');
   }
-  if (camp.formato === 'mata' && pa === pb) throw new Error('No mata-mata não há empate. Desempate no resultado.');
-  // A final é como a do mata-mata: placar empatado não vale, o desempate (pênaltis) entra no próprio placar.
-  if (ehFinal && pa === pb) throw new Error('Na final não há empate. Se foi para os pênaltis, lance o placar já com o desempate (ex.: 4 × 3).');
+  let penaltis = null;
+  if (pa === pb && ehEliminatoria(camp, c)) {
+    if (penaltisVencedorId !== c.time_a_id && penaltisVencedorId !== c.time_b_id) throw new Error('Empatou: diga quem venceu nos pênaltis.');
+    penaltis = penaltisVencedorId;
+  }
   c.placar_a = pa; c.placar_b = pb; c.jogado = true;
-  c.vencedor_id = pa > pb ? c.time_a_id : pb > pa ? c.time_b_id : null;
+  c.penaltis_vencedor_id = penaltis;
+  c.vencedor_id = penaltis || (pa > pb ? c.time_a_id : pb > pa ? c.time_b_id : null);
+  const agora = new Date().toISOString();
 
   if (camp.formato === 'pontos_final') {
     if (ehFinal) {
       camp.campeao_time_id = c.vencedor_id;
       camp.estado = 'terminado';
-      camp.terminado_em = new Date().toISOString();
+      camp.terminado_em = camp.terminado_em || agora; // corrigir a final não renova os 30 dias dos selos
     } else {
       sincronizarFinal(camp, avisos);
     }
   } else if (camp.formato === 'mata') {
     colocarVencedor(camp.confrontos, c);
-    const ultima = Math.max(...camp.confrontos.map((x) => x.ronda));
-    const final = camp.confrontos.find((x) => x.ronda === ultima);
     if (final.jogado && final.vencedor_id) {
       camp.campeao_time_id = final.vencedor_id;
       camp.estado = 'terminado';
-      camp.terminado_em = new Date().toISOString();
+      camp.terminado_em = camp.terminado_em || agora;
     }
   } else {
     // pontos: se todos jogados, termina e coroa o líder
@@ -571,6 +704,13 @@ module.exports = {
   JOGO_RECENTE_DIAS,
   enriquecer,
   tabelaDaFase1,
+  confrontoDaFinal,
+  resumoParaInicio,
+  resumoDoInicio,
+  campeonatosRecentes,
+  esquecerCacheDoInicio,
+  conteudoDoPostDoCampeao,
+  DIAS_DO_CAMPEAO_NO_INICIO,
   decidirEmpate,
   montar,
   criar,

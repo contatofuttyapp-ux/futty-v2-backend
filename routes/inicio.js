@@ -78,6 +78,8 @@ router.get(
         const proximo = (convites?.games || []).find((g) => g.status !== 'finished');
         return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id })) : null;
       }),
+      // O campeonato novo do time principal (todo membro vê): em andamento ou o campeão da última semana.
+      principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonatoNovo(principal, userId)) : null)),
     ]));
 
     const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2, seu_time] = await Promise.all([
@@ -106,7 +108,7 @@ router.get(
       onda2P,
       seuTimeP,
     ]);
-    const [votacao_status, campeonato, rsvp] = onda2;
+    const [votacao_status, campeonato, rsvp, campeonato_novo] = onda2;
     // 'dados' = o tempo real de espera de TODAS as partes juntas. As medidas por
     // parte acima sobrepõem-se entre si (correm em paralelo): servem para ver
     // qual é a lenta, não para somar.
@@ -114,6 +116,8 @@ router.get(
 
     res.json({
       me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp,
+      // O campeonato NOVO do time (ver obterCampeonatoNovo); `campeonato` acima é o antigo, de 2 times.
+      campeonato_novo: campeonato_novo || null,
       // [{ team_id, slug, nome, fuso, pendencias }] — um por time em que a pessoa é admin ([] = não administra nenhum).
       seu_time: seu_time || [],
       // `ad` continua a ser o slot do Início e com a MESMA forma de antes

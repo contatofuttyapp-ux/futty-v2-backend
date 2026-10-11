@@ -205,6 +205,13 @@ async function ensureBucket() {
 // FEED
 // =====================================================================
 
+// O post do campeão do campeonato (utils/postDoCampeao.js): linha de tipo 'post' com o retrato em `conteudo`.
+const ehPostDoCampeao = (p) => p.conteudo?.tipo === 'campeao_campeonato';
+const conteudoDoCampeaoComAvatares = (conteudo, avatarOf) => ({
+  ...conteudo,
+  campeao: { ...conteudo.campeao, jogadores: (conteudo.campeao?.jogadores || []).map((j) => ({ ...j, avatar_url: (j.user_id && avatarOf(j.user_id)) || j.avatar_url || null })) },
+});
+
 /**
  * GET /api/feed — feed unificado (jogos com campeão definido + posts),
  * ordenado por created_at DESC. Só de equipas onde o utilizador é membro.
@@ -308,6 +315,9 @@ router.get(
       for (const id of [g.artilheiro_user_id, g.destaque_user_id, g.rodada_user_id]) if (id) idsConhecidos.add(id);
     }
     for (const p of posts) if (p.author_id) idsConhecidos.add(p.author_id);
+    // O post do campeão do campeonato traz os jogadores do time campeão: o avatar de cada um vem do cadastro de hoje, não da foto
+    // de quando o campeonato foi criado.
+    for (const p of posts) for (const j of ehPostDoCampeao(p) ? p.conteudo.campeao?.jogadores || [] : []) if (j.user_id) idsConhecidos.add(j.user_id);
 
     // Onda 3: tudo o que depende dos ids acima, de uma vez só — média, os 2
     // comentários recentes de cada lado, as reações de cada lado e os users.
@@ -406,7 +416,7 @@ router.get(
         author_avatar_url: avatarOf(p.author_id),
         body: p.body,
         tipo: p.tipo || 'post',
-        conteudo: p.conteudo || null,
+        conteudo: ehPostDoCampeao(p) ? conteudoDoCampeaoComAvatares(p.conteudo, avatarOf) : p.conteudo || null,
         media: mediaByPost[p.id] || [],
         contagem_reacoes: reacPosts[p.id]?.contagem || {},
         minha_reacao: reacPosts[p.id]?.minha || null,

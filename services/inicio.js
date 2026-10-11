@@ -13,6 +13,7 @@ const { ehAdulto } = require('../utils/rostoPublico');
 const { temIdadeMinima } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
+const campeonatoStore = require('../utils/campeonatoStore'); // o campeonato novo no Início
 const denunciaStore = require('../utils/denunciaStore');
 const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time"
 const { criarCache } = require('../utils/cacheQuente');
@@ -564,6 +565,15 @@ async function obterCampeonato(slug, userId, conhecido = null) {
   return { campeonato, jornadas: jornadas || [] };
 }
 
+// ─── O campeonato NOVO (N times, no Storage) no Início de todo o time ─────────────────────────────────────────────────────
+// Em andamento: o mais novo; terminado: o campeão por 7 dias. O card antigo (2 times, tabela `campeonatos`) segue em `obterCampeonato`.
+// Os documentos saem do cache do store (30 s por time), então o Início não paga uma ida ao Storage a cada pedido.
+async function obterCampeonatoNovo(principal, userId) {
+  const camps = await campeonatoStore.campeonatosRecentes(principal.id);
+  const resumo = campeonatoStore.resumoDoInicio(camps, userId);
+  return resumo ? { ...resumo, team_slug: principal.slug } : null;
+}
+
 // ─── GET /api/jogos/:gameId/rsvp ──────────────────────────────────────────────
 // `teamId`: o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
 // que só precisa do time e do jogo saem NA MESMA ida ao banco — em fila seriam duas (loadGame, e só depois o resto). Se o jogo
@@ -736,6 +746,7 @@ module.exports = {
   obterDesfechosDenuncias,
   obterVotacaoStatus,
   obterCampeonato,
+  obterCampeonatoNovo,
   obterRsvp,
   obterAd,
   obterAdsSessao,

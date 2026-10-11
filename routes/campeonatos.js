@@ -8,7 +8,7 @@ const { supabase, requireTeamMember, getTeamBySlug, getRole } = require('../util
 const store = require('../utils/campeonatoStore');
 const selosCache = require('../utils/selosCache');
 const { buildRanking } = require('./ranking');
-const { fusoDoTime, dataNoFuso } = require('../utils/fuso');
+const { sincronizarPostDoCampeao, apagarPostDoCampeao } = require('../utils/postDoCampeao');
 
 const router = express.Router();
 
@@ -23,6 +23,16 @@ const mensagemMinTimes = (formato) => (formato === 'pontos_final'
 
 // Anexa a classificação (pontos), a pendência de empate (todos contra todos + final) e o campeão resolvido ao payload.
 const enriquecer = (camp) => store.enriquecer(camp);
+
+// O campeonato terminou (ou a final foi corrigida): a Resenha ganha UM post do campeão, ou o mesmo post é atualizado. O id do post
+// fica no documento do campeonato; se a gravação do id falhar, a próxima sincronização o reencontra pela busca em `conteudo`.
+async function postarOCampeao(team, camp, autorId) {
+  const postId = await sincronizarPostDoCampeao({ supabase, team, camp, autorId });
+  if (postId && postId !== camp.post_id) {
+    camp.post_id = postId;
+    await store.guardar(camp).catch((e) => console.error('[Futty] post_id do campeonato:', e.message));
+  }
+}
 
 const SELO_DIAS = 30;
 const HONRA_CAMP = { 1: 'CAMPEÃO', 2: 'VICE', 3: '3º LUGAR' };
@@ -209,11 +219,11 @@ router.post(
       convidado: !!j.convidado,
     })));
 
-    // A data do jogo no nome do campeonato é a do CAMPO (fuso do time), não a do servidor.
-    const dataJogo = game.data ? dataNoFuso(game.data, fusoDoTime(team)) : null;
-    const nome = dataJogo ? `Campeonato do sorteio · ${dataJogo}` : 'Campeonato do sorteio';
+    // O nome é do admin (a tela o traz preenchido com "Campeonato <time>"); sem nome, o mesmo padrão. A data do jogo não entra no
+    // nome: vai gravada em `origem_data` e a página do campeonato a mostra como subtítulo.
+    const nome = String(req.body?.nome || '').trim().slice(0, 60) || `Campeonato ${team.nome}`.slice(0, 60);
 
-    const origem = { game_id: game.id, assinatura: store.assinaturaDosTimes(timesSorteio) };
+    const origem = { game_id: game.id, assinatura: store.assinaturaDosTimes(timesSorteio), data: game.data || null };
     const camp = await store.criar(team.id, req.user.id, { nome, formato, nomes, plantel, origem });
     res.status(201).json({ campeonato: enriquecer(camp) });
   })
@@ -313,25 +323,25 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só o admin lança resultados.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
-    // Com a final jogada o campeão já foi coroado (e os selos já saíram): corrigir a fase de grupos agora mexeria no pódio.
-    if (camp.estado === 'terminado') {
-      throw camp.formato === 'pontos_final'
-        ? new HttpError(409, store.MSG_FINAL_JOGADA)
-        : new HttpError(400, 'Campeonato já terminou.');
-    }
-
     const pa = Math.max(0, Math.floor(Number(req.body?.placar_a)));
     const pb = Math.max(0, Math.floor(Number(req.body?.placar_b)));
     if (!Number.isFinite(pa) || !Number.isFinite(pb)) throw new HttpError(400, 'Placar inválido.');
 
+    // Placar empatado numa final ou num jogo do mata-mata só vale com o vencedor dos pênaltis (o placar fica como foi digitado).
+    const penaltis = req.body?.penaltis_vencedor_id ? String(req.body.penaltis_vencedor_id) : null;
+
     const avisos = [];
     try {
-      store.aplicarResultado(camp, req.params.cid, pa, pb, avisos);
+      // Com o campeão coroado (e os selos já fora) só a FINAL pode ser corrigida; antes disso o motor barra o resto com a explicação.
+      store.aplicarResultado(camp, req.params.cid, pa, pb, avisos, penaltis);
     } catch (e) {
-      throw new HttpError(400, e.message);
+      throw new HttpError(e.message === store.MSG_FINAL_JOGADA ? 409 : 400, e.message);
     }
     await store.guardar(camp);
-    if (camp.estado === 'terminado') selosCache.invalidarEquipa(team.id); // o último resultado coroou alguém
+    if (camp.estado === 'terminado') {
+      selosCache.invalidarEquipa(team.id); // o último resultado coroou alguém (ou a final foi corrigida)
+      await postarOCampeao(team, camp, req.user.id);
+    }
     res.json({ campeonato: enriquecer(camp), avisos });
   })
 );
@@ -375,6 +385,7 @@ router.post(
     store.terminarPontos(camp);
     await store.guardar(camp);
     selosCache.invalidarEquipa(team.id);
+    await postarOCampeao(team, camp, req.user.id);
     res.json({ campeonato: enriquecer(camp) });
   })
 );
@@ -386,6 +397,9 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só o admin exclui campeonatos.');
+    // O post do campeão não pode sobrar na Resenha apontando para um campeonato que não existe mais.
+    const camp = await store.obter(team.id, req.params.id);
+    if (camp) await apagarPostDoCampeao({ supabase, team, camp });
     await store.apagar(team.id, req.params.id);
     selosCache.invalidarEquipa(team.id); // se já tinha terminado, o selo sai junto
     res.json({ ok: true });

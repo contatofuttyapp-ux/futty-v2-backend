@@ -288,15 +288,16 @@ test('empate pelo 3º lugar não bloqueia a final: os dois dividem o 3º', () =>
 
 // ─── A final ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-test('final empatada não vale (a regra do mata-mata): o placar é recusado e nada muda', () => {
+test('final empatada sem o vencedor dos pênaltis não grava: o motor pede o vencedor e nada muda (a tela pergunta antes de enviar)', () => {
   const camp = comFinalCriada();
-  assert.throws(() => store.aplicarResultado(camp, final(camp).id, 2, 2), /Na final não há empate/);
+  assert.throws(() => store.aplicarResultado(camp, final(camp).id, 2, 2), /Empatou: diga quem venceu nos pênaltis/);
+  assert.throws(() => store.aplicarResultado(camp, final(camp).id, 2, 2, [], idDe(camp, 'Bronze')), /Empatou: diga quem venceu nos pênaltis/, 'quem não joga a final não pode ganhar nos pênaltis');
   assert.equal(final(camp).jogado, false);
   assert.equal(final(camp).placar_a, null);
   assert.equal(camp.estado, 'em_curso');
-  // o mata-mata continua com a frase de sempre
+  // o mata-mata pede o mesmo
   const mata = campeonato(['A', 'B', 'C', 'D'], 'mata');
-  assert.throws(() => store.aplicarResultado(mata, mata.confrontos[0].id, 1, 1), /No mata-mata não há empate/);
+  assert.throws(() => store.aplicarResultado(mata, mata.confrontos[0].id, 1, 1), /Empatou: diga quem venceu nos pênaltis/);
 });
 
 test('a final vaga não aceita placar', () => {
@@ -512,10 +513,10 @@ test('rotas — o campeonato inteiro: fase 1, final automática, empate recusado
   // Terminar "pelo líder" não existe neste formato.
   assert.equal((await pedir('POST', `${base}/${id}/terminar`, null, DONO)).status, 400);
 
-  // Final empatada: recusada.
+  // Final empatada sem o vencedor dos pênaltis: recusada (a tela pergunta antes de enviar).
   const empate = await lancar(fin, 1, 1);
   assert.equal(empate.status, 400);
-  assert.match(empate.json.error, /Na final não há empate/);
+  assert.match(empate.json.error, /Empatou: diga quem venceu nos pênaltis/);
 
   // Final decidida: o Roxo é campeão.
   const roxo = camp.times.find((x) => x.nome === 'Time Roxo').id;
