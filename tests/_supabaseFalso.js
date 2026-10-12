@@ -64,7 +64,16 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         }
         return { data: e.retorna ? saida : null, error: null };
       }
-      let alvo = todas.filter(passa);
+      // Filtro sobre coluna do embed (`.eq('teams.brilhante_ativo', true)`): o PostgREST filtra DEPOIS de juntar, então o select junta antes.
+      const comEmbeds = (linhas) => linhas.map((l) => {
+        let saida = l;
+        for (const [nome, def] of Object.entries(relacoes[tabela] || {})) {
+          if (new RegExp(`\\b${nome}(!inner)?\\s*\\(`).test(e.cols || '')) saida = { ...saida, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null };
+        }
+        return saida;
+      });
+      const fonte = e.op === 'select' && (e.colunas || []).some((c) => c.includes('.')) ? comEmbeds(todas) : todas;
+      let alvo = fonte.filter(passa);
       if (e.op === 'update') {
         for (const l of alvo) Object.assign(l, copia(e.patch));
         return { data: e.retorna ? alvo.map(copia) : null, error: null };

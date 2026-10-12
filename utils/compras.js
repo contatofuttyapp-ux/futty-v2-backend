@@ -19,6 +19,11 @@ const { somarCreditos } = require('./direitoBrilhante');
 
 // A Minha Figurinha dá 10 gerações.
 const MINHA_GERACOES = 10;
+// Cada pacote do time dá +2 gerações para CADA jogador (até 25 por time). O pacote pode ser comprado quantas vezes o dono quiser, como presente
+// para o time: o que cada jogador pode gerar no time é `teams.brilhante_por_jogador` = 2 × os pacotes do time, e o que ele já gerou
+// (brilhantes_time.geracoes) fica como está — o saldo é a diferença, então cada pacote novo soma em cima do que sobrou. Quem entra depois
+// começa do zero gasto e recebe tudo o que os pacotes já comprados dão.
+const GERACOES_POR_PACOTE = 2;
 const PRODUTOS = ['minha', 'pacote', 'manto'];
 const LOJAS = ['app_store', 'play_store', 'promo', 'gabinete', 'outra'];
 
@@ -91,16 +96,53 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
     return data;
   }
 
-  /** Liga o pacote. Sem a 064 (coluna brilhante_origem), liga sem ela — só o Gabinete chega aqui assim. */
-  async function ligarPacote(teamId, { kitId, loja }) {
-    const patch = { brilhante_ativo: true, brilhante_ativado_em: new Date().toISOString(), brilhante_kit: kitId, brilhante_origem: loja };
-    const { error } = await supabase.from('teams').update(patch).eq('id', teamId);
-    if (!error) return;
-    if (!/brilhante_origem/i.test(error.message)) throw new Error(error.message);
-    console.warn('[compras] teams.brilhante_origem em falta (migração 064 aplicada?) — pacote ligado sem a origem');
-    delete patch.brilhante_origem;
-    const { error: erro2 } = await supabase.from('teams').update(patch).eq('id', teamId);
-    if (erro2) throw new Error(erro2.message);
+  /** Quantos pacotes creditados o time tem (a conta que dá as gerações por jogador). */
+  async function contarPacotes(teamId) {
+    const { count, error } = await supabase.from('compras').select('id', { count: 'exact', head: true })
+      .eq('team_id', teamId).eq('produto', 'pacote').eq('estado', 'creditada');
+    if (error) throw new Error(error.message);
+    return count || 0;
+  }
+
+  /**
+   * Liga o pacote (ou soma mais um a um time que já tem). `porJogador` é o total de gerações por jogador depois desta compra (null = não mexe,
+   * o padrão do banco vale). Sem a 064 (coluna brilhante_origem) ou a 059 (brilhante_por_jogador), liga sem elas — fail-safe de sempre.
+   * O uniforme (`brilhante_kit`) é o que o dono escolheu e não muda com a compra; a data de ativação é a do 1º pacote.
+   */
+  async function ligarPacote(teamId, { kitId, loja, porJogador = null, jaAtivo = false }) {
+    const patch = { brilhante_ativo: true, brilhante_kit: kitId, brilhante_origem: loja };
+    if (!jaAtivo) patch.brilhante_ativado_em = new Date().toISOString();
+    if (porJogador != null) patch.brilhante_por_jogador = porJogador;
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      const { error } = await supabase.from('teams').update(patch).eq('id', teamId);
+      if (!error) return;
+      const coluna = ['brilhante_origem', 'brilhante_por_jogador'].find((c) => c in patch && new RegExp(c, 'i').test(error.message));
+      if (!coluna) throw new Error(error.message);
+      console.warn(`[compras] teams.${coluna} em falta (migração aplicada?) — pacote ligado sem ela`);
+      delete patch[coluna];
+    }
+    throw new Error('Não deu para ligar o pacote do time.');
+  }
+
+  /**
+   * Gerações por jogador que o time deve ter DEPOIS desta compra já gravada, ou null se não há como contar (sem a tabela compras).
+   * Time já ativo cuja ÚNICA compra registrada é esta: o pacote que ele já tinha (ligado à mão, antes de existir a tabela) não tem linha. Ganha
+   * uma agora (loja 'gabinete', transação `legado-<time>`, preço 0, marcada `payload.legado` para não entrar na receita nem nas concessões do mês),
+   * e daqui em diante todo pacote do time, de onde veio que veio, é uma linha — a conta é só contar linhas.
+   */
+  async function geracoesDoTime(teamId, time, registra) {
+    if (!registra) return null;
+    let pacotes = await contarPacotes(teamId);
+    if (time.brilhante_ativo && pacotes === 1) {
+      const agora = new Date().toISOString();
+      const { error } = await supabase.from('compras').insert({
+        user_id: null, team_id: teamId, produto: 'pacote', loja: 'gabinete', transacao_id: `legado-${teamId}`, ambiente: 'producao',
+        moeda: null, preco: 0, preco_usd: 0, estado: 'creditada', creditada_em: agora, payload: { legado: true },
+      });
+      if (error && error.code !== '23505') throw new Error(error.message);
+      pacotes = await contarPacotes(teamId);
+    }
+    return GERACOES_POR_PACOTE * pacotes;
   }
 
   /**
@@ -193,18 +235,19 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
         // dois fica null e ninguém gera até o uniforme ser fixado (direitoBrilhante salta
         // pacote sem kit).
         const kit = (doGabinete && kitId) || time.brilhante_kit || null;
-        await ligarPacote(teamId, { kitId: kit, loja });
+        const porJogador = await geracoesDoTime(teamId, time, registra);
+        await ligarPacote(teamId, { kitId: kit, loja, porJogador, jaAtivo: !!time.brilhante_ativo });
         resultado.kitId = kit;
+        resultado.porJogador = porJogador;
+        resultado.presente = !!time.brilhante_ativo; // o time já tinha o pacote: este é mais um, de presente
         await resolverPedidos({ team_id: teamId, produto: 'pacote' });
         if (kit) {
           const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
           const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
           resultado.membrosAvisados = ids.length;
-          notificar(ids, {
-            title: 'Sua figurinha foi liberada ✨',
-            body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`,
-            url: '/figurinha',
-          });
+          notificar(ids, time.brilhante_ativo
+            ? { title: 'Mais figurinhas pro seu time ✨', body: `O ${time.nome} ganhou +${GERACOES_POR_PACOTE} gerações para cada jogador. Abra e gere a sua.`, url: '/figurinha' }
+            : { title: 'Sua figurinha foi liberada ✨', body: `O ${time.nome} ativou as figurinhas. Abra e gere a sua.`, url: '/figurinha' });
         } else {
           resultado.membrosAvisados = 0;
           notificar([userId], {
@@ -277,6 +320,12 @@ function criarCompras({ supabase = supabaseReal, notificar = notificarReal } = {
         resultado.pacoteDesligado = true;
       } else {
         resultado.pacoteDesligado = false;
+        // O pacote reembolsado deixa de dar as gerações dele: sobra 2 × os que continuam creditados (no mínimo o 1 que o time ativo tem).
+        // O que cada jogador já gerou não volta: o saldo nunca sai negativo (temDireito corta em 0).
+        const porJogador = Math.max(GERACOES_POR_PACOTE, GERACOES_POR_PACOTE * (count || 0));
+        const { error: erroGeracoes } = await supabase.from('teams').update({ brilhante_por_jogador: porJogador }).eq('id', compra.team_id);
+        if (erroGeracoes && !/brilhante_por_jogador/i.test(erroGeracoes.message)) throw new Error(erroGeracoes.message);
+        resultado.porJogador = porJogador;
       }
     }
     console.log('[compras] reembolso aplicado', { loja, produto: compra.produto, compraId: compra.id, ...resultado });
@@ -325,7 +374,7 @@ function resumirReceita(linhas = []) {
   const r = { receita_mes: 0, compras_mes: 0, sandbox_mes: 0, reembolsadas_mes: 0, concessoes_mes: 0, por_produto: { minha: 0, pacote: 0, manto: 0 } };
   let centavos = 0;
   for (const c of linhas) {
-    if (c.estado === 'ignorada') continue;
+    if (c.estado === 'ignorada' || c.payload?.legado) continue; // o pacote antigo, sem linha, que a compra de um 2º pacote registra
     if (c.ambiente === 'sandbox') { r.sandbox_mes += 1; continue; }
     if (c.estado === 'reembolsada') { r.reembolsadas_mes += 1; continue; }
     if (c.estado !== 'creditada') continue;
@@ -345,6 +394,7 @@ module.exports = {
   criarCompras,
   ErroCompra,
   MINHA_GERACOES,
+  GERACOES_POR_PACOTE,
   PRODUTOS,
   LOJAS,
   ehTabelaEmFalta,

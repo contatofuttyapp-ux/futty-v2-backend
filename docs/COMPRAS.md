@@ -83,3 +83,6 @@ No painel do RevenueCat: os 3 produtos criados como **consumíveis** na App Stor
 5. Reembolso: no painel do RevenueCat, abrir o cliente → a transação → *Refund* → a linha vira `reembolsada` e os créditos descem.
 
 Sandbox **credita de verdade** no banco (é o mesmo Supabase). A receita do Gabinete conta só produção; o sandbox aparece em `sandbox_mes`.
+
+## O Pacote do time pode ser comprado mais de uma vez (Rodada 31F)
+O dono do time compra o `futty_pacote` quantas vezes quiser, como presente para o time. Cada compra soma **+2 gerações para cada jogador** (até 25 jogadores, a regra de sempre), em cima do que cada um ainda tem: o que o jogador pode gerar no time é `teams.brilhante_por_jogador` (= 2 × os pacotes creditados do time, contados em `compras`), e o que ele já gerou (`brilhantes_time.geracoes`) não muda — o saldo é a diferença. Quem entra depois começa do zero gasto e recebe tudo o que os pacotes já comprados dão. Idempotência: a mesma transação (loja + id) nunca soma duas vezes. O uniforme (`brilhante_kit`) continua o que o dono escolheu. Um time ligado à mão antes de existir a tabela `compras` ganha uma linha `legado-<time>` (loja gabinete, preço 0, `payload.legado`) quando compra o 2º pacote, para a conta ser só contar linhas. Reembolso de um pacote tira as 2 dele (e desliga o pacote só quando não sobra nenhum). Sem migração.
