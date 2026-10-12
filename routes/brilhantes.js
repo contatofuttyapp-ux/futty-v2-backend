@@ -13,7 +13,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
 const { temDireito, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
-const { lojaPronta } = require('../utils/lojaPronta');
+const { lojaPronta, ehTestador } = require('../utils/lojaPronta');
 
 const router = express.Router();
 
@@ -96,6 +96,8 @@ router.get(
       // A loja aparece no app quando o MOTOR diz — ligar sem build novo (P2 lê daqui). Aberta a todos (PAGAMENTOS_ATIVOS) ou só a esta conta,
       // se o e-mail autenticado dela está em PAGAMENTOS_TESTERS (utils/lojaPronta.js).
       loja_pronta: lojaPronta(req.user),
+      // Esta conta é de testador da loja (PAGAMENTOS_TESTERS)? A tela só usa para mostrar o detalhe técnico de uma compra que falhou.
+      testador_loja: ehTestador(req.user),
     });
   }),
 );

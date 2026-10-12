@@ -67,9 +67,11 @@ test('GET /api/brilhantes/estado: loja_pronta vem do e-mail da conta autenticada
   const testador = await pedir('GET', '/api/brilhantes/estado', null, 'testador');
   assert.equal(testador.status, 200, JSON.stringify(testador.json));
   assert.equal(testador.json.loja_pronta, true);
+  assert.equal(testador.json.testador_loja, true);
 
   const comum = await pedir('GET', '/api/brilhantes/estado', null, 'comum');
   assert.equal(comum.json.loja_pronta, false);
+  assert.equal(comum.json.testador_loja, false);
   // o e-mail de outra pessoa mandado como cabeçalho ou parâmetro não vale nada
   const forjado = await pedir('GET', '/api/brilhantes/estado?email=testador@futtymock.com', null, 'comum', { 'x-email': 'testador@futtymock.com' });
   assert.equal(forjado.json.loja_pronta, false);
@@ -79,5 +81,7 @@ test('GET /api/brilhantes/estado: loja_pronta vem do e-mail da conta autenticada
   assert.equal((await pedir('GET', '/api/brilhantes/estado', null, 'testador')).json.loja_pronta, false);
   // e com a loja aberta para todos, abre para todos
   process.env.PAGAMENTOS_ATIVOS = 'true';
-  assert.equal((await pedir('GET', '/api/brilhantes/estado', null, 'comum')).json.loja_pronta, true);
+  const comLojaAberta = await pedir('GET', '/api/brilhantes/estado', null, 'comum');
+  assert.equal(comLojaAberta.json.loja_pronta, true);
+  assert.equal(comLojaAberta.json.testador_loja, false, 'loja aberta a todos não faz de ninguém um testador');
 });
