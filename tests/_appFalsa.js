@@ -135,7 +135,13 @@ function criarStorageFalso() {
             if (!caminho.startsWith(base)) continue;
             const resto = caminho.slice(base.length);
             if (opcoes.search && !caminho.includes(opcoes.search)) continue;
-            nomes.set(resto.split('/')[0], { name: resto.split('/')[0], id: caminho, updated_at: a.em, created_at: a.em, metadata: { size: a.corpo.length, mimetype: a.tipo } });
+            // Como o Supabase: uma "pasta" (o que vem antes da próxima barra) não tem id nem metadata; só o arquivo tem. O diagnóstico e outros
+            // listam as pastas por esse id nulo.
+            const primeiro = resto.split('/')[0];
+            const ehPasta = resto.includes('/');
+            nomes.set(primeiro, ehPasta
+              ? { name: primeiro, id: null, updated_at: null, created_at: null, last_accessed_at: null, metadata: null }
+              : { name: primeiro, id: caminho, updated_at: a.em, created_at: a.em, metadata: { size: a.corpo.length, mimetype: a.tipo } });
           }
           return { data: [...nomes.values()].slice(0, opcoes.limit || 100), error: null };
         },
