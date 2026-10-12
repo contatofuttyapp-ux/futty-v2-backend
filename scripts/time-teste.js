@@ -73,23 +73,23 @@ const GENERICO = {
 // forca = nota média que os colegas dão. gr = goleiro. cabeca = cabeça de chave.
 const JOGADORES = [
   { slug: 'tonhao', apelido: 'Tonhão', nome: 'Antônio Carlos Ribeiro', pos: 'DEF', av: 'm2', forca: 3.6, nasc: '1984-02-11', admin: true },
-  { slug: 'magrao', apelido: 'Magrão', nome: 'Marcelo Augusto Dias', pos: 'ATA', av: 'm1', forca: 4.1, nasc: '1990-06-03', cabeca: true, figurinha: true },
+  { slug: 'marcelo', apelido: 'Marcelo', nome: 'Marcelo Augusto Dias', pos: 'ATA', av: 'm1', forca: 4.1, nasc: '1990-06-03', cabeca: true, figurinha: true },
   { slug: 'canhotinha', apelido: 'Canhotinha', nome: 'Vinícius Araújo', pos: 'MEI', av: 'm3', forca: 4.3, nasc: '1996-09-21', cabeca: true, figurinha: true },
   { slug: 'fumaca', apelido: 'Fumaça', nome: 'Wellington Rocha', pos: 'ATA', av: 'm1', forca: 4.2, nasc: '1998-12-02', cabeca: true },
-  { slug: 'pezao', apelido: 'Pezão', nome: 'Rodrigo Tavares', pos: 'GL', av: 'm2', forca: 3.7, nasc: '1989-04-17', gr: true },
+  { slug: 'rodrigo', apelido: 'Rodrigo', nome: 'Rodrigo Tavares', pos: 'GL', av: 'm2', forca: 3.7, nasc: '1989-04-17', gr: true },
   { slug: 'muralha', apelido: 'Muralha', nome: 'Thiago Mendes', pos: 'GL', av: 'm3', forca: 3.4, nasc: '1993-01-29', gr: true },
   { slug: 'paredao', apelido: 'Paredão', nome: 'Everton Lima', pos: 'GL', av: 'm1', forca: 3.2, nasc: '1987-08-08', gr: true },
-  { slug: 'baixinho', apelido: 'Baixinho', nome: 'Luiz Fernando Prado', pos: 'MEI', av: 'm2', forca: 3.9, nasc: '1995-03-14' },
+  { slug: 'luiz', apelido: 'Luiz', nome: 'Luiz Fernando Prado', pos: 'MEI', av: 'm2', forca: 3.9, nasc: '1995-03-14' },
   { slug: 'xerife', apelido: 'Xerife', nome: 'Márcio Queiroz', pos: 'DEF', av: 'm3', forca: 4.0, nasc: '1986-11-30', figurinha: true },
-  { slug: 'bigode', apelido: 'Bigode', nome: 'Sérgio Nunes', pos: 'DEF', av: 'm1', forca: 3.3, nasc: '1982-07-19' },
-  { slug: 'alemao', apelido: 'Alemão', nome: 'Gustavo Weber', pos: 'DEF', av: 'm2', forca: 3.5, nasc: '1994-05-25' },
+  { slug: 'sergio', apelido: 'Sérgio', nome: 'Sérgio Nunes', pos: 'DEF', av: 'm1', forca: 3.3, nasc: '1982-07-19' },
+  { slug: 'gustavo', apelido: 'Gustavo', nome: 'Gustavo Weber', pos: 'DEF', av: 'm2', forca: 3.5, nasc: '1994-05-25' },
   { slug: 'juninho', apelido: 'Juninho', nome: 'Júlio César Moura', pos: 'ATA', av: 'm3', forca: 3.8, nasc: '2000-10-10' },
-  { slug: 'gordinho', apelido: 'Gordinho', nome: 'Leandro Barbosa', pos: 'MEI', av: 'm1', forca: 3.0, nasc: '1991-02-02' },
-  { slug: 'tche', apelido: 'Tchê', nome: 'Guilherme Fontoura', pos: 'MEI', av: 'm2', forca: 3.6, nasc: '1997-07-07' },
-  { slug: 'cabeca', apelido: 'Cabeça', nome: 'André Luiz Pinto', pos: 'ATA', av: 'm3', forca: 3.4, nasc: '1992-09-15' },
+  { slug: 'leandro', apelido: 'Leandro', nome: 'Leandro Barbosa', pos: 'MEI', av: 'm1', forca: 3.0, nasc: '1991-02-02' },
+  { slug: 'guilherme', apelido: 'Guilherme', nome: 'Guilherme Fontoura', pos: 'MEI', av: 'm2', forca: 3.6, nasc: '1997-07-07' },
+  { slug: 'andre', apelido: 'André', nome: 'André Luiz Pinto', pos: 'ATA', av: 'm3', forca: 3.4, nasc: '1992-09-15' },
   { slug: 'doutor', apelido: 'Doutor', nome: 'Felipe Andrade', pos: 'MEI', av: 'm1', forca: 3.7, nasc: '1988-12-24' },
   { slug: 'zezinho', apelido: 'Zezinho', nome: 'José Carlos Neto', pos: 'DEF', av: 'm2', forca: 2.9, nasc: '1999-04-04' },
-  { slug: 'portugues', apelido: 'Português', nome: 'Manuel Ferreira', pos: 'MEI', av: 'm3', forca: 3.1, nasc: '1985-10-31' },
+  { slug: 'manuel', apelido: 'Manuel', nome: 'Manuel Ferreira', pos: 'MEI', av: 'm3', forca: 3.1, nasc: '1985-10-31' },
   { slug: 'rafa', apelido: 'Rafa', nome: 'Rafaela Costa', pos: 'ATA', av: 'f1', forca: 3.8, nasc: '1997-06-12' },
   { slug: 'bia', apelido: 'Bia', nome: 'Beatriz Lopes', pos: 'MEI', av: 'f2', forca: 3.5, nasc: '1999-01-20' },
 ];
@@ -100,7 +100,7 @@ const porApelido = (a) => JOGADORES.find((j) => j.apelido === a);
 // molde de _bench/repor-estado-demo.js --figurinha-de. Pessoas inventadas
 // pela IA a partir da silhueta genérica — nenhuma é real.
 const FIGURINHAS = [
-  { apelido: 'Magrão', arquivo: path.join(__dirname, '_bench', 'saida-producao', 'prova-real-2026-09-17-dark-gold.png') },
+  { apelido: 'Marcelo', arquivo: path.join(__dirname, '_bench', 'saida-producao', 'prova-real-2026-09-17-dark-gold.png') },
   { apelido: 'Canhotinha', arquivo: path.join(__dirname, '_bench', 'saida-producao', 'prova-real-2026-09-22-dark-gold.png') },
   { apelido: 'Xerife', arquivo: path.join(__dirname, '_bench', 'estado-demo', 'figurinha-reposta.png') },
 ];
@@ -111,23 +111,23 @@ const FIGURINHAS = [
 // goleiros revezam 2 de cada vez (sempre 2 presentes); os outros 12 entram
 // em janelas de 3 jogos seguidos (sempre exatamente 3 presenças).
 const CONFIRMADOS_PASSADOS = [
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Muralha', 'Paredão', 'Baixinho', 'Gordinho', 'Tchê', 'Cabeça', 'Rafa', 'Bia'],
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Pezão', 'Paredão', 'Baixinho', 'Bigode', 'Tchê', 'Cabeça', 'Doutor', 'Bia'],
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Pezão', 'Muralha', 'Baixinho', 'Bigode', 'Alemão', 'Cabeça', 'Doutor', 'Zezinho'],
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Muralha', 'Paredão', 'Bigode', 'Alemão', 'Juninho', 'Doutor', 'Zezinho', 'Português'],
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Pezão', 'Paredão', 'Alemão', 'Juninho', 'Gordinho', 'Zezinho', 'Português', 'Rafa'],
-  ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Pezão', 'Muralha', 'Juninho', 'Gordinho', 'Tchê', 'Português', 'Rafa', 'Bia'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Muralha', 'Paredão', 'Luiz', 'Leandro', 'Guilherme', 'André', 'Rafa', 'Bia'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Rodrigo', 'Paredão', 'Luiz', 'Sérgio', 'Guilherme', 'André', 'Doutor', 'Bia'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Rodrigo', 'Muralha', 'Luiz', 'Sérgio', 'Gustavo', 'André', 'Doutor', 'Zezinho'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Muralha', 'Paredão', 'Sérgio', 'Gustavo', 'Juninho', 'Doutor', 'Zezinho', 'Manuel'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Rodrigo', 'Paredão', 'Gustavo', 'Juninho', 'Leandro', 'Zezinho', 'Manuel', 'Rafa'],
+  ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Rodrigo', 'Muralha', 'Juninho', 'Leandro', 'Guilherme', 'Manuel', 'Rafa', 'Bia'],
 ];
 const PLACARES_PASSADOS = [[5, 3], [2, 2], [7, 4], [3, 1], [4, 5], [6, 2]];
 
 // J1: 11 confirmam, 2 recusam, 7 não respondem (molde demo-completa.js:528-553).
-const CONFIRMADOS_J1 = ['Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Pezão', 'Muralha', 'Paredão', 'Baixinho', 'Xerife', 'Bigode', 'Alemão'];
-const RECUSARAM_J1 = ['Juninho', 'Gordinho'];
+const CONFIRMADOS_J1 = ['Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Rodrigo', 'Muralha', 'Paredão', 'Luiz', 'Xerife', 'Sérgio', 'Gustavo'];
+const RECUSARAM_J1 = ['Juninho', 'Leandro'];
 // J2: os 3 goleiros + 14 de linha (17 no total) + 1 convidado sem app.
-const CONFIRMADOS_J2 = JOGADORES.map((j) => j.apelido).filter((a) => !['Zezinho', 'Português', 'Bia'].includes(a));
+const CONFIRMADOS_J2 = JOGADORES.map((j) => j.apelido).filter((a) => !['Zezinho', 'Manuel', 'Bia'].includes(a));
 const CONVIDADOS_J2 = ['Primo do Tonhão'];
 // J3: 12 exatos, 2 goleiros.
-const CONFIRMADOS_J3 = ['Pezão', 'Muralha', 'Tonhão', 'Magrão', 'Canhotinha', 'Fumaça', 'Xerife', 'Bigode', 'Alemão', 'Juninho', 'Tchê', 'Doutor'];
+const CONFIRMADOS_J3 = ['Rodrigo', 'Muralha', 'Tonhão', 'Marcelo', 'Canhotinha', 'Fumaça', 'Xerife', 'Sérgio', 'Gustavo', 'Juninho', 'Guilherme', 'Doutor'];
 
 // Fotos livres de direitos (CREDITOS-FOTOS.md) — conferidas uma a uma à mão.
 const FOTOS = {
@@ -148,7 +148,7 @@ const FOTOS = {
 const POSTS = [
   {
     autor: 'Fumaça', horas: 5, texto: 'Golaço de fora da área na quinta, alguém filmou? 🚀', foto: 'bola-na-rede',
-    reacoes: { Tonhão: '😮', Magrão: '👍', Canhotinha: '😮', Xerife: '👍', Bigode: '👍', Rafa: '🍿' },
+    reacoes: { Tonhão: '😮', Marcelo: '👍', Canhotinha: '😮', Xerife: '👍', Sérgio: '👍', Rafa: '🍿' },
     comentarios: [
       { de: 'Xerife', txt: 'Eu vi, foi de primeira, subiu no ângulo.' },
       { de: 'Canhotinha', txt: 'Eu tava filmando mas travou o celular bem na hora 😢' },
@@ -157,7 +157,7 @@ const POSTS = [
   },
   {
     autor: 'Bia', horas: 20, texto: 'A grama nova do campo 2 ficou top demais 🌱', foto: 'campo-linhas',
-    reacoes: { Tonhão: '👍', Doutor: '❤️', Tchê: '👍', Cabeça: '👍' },
+    reacoes: { Tonhão: '👍', Doutor: '❤️', Guilherme: '👍', André: '👍' },
     comentarios: [
       { de: 'Doutor', txt: 'Finalmente sem buraco perto do gol.' },
       { de: 'Bia', txt: 'Agora só falta a rede nova 😂', resp: 0 },
@@ -165,27 +165,27 @@ const POSTS = [
   },
   {
     autor: 'Juninho', horas: 30, texto: 'Quem leva a bola sábado? A minha furou 😂',
-    reacoes: { Alemão: '😂', Gordinho: '😂', Baixinho: '👍' },
+    reacoes: { Gustavo: '😂', Leandro: '😂', Luiz: '👍' },
     comentarios: [
       { de: 'Tonhão', txt: 'Eu levo, já separei.' },
       { de: 'Xerife', txt: 'Furou de novo? Essa bola já era, Juninho 😂' },
       { de: 'Juninho', txt: 'Pisei em cima sem querer, jura 🙈', resp: 1 },
-      { de: 'Bigode', txt: 'Compra uma decente que dura mais.' },
-      { de: 'Cabeça', txt: 'Levo uma reserva também, por garantia.' },
+      { de: 'Sérgio', txt: 'Compra uma decente que dura mais.' },
+      { de: 'André', txt: 'Levo uma reserva também, por garantia.' },
     ],
   },
   {
-    autor: 'Português', horas: 50, texto: 'Ó pá, depois do torneio tem churrasco? Eu levo o pão de alho 🍖', foto: 'churrasco-carne',
+    autor: 'Manuel', horas: 50, texto: 'Ó pá, depois do torneio tem churrasco? Eu levo o pão de alho 🍖', foto: 'churrasco-carne',
     reacoes: { Tonhão: '👍', Doutor: '👍', Zezinho: '❤️', Rafa: '👍', Bia: '🍿' },
     comentarios: [
       { de: 'Tonhão', txt: 'Tem sim, já separei o carvão.' },
       { de: 'Doutor', txt: 'Eu levo a linguiça então.' },
-      { de: 'Português', txt: 'Fechado! 🍻', resp: 0 },
+      { de: 'Manuel', txt: 'Fechado! 🍻', resp: 0 },
     ],
   },
   {
     autor: 'Rafa', horas: 70, texto: 'Chuteira nova estreando no sábado 👟⚽', foto: 'chuteiras',
-    reacoes: { Bia: '❤️', Canhotinha: '👍', Magrão: '👍', Juninho: '😮' },
+    reacoes: { Bia: '❤️', Canhotinha: '👍', Marcelo: '👍', Juninho: '😮' },
     comentarios: [
       { de: 'Bia', txt: 'Linda! Estreia com gol, hein.' },
       { de: 'Rafa', txt: 'Vou tentar 😂', resp: 0 },
@@ -193,7 +193,7 @@ const POSTS = [
   },
   {
     autor: 'Doutor', horas: 150, texto: 'Três anos de pelada toda quinta. Que venham mais trinta! 🏆', foto: 'trofeu', foto2: 'arquibancada',
-    reacoes: { Tonhão: '❤️', Magrão: '👍', Canhotinha: '👍', Fumaça: '❤️', Xerife: '👍', Pezão: '👍', Bia: '❤️' },
+    reacoes: { Tonhão: '❤️', Marcelo: '👍', Canhotinha: '👍', Fumaça: '❤️', Xerife: '👍', Rodrigo: '👍', Bia: '❤️' },
     comentarios: [
       { de: 'Tonhão', txt: 'Três anos! Começou com 8 gente, olha isso agora.' },
       { de: 'Xerife', txt: 'E olha que quase não teve quinta passada, chovia muito.' },
@@ -203,16 +203,16 @@ const POSTS = [
   },
   {
     autor: 'Xerife', horas: 200, texto: 'Aviso da diretoria: chegou atrasado, começa no gol 🧤😂',
-    reacoes: { Baixinho: '😂', Gordinho: '😡', Tchê: '😂', Doutor: '👍', Bigode: '😂', Alemão: '👍' },
+    reacoes: { Luiz: '😂', Leandro: '😡', Guilherme: '😂', Doutor: '👍', Sérgio: '😂', Gustavo: '👍' },
     comentarios: [
-      { de: 'Gordinho', txt: 'Injusto, o trânsito não é minha culpa 😡' },
-      { de: 'Xerife', txt: 'Regra é regra, Gordinho 😂', resp: 0 },
-      { de: 'Tchê', txt: 'Eu já nasci no gol então tanto faz pra mim.' },
+      { de: 'Leandro', txt: 'Injusto, o trânsito não é minha culpa 😡' },
+      { de: 'Xerife', txt: 'Regra é regra, Leandro 😂', resp: 0 },
+      { de: 'Guilherme', txt: 'Eu já nasci no gol então tanto faz pra mim.' },
     ],
   },
   {
     autor: 'Canhotinha', horas: 260, texto: 'Resenha pós-jogo 🍻', foto: 'grupo-de-longe',
-    reacoes: { Fumaça: '❤️', Magrão: '🍿', Tonhão: '👍', Rafa: '❤️', Zezinho: '👍' },
+    reacoes: { Fumaça: '❤️', Marcelo: '🍿', Tonhão: '👍', Rafa: '❤️', Zezinho: '👍' },
     comentarios: [
       { de: 'Fumaça', txt: 'Foi bom demais hoje.' },
       { de: 'Canhotinha', txt: 'Semana que vem tem mais 🙌', resp: 0 },
@@ -221,9 +221,9 @@ const POSTS = [
 ];
 const ANUNCIO = {
   horas: 2, titulo: 'Mensalidade de outubro', mensagem: 'Pix de R$40 até dia 5. Quem já pagou, deixa um 👍 aqui. Valeu, rapaziada!',
-  reacoes: { Magrão: '👍', Canhotinha: '👍', Fumaça: '👍', Xerife: '👍', Bigode: '👍' },
+  reacoes: { Marcelo: '👍', Canhotinha: '👍', Fumaça: '👍', Xerife: '👍', Sérgio: '👍' },
   comentarios: [
-    { de: 'Baixinho', txt: 'Já paguei, pode conferir.' },
+    { de: 'Luiz', txt: 'Já paguei, pode conferir.' },
     { de: 'Juninho', txt: 'Top, mando o comprovante no grupo.' },
   ],
 };

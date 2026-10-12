@@ -66,9 +66,9 @@ const JOGADORES = [
   { slug: 'muralha', apelido: 'Muralha', nome: 'Wagner dos Santos', pos: 'GL', av: 'm1', forca: 4.0, nasc: '1989-11-12', gr: true },
   { slug: 'juninho', apelido: 'Juninho', nome: 'José Carlos Batista Filho', pos: 'DEF', av: 'm2', forca: 3.7, nasc: '1994-04-03' },
   { slug: 'nanda', apelido: 'Nanda', nome: 'Fernanda Correia', pos: 'MEI', av: 'f2', forca: 3.8, nasc: '1997-07-19' },
-  { slug: 'bigode', apelido: 'Bigode', nome: 'Reinaldo Moreira', pos: 'DEF', av: 'm3', forca: 3.4, nasc: '1985-03-27' },
+  { slug: 'reinaldo', apelido: 'Reinaldo', nome: 'Reinaldo Moreira', pos: 'DEF', av: 'm3', forca: 3.4, nasc: '1985-03-27' },
   { slug: 'gato', apelido: 'Gato', nome: 'Leandro Pinheiro', pos: 'GL', av: 'm1', forca: 3.6, nasc: '1992-12-01', gr: true },
-  { slug: 'russo', apelido: 'Russo', nome: 'Rodrigo Steinbach', pos: 'ATA', av: 'm2', forca: 3.9, nasc: '1995-05-16' },
+  { slug: 'rodrigo', apelido: 'Rodrigo', nome: 'Rodrigo Steinbach', pos: 'ATA', av: 'm2', forca: 3.9, nasc: '1995-05-16' },
   { slug: 'lelê', apelido: 'Lelê', nome: 'Letícia Ramos', pos: 'DEF', av: 'f3', forca: 3.5, nasc: '1999-08-22' },
   { slug: 'formiga', apelido: 'Formiga', nome: 'Marcelo Tavares', pos: 'MEI', av: 'm3', forca: 3.3, nasc: '2000-02-09' },
   { slug: 'boi', apelido: 'Boi', nome: 'Everton Nogueira', pos: 'DEF', av: 'm1', forca: 3.2, nasc: '1987-10-14' },
@@ -78,7 +78,7 @@ const JOGADORES = [
   { slug: 'serginho', apelido: 'Serginho', nome: 'Sérgio Barreto', pos: 'DEF', av: 'm1', forca: 3.0, nasc: '1986-07-21' },
   { slug: 'kiko', apelido: 'Kiko', nome: 'Henrique Sales', pos: 'ATA', av: 'm2', forca: 3.5, nasc: '2002-03-11' },
   { slug: 'duda', apelido: 'Duda', nome: 'Eduarda Prado', pos: 'ATA', av: 'f2', forca: 3.7, nasc: '2000-12-28' },
-  { slug: 'baiano', apelido: 'Baiano', nome: 'Ubiratan Conceição', pos: 'MEI', av: 'm3', forca: 3.1, nasc: '1988-05-02' },
+  { slug: 'bira', apelido: 'Bira', nome: 'Ubiratan Conceição', pos: 'MEI', av: 'm3', forca: 3.1, nasc: '1988-05-02' },
   { slug: 'canela', apelido: 'Canela', nome: 'Thiago Vilela', pos: 'DEF', av: 'm1', forca: 2.9, nasc: '2003-01-24' },
 ];
 // Candidatos: existem só para PEDIR ENTRADA. Não são membros de nenhum time,
@@ -105,9 +105,9 @@ const TIME = {
   created_at: '2026-06-01T18:00:00.000Z',
 };
 const TIMES_PUBLICOS = [
-  { nome: 'Saudade FC', slug: 'saudade-fc-demo-vila', cor: 'azul', modo: 'publico_aberto', cidade: 'Lisboa', local: 'Benfica, Lisboa', geo: [38.75, -9.20], desc: 'Brasileiros em Lisboa, terça e quinta às 19h. Chega e joga, sem burocracia.', admin: 'Tonho', membros: ['Pipoca', 'Russo', 'Mel', 'Kiko'] },
+  { nome: 'Saudade FC', slug: 'saudade-fc-demo-vila', cor: 'azul', modo: 'publico_aberto', cidade: 'Lisboa', local: 'Benfica, Lisboa', geo: [38.75, -9.20], desc: 'Brasileiros em Lisboa, terça e quinta às 19h. Chega e joga, sem burocracia.', admin: 'Tonho', membros: ['Pipoca', 'Rodrigo', 'Mel', 'Kiko'] },
   { nome: 'Tejo Bola', slug: 'tejo-bola-demo-vila', cor: 'vermelho', modo: 'publico_aprovacao', cidade: 'Lisboa', local: 'Parque das Nações, Lisboa', geo: [38.77, -9.10], desc: 'Society 7, sábado de manhã à beira-rio. Nível intermediário, sem carrinho.', admin: 'Gabi', membros: ['Nanda', 'Duda', 'Lelê'] },
-  { nome: 'Amadora Athletic', slug: 'amadora-athletic-demo-vila', cor: 'preto', modo: 'publico_aberto', cidade: 'Amadora', local: 'Reboleira, Amadora', geo: [38.75, -9.23], desc: 'Domingo 18h, campo com luz. Churrasco no fim é lei.', admin: 'Bigode', membros: ['Boi', 'Serginho', 'Baiano', 'Canela', 'Formiga'] },
+  { nome: 'Amadora Athletic', slug: 'amadora-athletic-demo-vila', cor: 'preto', modo: 'publico_aberto', cidade: 'Amadora', local: 'Reboleira, Amadora', geo: [38.75, -9.23], desc: 'Domingo 18h, campo com luz. Churrasco no fim é lei.', admin: 'Reinaldo', membros: ['Boi', 'Serginho', 'Bira', 'Canela', 'Formiga'] },
   { nome: 'Cerrado Futebol Clube', slug: 'cerrado-fc-demo-vila', cor: 'verde', modo: 'publico_aprovacao', cidade: 'Brasília', local: 'Sudoeste, Brasília, DF', geo: [-15.79, -47.92], desc: 'Pelada de quarta no Sudoeste, 20h. Time fechado há 6 anos, entra quem o grupo aprova.', admin: 'Muralha', membros: ['Juninho', 'Zequinha'] },
   { nome: 'Planalto Society', slug: 'planalto-society-demo-vila', cor: 'azul', modo: 'publico_aberto', cidade: 'Brasília', local: 'Asa Sul, Brasília, DF', geo: [-15.83, -47.91], desc: 'Sábado 8h antes do calor. Leva água, o bar só abre às 10h.', admin: 'Gato', membros: ['Paredão', 'Cacau'] },
 ];
@@ -131,19 +131,19 @@ const JOGOS_PASSADOS = [
 // Emojis permitidos (migração 036): 👍 ❤️ 😂 😮 😢 😡 🍿 — UMA reação por pessoa/post.
 const POSTS = [
   { autor: 'Cacau', horas: 3, texto: 'Domingo 10h, campo 2. Quem não avisar até sábado fica de fora do sorteio.',
-    reacoes: { Tonho: '👍', Gabi: '👍', Pipoca: '👍', Muralha: '❤️', Russo: '👍', Nanda: '👍' },
+    reacoes: { Tonho: '👍', Gabi: '👍', Pipoca: '👍', Muralha: '❤️', Rodrigo: '👍', Nanda: '👍' },
     comentarios: [{ de: 'Boi', txt: 'Tô dentro. Levo as bolas novas.' }, { de: 'Formiga', txt: 'Chego 9h45, trânsito na Segunda Circular é traiçoeiro.' }, { de: 'Cacau', txt: 'Boi, leva o colete azul também que o outro rasgou.', resp: 0 }] },
 
-  { autor: 'Gabi', horas: 9, gif: true, texto: 'O gol do Russo ontem, versão oficial. Reparem na dancinha depois.',
-    reacoes: { Cacau: '😂', Tonho: '😂', Russo: '❤️', Pipoca: '😂', Kiko: '🍿', Duda: '😂', Mel: '😂' },
-    comentarios: [{ de: 'Russo', txt: 'Isso é arte, não dancinha.' }, { de: 'Bigode', txt: 'Arte foi o goleiro deixar passar por baixo.' }, { de: 'Russo', txt: 'Bigode, no teu lugar eu ficava calado sobre defesa.', resp: 1 }, { de: 'Muralha', txt: 'Eu não estava no gol nesse dia. Fica registrado.' }] },
+  { autor: 'Gabi', horas: 9, gif: true, texto: 'O gol do Rodrigo ontem, versão oficial. Reparem na dancinha depois.',
+    reacoes: { Cacau: '😂', Tonho: '😂', Rodrigo: '❤️', Pipoca: '😂', Kiko: '🍿', Duda: '😂', Mel: '😂' },
+    comentarios: [{ de: 'Rodrigo', txt: 'Isso é arte, não dancinha.' }, { de: 'Reinaldo', txt: 'Arte foi o goleiro deixar passar por baixo.' }, { de: 'Rodrigo', txt: 'Reinaldo, no teu lugar eu ficava calado sobre defesa.', resp: 1 }, { de: 'Muralha', txt: 'Eu não estava no gol nesse dia. Fica registrado.' }] },
 
   { autor: 'Tonho', horas: 20, foto: true, texto: 'Campo liberado pra quarta. Gramado sintético novo, nada de desculpa de buraco.',
     reacoes: { Cacau: '👍', Gabi: '❤️', Juninho: '👍', Boi: '😮', Serginho: '👍', Lelê: '❤️', Nanda: '👍', Zequinha: '👍' },
     comentarios: [{ de: 'Serginho', txt: 'O buraco era real, tinha até poça quando chovia.' }, { de: 'Tonho', txt: 'Era. Agora não é mais.', resp: 0 }, { de: 'Kiko', txt: 'Sintético novo escorrega mais, cuidado com a trava alta.' }] },
 
   { autor: 'Pipoca', horas: 30, texto: 'Alguém viu meu par de meiões vermelho? Ficou no vestiário domingo. Se aparecer, chama.',
-    reacoes: { Formiga: '😂', Boi: '😂', Mel: '👍', Russo: '😂' },
+    reacoes: { Formiga: '😂', Boi: '😂', Mel: '👍', Rodrigo: '😂' },
     comentarios: [{ de: 'Mel', txt: 'Vi um meião vermelho no cesto de perdidos da portaria.' }, { de: 'Pipoca', txt: 'Salvou. Passo lá amanhã.', resp: 0 }] },
 
   { autor: 'Nanda', horas: 44, youtube: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
@@ -152,30 +152,30 @@ const POSTS = [
     comentarios: [{ de: 'Kiko', txt: 'Injusto. Eu acerto o gol, o gol é que se move.' }, { de: 'Duda', txt: 'Vou assistir contigo, a gente treina sábado antes do jogo.' }, { de: 'Kiko', txt: 'Fechado, 9h no campo 2.', resp: 1 }] },
 
   { autor: 'Muralha', horas: 58, texto: 'Quatro jogos sem levar gol de fora da área. Só registrando antes que alguém diga que goleiro não faz nada.',
-    reacoes: { Gato: '👍', Paredão: '❤️', Cacau: '👍', Tonho: '😮', Boi: '👍', Bigode: '😂' },
-    comentarios: [{ de: 'Russo', txt: 'De fora da área. De dentro entraram uns quantos.' }, { de: 'Muralha', txt: 'De dentro da área é falha da defesa. Pergunta pro Bigode.', resp: 0 }, { de: 'Bigode', txt: 'Sempre sobra pra mim.' }] },
+    reacoes: { Gato: '👍', Paredão: '❤️', Cacau: '👍', Tonho: '😮', Boi: '👍', Reinaldo: '😂' },
+    comentarios: [{ de: 'Rodrigo', txt: 'De fora da área. De dentro entraram uns quantos.' }, { de: 'Muralha', txt: 'De dentro da área é falha da defesa. Pergunta pro Reinaldo.', resp: 0 }, { de: 'Reinaldo', txt: 'Sempre sobra pra mim.' }] },
 
   { autor: 'Boi', horas: 70, texto: 'Rateio do campo de setembro fechado: 8 euros por cabeça. Quem ainda não passou, MB Way pro Tonho.',
     reacoes: { Tonho: '👍', Cacau: '👍', Juninho: '👍', Serginho: '👍', Formiga: '😢', Lelê: '👍' },
-    comentarios: [{ de: 'Formiga', txt: 'Passo hoje à noite.' }, { de: 'Baiano', txt: 'Já mandei semana passada, confere aí.' }, { de: 'Tonho', txt: 'Confirmado, Baiano. Falta só o Canela e o Zequinha.', resp: 1 }] },
+    comentarios: [{ de: 'Formiga', txt: 'Passo hoje à noite.' }, { de: 'Bira', txt: 'Já mandei semana passada, confere aí.' }, { de: 'Tonho', txt: 'Confirmado, Bira. Falta só o Canela e o Zequinha.', resp: 1 }] },
 
   { autor: 'Duda', horas: 88, instagram: 'https://www.instagram.com/p/C1abcdefghi/',
     texto: 'O pessoal do Tejo Bola postou o resumo do torneio de sábado. A gente aparece no fundo do vídeo, minuto 2.',
     reacoes: { Gabi: '❤️', Nanda: '😮', Mel: '👍', Lelê: '❤️', Cacau: '👍' },
     comentarios: [{ de: 'Gabi', txt: 'Vi! Dá pra ver o Cacau reclamando com o árbitro, clássico.' }, { de: 'Cacau', txt: 'Era impedimento e todos sabem.', resp: 0 }] },
 
-  { autor: 'Bigode', horas: 110, denunciado: true, texto: 'Time que joga de sábado é time de perna mole, todo mundo sabe disso. Domingo é dia de futebol de verdade, o resto é recreação pra quem não aguenta ritmo.',
-    reacoes: { Boi: '😂', Serginho: '😡', Formiga: '😂', Canela: '😡', Russo: '🍿' },
-    comentarios: [{ de: 'Serginho', txt: 'Jogo sábado e corro mais que tu, Bigode.' }, { de: 'Canela', txt: 'Isso foi desnecessário.' }, { de: 'Bigode', txt: 'Brincadeira, gente. Sábado também é futebol.', resp: 1 }] },
+  { autor: 'Reinaldo', horas: 110, denunciado: true, texto: 'Time que joga de sábado é time de perna mole, todo mundo sabe disso. Domingo é dia de futebol de verdade, o resto é recreação pra quem não aguenta ritmo.',
+    reacoes: { Boi: '😂', Serginho: '😡', Formiga: '😂', Canela: '😡', Rodrigo: '🍿' },
+    comentarios: [{ de: 'Serginho', txt: 'Jogo sábado e corro mais que tu, Reinaldo.' }, { de: 'Canela', txt: 'Isso foi desnecessário.' }, { de: 'Reinaldo', txt: 'Brincadeira, gente. Sábado também é futebol.', resp: 1 }] },
 
   { autor: 'Lelê', horas: 140, longo: true,
     texto: 'Gente, aproveitando que ninguém está discutindo escalação agora, queria propor uma coisa pro grupo.\n\nA gente joga junto há mais de um ano e nunca fez nada fora do campo além do churrasco de dezembro. Andei conversando com a Nanda e com o Muralha e a ideia é simples: um fim de semana fora, dois dias, num sítio com campo e churrasqueira. Dá pra dividir a diária entre 20 pessoas e sair barato.\n\nO plano seria: sábado de manhã a gente chega e faz um torneio interno de quatro times, mata-mata, jogos de 20 minutos. À tarde, churrasco e descanso. Domingo de manhã, um jogo só, 11 contra 11, e volta depois do almoço.\n\nJá pesquisei três lugares a menos de uma hora de Lisboa. Preciso saber quem topa antes de reservar, porque sinal é sinal. Responde aqui embaixo com um sim ou não que eu faço a lista.',
     reacoes: { Nanda: '❤️', Muralha: '❤️', Gabi: '❤️', Cacau: '👍', Tonho: '👍', Mel: '❤️', Duda: '❤️', Pipoca: '👍' },
     comentarios: [{ de: 'Nanda', txt: 'Sim. Já tenho dois lugares favoritos, mando os links.' }, { de: 'Muralha', txt: 'Sim, e levo a churrasqueira portátil.' }, { de: 'Cacau', txt: 'Sim, mas o torneio tem que ser 4 times de verdade, com tabela.' }, { de: 'Lelê', txt: 'Cacau, tabela e tudo. Já sei quem vai fazer a arbitragem.', resp: 2 }, { de: 'Boi', txt: 'Depende da data. Outubro eu não posso.' }, { de: 'Mel', txt: 'Sim! Melhor ideia do ano.' }] },
 
-  { autor: 'Russo', horas: 175, texto: 'Aviso de utilidade pública: o bar da esquina do campo fechou. O plano B é a padaria da rua de trás, abre até meia-noite.',
-    reacoes: { Boi: '😢', Cacau: '😢', Tonho: '😮', Baiano: '😢', Formiga: '😡' },
-    comentarios: [{ de: 'Baiano', txt: 'Que notícia triste pra começar a semana.' }, { de: 'Boi', txt: 'A padaria não tem imperial gelada, não é a mesma coisa.' }] },
+  { autor: 'Rodrigo', horas: 175, texto: 'Aviso de utilidade pública: o bar da esquina do campo fechou. O plano B é a padaria da rua de trás, abre até meia-noite.',
+    reacoes: { Boi: '😢', Cacau: '😢', Tonho: '😮', Bira: '😢', Formiga: '😡' },
+    comentarios: [{ de: 'Bira', txt: 'Que notícia triste pra começar a semana.' }, { de: 'Boi', txt: 'A padaria não tem imperial gelada, não é a mesma coisa.' }] },
 
   { autor: 'Muralha', horas: 200, texto: 'Quem deixou a bola furada dentro da rede? Se ninguém assumir até quarta, compro uma nova e divido no rateio de todo mundo.',
     reacoes: { Cacau: '😂', Pipoca: '😮', Gabi: '😂', Kiko: '😂', Tonho: '👍', Juninho: '😮' },
@@ -767,8 +767,8 @@ async function criarCampeonatosStorage(ids, teamId, donos) {
     nomes: ['Leões do Alvalade', 'Fúria Verde', 'Os Intocáveis', 'Rebeldes FC'],
     plantel: [
       plantel(['Cacau', 'Muralha', 'Juninho', 'Formiga', 'Duda']).concat([{ user_id: donos[0].id, nome: donos[0].nome_jogador || 'Você', avatar_url: null, convidado: false }]),
-      plantel(['Tonho', 'Gato', 'Bigode', 'Russo', 'Mel']),
-      plantel(['Gabi', 'Paredão', 'Lelê', 'Zequinha', 'Baiano']),
+      plantel(['Tonho', 'Gato', 'Reinaldo', 'Rodrigo', 'Mel']),
+      plantel(['Gabi', 'Paredão', 'Lelê', 'Zequinha', 'Bira']),
       plantel(['Pipoca', 'Boi', 'Serginho', 'Kiko', 'Nanda', 'Canela']),
     ],
   });
@@ -784,9 +784,9 @@ async function criarCampeonatosStorage(ids, teamId, donos) {
     nomes: ['Leões do Alvalade', 'Tejo Azul', 'Sporting da Rua', 'Cerrado Unido'],
     plantel: [
       plantel(['Cacau', 'Muralha', 'Juninho', 'Gabi', 'Duda']).concat([{ user_id: donos[0].id, nome: donos[0].nome_jogador || 'Você', avatar_url: null, convidado: false }]),
-      plantel(['Tonho', 'Gato', 'Russo', 'Mel', 'Formiga']),
-      plantel(['Pipoca', 'Paredão', 'Bigode', 'Kiko', 'Nanda']),
-      plantel(['Boi', 'Serginho', 'Lelê', 'Zequinha', 'Baiano', 'Canela']),
+      plantel(['Tonho', 'Gato', 'Rodrigo', 'Mel', 'Formiga']),
+      plantel(['Pipoca', 'Paredão', 'Reinaldo', 'Kiko', 'Nanda']),
+      plantel(['Boi', 'Serginho', 'Lelê', 'Zequinha', 'Bira', 'Canela']),
     ],
   });
   const semis = mata.confrontos.filter((c) => c.ronda === 1);
@@ -841,9 +841,9 @@ async function criarPendencias(ids, time, donos) {
 // Bloqueio: o dono bloqueia um fictício. Serve para ver a Resenha a filtrar —
 // os posts e comentários do bloqueado desaparecem para ele (blocksStore#conjuntoMutuo).
 async function criarBloqueio(ids, donos) {
-  const { error } = await supabase.from('user_blocks').insert({ blocker_id: donos[0].id, blocked_id: ids.Bigode });
+  const { error } = await supabase.from('user_blocks').insert({ blocker_id: donos[0].id, blocked_id: ids.Reinaldo });
   if (error && !/duplicate|unique/i.test(error.message)) throw new Error(`user_blocks: ${error.message}`);
-  ok('Bigode bloqueado pelo dono — os posts e comentários dele somem da Resenha dele');
+  ok('Reinaldo bloqueado pelo dono — os posts e comentários dele somem da Resenha dele');
 }
 
 async function criar() {
@@ -915,7 +915,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('    → Post longo da Lelê (fim de semana fora) com 6 comentários e respostas aninhadas.');
   l('    → Card dourado do anúncio oficial (sem curtida, sem comentário).');
   l('    → Cards de jogo com campeão, artilheiro e craque da pelada.');
-  l('    → O Bigode está BLOQUEADO por você: os posts dele não aparecem. Desbloqueie em Perfil → Bloqueados para ver sumir e voltar.');
+  l('    → O Reinaldo está BLOQUEADO por você: os posts dele não aparecem. Desbloqueie em Perfil → Bloqueados para ver sumir e voltar.');
   l('');
   l('  RANKING');
   l('    → Lista única com os 21 mais você, score de 0 a 100. Você já tem nota');
@@ -942,7 +942,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l(`    → Convite por link ativo (vale 30 dias, reutilizável): /convite/${convite.token}`);
   l('');
   l('  GABINETE (só na conta contatofuttyapp, que é super-admin)');
-  l('    → Pessoas & times → Denúncias: 1 caso na fila (post do Bigode, categoria assédio).');
+  l('    → Pessoas & times → Denúncias: 1 caso na fila (post do Reinaldo, categoria assédio).');
   l('    → O mesmo caso aparece na fila do admin do time, dentro da Resenha.');
   l('');
   l('O QUE O APP NÃO TEM (pedido no bloco, não existe no produto)');

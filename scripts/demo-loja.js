@@ -73,15 +73,15 @@ function proximoDomingo() {
 // forca = nota média que os colegas dão (0,5 a 5). gr = goleiro. cabeca = cabeça de chave.
 const JOGADORES = [
   { apelido: 'Bruninho', nome: 'Bruno Henrique Santos', slug: '', posicao: 'MEI', avatar: 'm1', forca: 4.2, nasc: '1994-03-12', cabeca: true },
-  { apelido: 'Tiago', nome: 'Sebastião Ferreira', slug: 'tiaozinho', posicao: 'ATA', avatar: 'm2', forca: 4.0, nasc: '1990-07-01', cabeca: true },
-  { apelido: 'Carlos', nome: 'Carlos Eduardo Lima', slug: 'careca', posicao: 'DEF', avatar: 'm3', forca: 3.5, nasc: '1988-11-23' },
-  { apelido: 'Paredão', nome: 'Anderson Souza', slug: 'indio', posicao: 'GL', avatar: 'm1', forca: 3.8, nasc: '1992-05-30', gr: true },
-  { apelido: 'Roberto', nome: 'José Roberto Alves', slug: 'ze-gordo', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1986-09-09' },
+  { apelido: 'Tiago', nome: 'Sebastião Ferreira', slug: 'tiago', posicao: 'ATA', avatar: 'm2', forca: 4.0, nasc: '1990-07-01', cabeca: true },
+  { apelido: 'Carlos', nome: 'Carlos Eduardo Lima', slug: 'carlos', posicao: 'DEF', avatar: 'm3', forca: 3.5, nasc: '1988-11-23' },
+  { apelido: 'Paredão', nome: 'Anderson Souza', slug: 'paredao', posicao: 'GL', avatar: 'm1', forca: 3.8, nasc: '1992-05-30', gr: true },
+  { apelido: 'Roberto', nome: 'José Roberto Alves', slug: 'roberto', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1986-09-09' },
   { apelido: 'Marquinhos', nome: 'Marcos Vinícius Rocha', slug: 'marquinhos', posicao: 'MEI', avatar: 'm3', forca: 3.8, nasc: '1997-01-17' },
-  { apelido: 'Paulinho', nome: 'Paulo Ricardo Machado', slug: 'paulinho-gaucho', posicao: 'ATA', avatar: 'm1', forca: 3.9, nasc: '1995-12-05' },
+  { apelido: 'Paulinho', nome: 'Paulo Ricardo Machado', slug: 'paulinho', posicao: 'ATA', avatar: 'm1', forca: 3.9, nasc: '1995-12-05' },
   { apelido: 'Dudu', nome: 'Eduardo Nascimento', slug: 'dudu', posicao: 'MEI', avatar: 'm2', forca: 3.4, nasc: '1999-04-21' },
-  { apelido: 'Gonçalo', nome: 'Rafael Oliveira', slug: 'cabecao', posicao: 'GL', avatar: 'm3', forca: 3.4, nasc: '1991-08-14', gr: true },
-  { apelido: 'Diguinho', nome: 'Diego Silva', slug: 'nego-di', posicao: 'ATA', avatar: 'm1', forca: 3.5, nasc: '1998-02-27' },
+  { apelido: 'Gonçalo', nome: 'Rafael Oliveira', slug: 'goncalo', posicao: 'GL', avatar: 'm3', forca: 3.4, nasc: '1991-08-14', gr: true },
+  { apelido: 'Diguinho', nome: 'Diego Silva', slug: 'diguinho', posicao: 'ATA', avatar: 'm1', forca: 3.5, nasc: '1998-02-27' },
   { apelido: 'Fabinho', nome: 'Fábio Costa', slug: 'fabinho', posicao: 'DEF', avatar: 'm2', forca: 3.0, nasc: '1993-06-18' },
   { apelido: 'Renatinho', nome: 'Renato Pereira', slug: 'renatinho', posicao: 'MEI', avatar: 'm3', forca: 2.6, nasc: '2001-10-02' },
 ];
