@@ -41,7 +41,7 @@ test('os cabeçalhos de produção: nada de X-Powered-By, helmet ligado, nada de
   assert.ok(!/express|node|\d+\.\d+\.\d+/i.test(r.cabecalhos.get('server') || ''), `o cabeçalho Server entrega a versão: ${r.cabecalhos.get('server')}`);
   const saude = await app.pedir('GET', '/health');
   assert.equal(saude.status, 200);
-  assert.deepEqual(Object.keys(saude.json).sort(), ['service', 'status', 'supabase', 'timestamp', 'uptime']);
+  assert.deepEqual(saude.json, { status: 'ok' }, 'o /health diz só que está vivo: nada de uptime, serviço, hora nem banco');
   assert.doesNotMatch(saude.texto, /supabase\.co|\.supabase\.|projeto-falso|postgres|version|NODE_ENV|secret|https?:/i);
 });
 

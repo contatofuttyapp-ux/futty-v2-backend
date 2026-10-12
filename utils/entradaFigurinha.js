@@ -15,6 +15,7 @@
 // IA de ancorar no enquadramento do input e comer a coroa da cabeça.
 // ═══════════════════════════════════════════════════════════════════════════════
 const sharp = require('sharp');
+const { LIMITE_PIXELS } = require('./imagemReal'); // o teto de pixels da casa: foto de celular cabe, imagem fabricada para estourar a memória não
 
 const FAIXA_TOPO = 0.18;   // altura da faixa acrescentada acima da foto
 const FOLGA_ACIMA = 0.12;  // onde a cabeça assenta dentro do quadrado
@@ -25,7 +26,7 @@ const FOLGA_ACIMA = 0.12;  // onde a cabeça assenta dentro do quadrado
  * parecer continuação natural e não uma banda pintada.
  */
 async function comFaixa(buf) {
-  const base = await sharp(buf).rotate().toBuffer();
+  const base = await sharp(buf, { limitInputPixels: LIMITE_PIXELS }).rotate().toBuffer();
   const m = await sharp(base).metadata();
   const strip = Math.max(8, Math.round((m.height || 0) * 0.02));
   const { data: avg } = await sharp(base)
@@ -56,7 +57,7 @@ const ehPele = (r, g, b) => {
  * null = não achou pele (foto muito escura) — quem chama decide o que fazer.
  */
 async function topoDaPele(buf) {
-  const { data, info } = await sharp(buf).resize({ width: 360 }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const { data, info } = await sharp(buf, { limitInputPixels: LIMITE_PIXELS }).resize({ width: 360 }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const dens = [];
   for (let y = 0; y < info.height; y += 1) {
     let n = 0;

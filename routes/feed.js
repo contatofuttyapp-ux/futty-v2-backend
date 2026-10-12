@@ -11,7 +11,7 @@ const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
 const { filtroNSFW } = require('../utils/nsfwFilter');
-const { exigirImagemReal, formatoReal, MSG_FORMATO } = require('../utils/imagemReal');
+const { exigirImagemReal, exigirVideoReal, formatoReal, MSG_FORMATO, LIMITE_PIXELS } = require('../utils/imagemReal');
 const { removerFicheirosPorUrl } = require('../utils/storage');
 const { urlDeMidiaValida, midiaEhDe } = require('../utils/validarUrl');
 const { inteiroEmFaixa, ehUuid } = require('../utils/entrada');
@@ -181,7 +181,7 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
  */
 async function comprimirImagem(buffer, mimetypeOriginal, extOriginal) {
   try {
-    const comprimido = await sharp(buffer)
+    const comprimido = await sharp(buffer, { limitInputPixels: LIMITE_PIXELS })
       .rotate() // aplica a orientação EXIF antes de qualquer coisa — sem isto a rotação vai junto para o WebP
       .resize(COMPRESSAO_LADO_MAX, COMPRESSAO_LADO_MAX, { fit: 'inside', withoutEnlargement: true })
       .webp({ quality: COMPRESSAO_QUALIDADE })
@@ -758,6 +758,7 @@ router.post(
   uploadResenhaLimiter,
   receberFicheiro,
   exigirImagemReal(IMAGENS_DA_RESENHA), // SVG (ou outro formato) com Content-Type de imagem: 400, antes de qualquer sharp
+  exigirVideoReal, // video/mp4 só passa se os bytes são de um MP4 de verdade
   filtroNSFW, // bloqueia imagem explícita da resenha antes de guardar
   asyncHandler(async (req, res) => {
     if (!req.file) throw new HttpError(400, 'Nenhum arquivo enviado.');

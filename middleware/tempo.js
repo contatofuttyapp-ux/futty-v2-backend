@@ -8,9 +8,13 @@
 // (São Paulo) e quanto é rede: `curl -w '...'`/DevTools separam o Server-Timing
 // do round-trip total sem precisar de nenhum log do lado do servidor.
 //
+// O header que SAI para quem pede é só `app;dur` — é o que o Diagnóstico e a telemetria do app leem (`app`; o `edge` quem põe é a
+// função da Cloudflare). Os nomes das fases, as consultas e o estado dos caches são detalhe interno do motor: ficam no LOG do servidor
+// (pedido lento) e, se alguém precisar medir de fora, no interruptor SERVER_TIMING_DETALHE=1 do próprio ambiente.
+//
 // As FASES respondem à pergunta seguinte: dentro dos ~500 ms do motor, onde é
 // que eles foram? `marcarFase(res, 'teams')` fecha a fase anterior e abre esta;
-// no fim sai `Server-Timing: auth;dur=…, teams;dur=…, resto;dur=…, app;dur=…`.
+// com o detalhe ligado sai `Server-Timing: auth;dur=…, teams;dur=…, resto;dur=…, app;dur=…`.
 // O `app` fica sempre em ÚLTIMO porque o Diagnóstico do app lê `app;dur`.
 //
 // CACHE (15-set, "Velocidade 7A"): os caches quentes (utils/cacheQuente.js)
@@ -24,6 +28,8 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const pedidoAtual = new AsyncLocalStorage();
 const AGORA = () => process.hrtime.bigint();
 const MS = (de, ate) => Number(ate - de) / 1e6;
+// Lido a cada pedido (não no arranque): o interruptor muda sem reiniciar e o teste liga e desliga.
+const detalheLigado = () => process.env.SERVER_TIMING_DETALHE === '1';
 
 /**
  * Dá nome ao trecho que ACABOU DE TERMINAR (do início do pedido, ou da marca
@@ -105,7 +111,7 @@ function tempoPorRota(req, res, next) {
       const partes = Object.entries(t.fases).map(([nome, ms]) => `${nome};dur=${ms.toFixed(1)}`);
       if (t.consultouCache) partes.push(`cache;desc=${t.cacheFrio ? 'miss' : 'hit'}`);
       partes.push(`app;dur=${total.toFixed(1)}`); // SEMPRE por último
-      res.setHeader('Server-Timing', partes.join(', '));
+      res.setHeader('Server-Timing', detalheLigado() ? partes.join(', ') : `app;dur=${total.toFixed(1)}`);
 
       // Em produção, um pedido lento diz POR ONDE se perdeu o tempo — sem isto,
       // saber que "demorou 700 ms" não leva a lado nenhum.

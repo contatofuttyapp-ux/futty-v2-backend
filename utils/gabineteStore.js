@@ -151,9 +151,34 @@ function invalidar() {
   cache.invalidar(CHAVE);
 }
 
+/**
+ * O link que a campanha abre ao toque: texto vazio (sem link), um endereço http(s) ou um caminho do próprio app ("/planos").
+ * `javascript:`, `data:`, `file:` e qualquer outro esquema rodariam com a sessão de quem toca; o app já ignora o que não é http(s)
+ * (src/utils/linkDoAnuncio.js), e aqui o motor se recusa a gravar — o dono é quem digita, mas a trava não depende de quem digita.
+ * Devolve o link aparado ('' quando vazio) ou lança HttpError(400).
+ */
+function validarLinkDaCampanha(link, nomeDaCampanha = '') {
+  if (link === undefined || link === null) return '';
+  const rotulo = nomeDaCampanha ? `Campanha "${String(nomeDaCampanha).slice(0, 60)}"` : 'Campanha';
+  if (typeof link !== 'string') throw new HttpError(400, `${rotulo}: o link precisa ser um endereço de texto.`);
+  const texto = link.trim();
+  if (!texto) return '';
+  if (texto.length > 2000) throw new HttpError(400, `${rotulo}: o link é longo demais.`);
+  // Caminho do app: começa com UMA barra ("/planos"), nunca "//host" (que o navegador lê como outro site) nem "/\\host".
+  if (/^\/(?![\/\\])/.test(texto)) return texto;
+  let url;
+  try { url = new URL(texto); } catch { throw new HttpError(400, `${rotulo}: o link precisa começar com http:// ou https://.`); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new HttpError(400, `${rotulo}: o link precisa começar com http:// ou https://.`);
+  return texto;
+}
+
 async function gravar(obj) {
   const acessos = Array.isArray(obj?.acessos) ? obj.acessos : SEED.acessos;
   validarAcessos(acessos); // lança HttpError(400) se algum `obs` parecer senha/chave
+  const campanhas = Array.isArray(obj?.campanhas) ? obj.campanhas : [];
+  for (const c of campanhas) {
+    if (c && typeof c === 'object' && 'link' in c) c.link = validarLinkDaCampanha(c.link, c.nome);
+  }
 
   // cambio_usd_eur: número são entre 0.5 e 2 (paraquedas contra um dígito a
   // mais/a menos escrito à mão) — fora disso, mantém o que já estava gravado.
@@ -167,7 +192,7 @@ async function gravar(obj) {
     acessos,
     seguranca_manual: obj?.seguranca_manual && typeof obj.seguranca_manual === 'object' ? obj.seguranca_manual : SEED.seguranca_manual,
     cobertura: obj?.cobertura && typeof obj.cobertura === 'object' ? obj.cobertura : SEED.cobertura,
-    campanhas: Array.isArray(obj?.campanhas) ? obj.campanhas : [],
+    campanhas,
     ads_ativo: typeof obj?.ads_ativo === 'boolean' ? obj.ads_ativo : SEED.ads_ativo,
     toggles: obj?.toggles && typeof obj.toggles === 'object' ? obj.toggles : SEED.toggles,
     protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
@@ -183,4 +208,4 @@ function novoId() {
 }
 
 // validarAcessos exportada só para o teste provar a trava SEM gravar nada (tests/semear-acessos.test.js).
-module.exports = { ler, lerRaw, gravar, invalidar, SEED, novoId, validarAcessos };
+module.exports = { ler, lerRaw, gravar, invalidar, SEED, novoId, validarAcessos, validarLinkDaCampanha };

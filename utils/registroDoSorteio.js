@@ -86,10 +86,13 @@ function resultadoAjustado(anterior, { times, reservas }, quem, agora) {
   return { ...novo, registro };
 }
 
-/** Na vista pública ninguém precisa do id de quem sorteou/ajustou — só o nome que o selo mostra. */
-function registroPublico(registro) {
+/**
+ * Na vista pública ninguém precisa do id de quem sorteou/ajustou — só o nome que o selo mostra, e esse é o APELIDO de hoje
+ * (`nomePorUsuario`: id → nome público, utils/nomePublico.js); quem não está no mapa fica com o nome que o registro guardou.
+ */
+function registroPublico(registro, nomePorUsuario = null) {
   if (!registro || typeof registro !== 'object') return registro;
-  const semId = (p) => (p ? { nome: p.nome || null } : null);
+  const semId = (p) => (p ? { nome: (p.id && nomePorUsuario?.get(p.id)) || p.nome || null } : null);
   return {
     ...registro,
     por: semId(registro.por),

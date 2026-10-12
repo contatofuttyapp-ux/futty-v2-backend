@@ -4,7 +4,7 @@
 // devolvia o texto de erro do Supabase se falhasse: quem martelasse a URL do Cloud Run martelava o banco. Agora:
 //   · o banco é conferido no máximo uma vez a cada 30 s (100 chamadas seguidas ou ao mesmo tempo = 1 consulta);
 //   · a conferência é count 'planned' (a estimativa, não a contagem);
-//   · a resposta traz o mesmo de sempre (status, service, timestamp, uptime, supabase) e NUNCA o texto de erro;
+//   · a resposta é enxuta (rodada 30N): só `status` — "ok" ou "degradado" —, sem uptime, serviço, hora nem o nome do banco, e NUNCA o texto de erro;
 //   · o server.js põe o /health nos mesmos baldes do limiter geral da /api.
 //
 // Uso: npm test  (ou: node --test tests/saude.test.js)
@@ -60,18 +60,14 @@ test('100 chamadas AO MESMO TEMPO com o banco lento: quem chega com a conferênc
   const chamar = await subirSaude(t, { supabase });
   const respostas = await Promise.all(Array.from({ length: 100 }, () => chamar()));
   assert.equal(supabase.consultas.length, 1);
-  assert.ok(respostas.every((r) => r.json.supabase === 'connected'));
+  assert.ok(respostas.every((r) => r.json.status === 'ok'));
 });
 
-test('a resposta é a de sempre: status ok, serviço, hora, uptime e supabase: connected', async (t) => {
+test('a resposta é enxuta: só { status: "ok" } — nada de uptime, serviço, hora ou banco para quem olha de fora', async (t) => {
   const chamar = await subirSaude(t, { supabase: bancoContador() });
-  const { json } = await chamar();
-  assert.equal(json.status, 'ok');
-  assert.equal(json.service, 'futty-backend');
-  assert.equal(json.supabase, 'connected');
-  assert.ok(Number.isFinite(json.uptime) && json.uptime >= 0);
-  assert.ok(!Number.isNaN(Date.parse(json.timestamp)));
-  assert.deepEqual(Object.keys(json).sort(), ['service', 'status', 'supabase', 'timestamp', 'uptime']);
+  const { status, json } = await chamar();
+  assert.equal(status, 200);
+  assert.deepEqual(json, { status: 'ok' });
 });
 
 test('passados 30 s, a próxima chamada confere de novo (e só ela)', async (t) => {
@@ -90,16 +86,14 @@ test('passados 30 s, a próxima chamada confere de novo (e só ela)', async (t) 
   assert.equal(TTL_DO_BANCO_MS, 30_000);
 });
 
-test('banco com erro: supabase "error", sem o texto do banco na resposta; o texto vai para o log (uma vez por conferência)', async (t) => {
+test('banco com erro: status "degradado" (ainda 200), sem o texto do banco na resposta; o texto vai para o log (uma vez por conferência)', async (t) => {
   const erros = [];
   t.mock.method(console, 'error', (...args) => { erros.push(args.join(' ')); });
   const supabase = bancoContador({ erro: { message: 'relation "public.users" does not exist (db.abcdefgh.supabase.co)' } });
   const chamar = await subirSaude(t, { supabase });
   const r = await chamar();
   assert.equal(r.status, 200);
-  assert.equal(r.json.status, 'ok');
-  assert.equal(r.json.supabase, 'error');
-  assert.ok(!('supabaseError' in r.json));
+  assert.deepEqual(r.json, { status: 'degradado' });
   assert.ok(!JSON.stringify(r.json).includes('abcdefgh'));
   await chamar();
   await chamar();
@@ -107,17 +101,17 @@ test('banco com erro: supabase "error", sem o texto do banco na resposta; o text
   assert.ok(erros[0].includes('db.abcdefgh.supabase.co'));
 });
 
-test('banco que lança (rede caiu): supabase "error", sem o texto na resposta', async (t) => {
+test('banco que lança (rede caiu): "degradado", sem o texto na resposta', async (t) => {
   t.mock.method(console, 'error', () => {});
   const chamar = await subirSaude(t, { supabase: bancoContador({ lancar: new TypeError('fetch failed: ECONNRESET 34.95.12.7:443') }) });
   const { status, json } = await chamar();
   assert.equal(status, 200);
-  assert.equal(json.supabase, 'error');
+  assert.deepEqual(json, { status: 'degradado' });
   assert.ok(!JSON.stringify(json).includes('34.95.12.7'));
 });
 
 // ─── o server.js de verdade ───────────────────────────────────────────────────
-test('server.js: o /health passa pelo limiter geral (RateLimit-* na resposta, e o balde desce a cada chamada) e nunca tem supabaseError', async (t) => {
+test('server.js: o /health passa pelo limiter geral (RateLimit-* na resposta, e o balde desce a cada chamada) e só diz o status', async (t) => {
   // O cliente real do motor, trocado por um falso só neste teste: nada de rede.
   const original = supabaseReal.from;
   const supabase = bancoContador({ erro: { message: 'segredo do banco' } });
@@ -137,8 +131,7 @@ test('server.js: o /health passa pelo limiter geral (RateLimit-* na resposta, e 
   assert.ok(a.headers.get('ratelimit') || a.headers.get('ratelimit-remaining'), 'sem cabeçalho RateLimit o limiter não está no caminho');
   assert.equal(restante(b), restante(a) - 1, 'a segunda chamada gastou uma do mesmo balde');
   const corpo = await b.json();
-  assert.equal(corpo.supabase, 'error');
-  assert.ok(!('supabaseError' in corpo));
+  assert.deepEqual(corpo, { status: 'degradado' });
   assert.ok(!JSON.stringify(corpo).includes('segredo do banco'));
   assert.equal(supabase.consultas.length, 1, 'duas chamadas ao /health real, uma consulta');
 });

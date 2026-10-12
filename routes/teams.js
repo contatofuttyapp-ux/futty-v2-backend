@@ -10,6 +10,7 @@ const { obterTeams, obterPedidos } = require('../services/inicio');
 const { agregadosDaEquipa } = require('../utils/agregados');
 const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
 const { verificarImagemReal } = require('../utils/imagemReal');
+const { nomePublico } = require('../utils/nomePublico');
 const { resolverCidade, lerEscolhaDaLista, normalizarCidade, condicaoPorCidade, lerBairro, resolverBairro } = require('../utils/cidade');
 const { slugify, notaParaExibir } = require('../utils/helpers');
 const plataforma = require('../utils/plataformaStore');
@@ -1180,7 +1181,7 @@ router.get(
       motivo,
       autenticado: !!req.user,
       jaMembro,
-      convidadoPor: inviter?.nome_jogador || inviter?.nome || null,
+      convidadoPor: inviter ? nomePublico(inviter) : null, // a página do convite é pública: o apelido, nunca o nome completo
       expires_at: convite.expires_at,
       usos,
       // Os fatos da página: `membros` é a contagem, `proximoJogo` o instante do próximo jogo agendado

@@ -11,6 +11,7 @@ const { buildRanking } = require('./ranking');
 const { sincronizarPostDoCampeao, apagarPostDoCampeao } = require('../utils/postDoCampeao');
 const { textoCurto } = require('../utils/entrada');
 const { urlDeAvatarValida } = require('../utils/validarUrl');
+const { carregarNomesPublicos } = require('../utils/nomePublico');
 const { MAX_GOLS } = require('../utils/resultadoDoJogo');
 
 const router = express.Router();
@@ -427,6 +428,22 @@ router.delete(
   })
 );
 
+/**
+ * O documento do campeonato para quem NÃO está logado: o plantel dos times (e o do campeão) leva o apelido de cada jogador que tem conta,
+ * nunca o nome completo. O plantel é um snapshot do sorteio (o nome de quando foi feito); aqui sai o de hoje. Convidado sem app mantém o
+ * nome que o admin digitou. Não altera o documento recebido.
+ */
+async function comApelidosNoPlantel(doc) {
+  const ids = [];
+  for (const t of doc.times || []) for (const j of t.jogadores || []) if (j && j.user_id && !j.convidado) ids.push(j.user_id);
+  if (!ids.length) return doc;
+  const nomes = await carregarNomesPublicos(supabase, ids);
+  if (!nomes.size) return doc;
+  const trocar = (j) => (j && j.user_id && !j.convidado && nomes.has(j.user_id) ? { ...j, nome: nomes.get(j.user_id) } : j);
+  const refazer = (t) => (t ? { ...t, jogadores: (t.jogadores || []).map(trocar) } : t);
+  return { ...doc, times: (doc.times || []).map(refazer), campeao: refazer(doc.campeao) };
+}
+
 /** GET /api/p/campeonato/:slug/:id — vista pública (sem login) para o link. */
 router.get(
   '/api/p/campeonato/:slug/:id',
@@ -437,7 +454,7 @@ router.get(
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
     // logo_url: og:image da prévia do link, quando o time tem logo.
-    res.json({ campeonato: enriquecer(camp), equipa: { nome: team.nome, slug: team.slug, logo_url: team.logo_url || null } });
+    res.json({ campeonato: await comApelidosNoPlantel(enriquecer(camp)), equipa: { nome: team.nome, slug: team.slug, logo_url: team.logo_url || null } });
   })
 );
 

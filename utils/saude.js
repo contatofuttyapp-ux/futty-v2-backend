@@ -6,7 +6,10 @@
 //   · a conferência é um count 'planned' (estimativa do planner, não varre a tabela);
 //   · o texto de erro do banco fica no log do motor e NUNCA vai na resposta.
 // Quem confere o motor de fora (checagem de uptime, Freaky) continua usando /api/health, que nem toca o banco.
-// O que a resposta diz (status, uptime, supabase: connected|error) é o mesmo de sempre.
+// A resposta é enxuta de propósito: só `status`. Uptime, nome do serviço, hora do servidor e o estado "do Supabase" dizem a quem
+// olha de fora há quanto tempo o motor subiu (quando entrou uma revisão nova) e de que banco ele depende — detalhe interno, que só o
+// próprio sistema precisa. Ninguém de dentro lê esse corpo (o app, a telemetria e as bancadas usam /api/health). `ok` = o motor
+// responde e o banco também; `degradado` = o motor responde e o banco não (sempre HTTP 200, como antes).
 const TTL_DO_BANCO_MS = 30 * 1000;
 
 /**
@@ -43,13 +46,7 @@ function criarSaude({ supabase, agora = Date.now, ttlMs = TTL_DO_BANCO_MS }) {
 
   return async (req, res, next) => {
     try {
-      res.json({
-        status: 'ok',
-        service: 'futty-backend',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        supabase: await estadoDoBanco(),
-      });
+      res.json({ status: (await estadoDoBanco()) === 'connected' ? 'ok' : 'degradado' });
     } catch (err) {
       next(err);
     }

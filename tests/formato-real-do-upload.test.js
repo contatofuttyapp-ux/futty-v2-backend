@@ -217,11 +217,16 @@ test('Resenha: GIF de verdade com Content-Type de GIF passa (a lista da Resenha 
   assert.equal(subidos.length, 1);
 });
 
-test('Resenha: o vídeo não passa pelo sharp e segue como estava (video/mp4 vai ao Storage sem a conferência de imagem)', async (t) => {
+test('Resenha: o vídeo não passa pelo sharp (video/mp4 com bytes de MP4 vai ao Storage sem a conferência de imagem); bytes que não são MP4 levam 400', async (t) => {
   silenciar(t);
   const { enviar, subidos } = cenario(t);
-  const r = await enviar('POST', '/api/feed/upload', 'file', Buffer.from('bytes de um vídeo qualquer'), 'video/mp4', 'a.mp4');
+  // Os primeiros bytes de um MP4: caixa ftyp (tamanho 24, "ftyp", marca "isom"). A conferência fina do vídeo vive em upload-video-e-pixels.test.js.
+  const mp4 = Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypisom'), Buffer.from([0, 0, 2, 0]), Buffer.from('isomiso2'), Buffer.alloc(16)]);
+  const r = await enviar('POST', '/api/feed/upload', 'file', mp4, 'video/mp4', 'a.mp4');
   assert.notEqual(r.json?.error, MSG);
   assert.equal(subidos.length, 1);
   assert.equal(subidos[0].tipo, 'video/mp4');
+  const falso = await enviar('POST', '/api/feed/upload', 'file', Buffer.from('bytes de um vídeo qualquer'), 'video/mp4', 'a.mp4');
+  assert.deepEqual([falso.status, falso.json.error], [400, 'Esse arquivo não é um vídeo aceito.']);
+  assert.equal(subidos.length, 1, 'o falso não chegou ao Storage');
 });

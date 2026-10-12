@@ -8,6 +8,10 @@ const assert = require('node:assert/strict');
 const express = require('express');
 const { tempoPorRota, marcarFase, medir } = require('../middleware/tempo');
 
+// O header que SAI por padrão é só `app;dur` (rodada 30N: nomes de fases, consultas e estado dos caches são detalhe interno). Os testes
+// de fase abaixo ligam o detalhe (SERVER_TIMING_DETALHE=1, o interruptor do ambiente); os do fim do arquivo provam o padrão enxuto.
+process.env.SERVER_TIMING_DETALHE = '1';
+
 async function pedir(montarRota) {
   const app = express();
   app.use(tempoPorRota);
@@ -127,4 +131,73 @@ test('pedidos simultâneos no cache frio: cada um registra a própria espera', a
       assert.ok(campos(st)['cache-sessao'] > 0, st);
     }
   });
+});
+
+// ─── Rodada 30N: por padrão o header sai enxuto ─────────────────────────────────
+
+async function comDetalhe(valor, fn) {
+  const antes = process.env.SERVER_TIMING_DETALHE;
+  if (valor === undefined) delete process.env.SERVER_TIMING_DETALHE; else process.env.SERVER_TIMING_DETALHE = valor;
+  try { return await fn(); } finally { if (antes === undefined) delete process.env.SERVER_TIMING_DETALHE; else process.env.SERVER_TIMING_DETALHE = antes; }
+}
+
+const rotaComFasesECache = (app) => {
+  const cache = criarCache({ nome: 'sessao', ttlMs: 60_000 });
+  app.get('/x', async (req, res) => {
+    marcarFase(res, 'auth');
+    await cache.obter('token', async () => ({ id: 'u1' }));
+    marcarFase(res, 'dados');
+    res.json({ ok: true });
+  });
+};
+
+test('sem o interruptor, o Server-Timing que sai é SÓ app;dur — nenhuma fase, nenhum cache', async () => {
+  await comDetalhe(undefined, async () => {
+    const st = await pedir(rotaComFasesECache);
+    assert.match(st, /^app;dur=[\d.]+$/, `saiu mais que app;dur: ${st}`);
+    assert.doesNotMatch(st, /auth|dados|cache/);
+  });
+});
+
+test('o valor do interruptor tem de ser exatamente "1": qualquer outro (0, true, vazio) deixa enxuto', async () => {
+  for (const v of ['0', 'true', '', 'sim']) {
+    await comDetalhe(v, async () => {
+      const st = await pedir(rotaComFasesECache);
+      assert.match(st, /^app;dur=[\d.]+$/, `"${v}" ligou o detalhe: ${st}`);
+    });
+  }
+});
+
+test('com SERVER_TIMING_DETALHE=1 as fases e o cache voltam (para medir de fora), e app;dur segue por último', async () => {
+  await comDetalhe('1', async () => {
+    const st = await pedir(rotaComFasesECache);
+    assert.match(st, /(?:^|, )auth;dur=/);
+    assert.match(st, /(?:^|, )dados;dur=/);
+    assert.match(st, /(?:^|, )cache;desc=(hit|miss)/);
+    assert.match(st.split(', ').pop(), /^app;dur=/);
+  });
+});
+
+test('o detalhe continua no LOG do servidor (pedido lento em produção) mesmo com o header enxuto', async (t) => {
+  const linhas = [];
+  t.mock.method(console, 'log', (...args) => { linhas.push(args.join(' ')); });
+  const producaoAntes = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    await comDetalhe(undefined, async () => {
+      const st = await pedir((app) => app.get('/x', async (req, res) => {
+        marcarFase(res, 'auth');
+        await new Promise((r) => setTimeout(r, 330));
+        marcarFase(res, 'dados');
+        res.json({ ok: true });
+      }));
+      assert.match(st, /^app;dur=[\d.]+$/);
+    });
+  } finally {
+    if (producaoAntes === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = producaoAntes;
+  }
+  const lento = linhas.find((l) => l.startsWith('[tempo]'));
+  assert.ok(lento, `o pedido lento devia ir para o log: ${linhas.join(' | ')}`);
+  assert.match(lento, /auth;dur=/);
+  assert.match(lento, /dados;dur=/);
 });

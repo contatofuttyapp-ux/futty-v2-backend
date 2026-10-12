@@ -6,6 +6,7 @@
 // (orientação, GPS, modelo do aparelho...) continua passando pelo .rotate().toBuffer(), que gira os
 // pixels já em pé e DESCARTA o EXIF — a privacidade de antes fica igual.
 const sharp = require('sharp');
+const { LIMITE_PIXELS } = require('./imagemReal'); // o teto de pixels da casa: foto de celular cabe, imagem fabricada para estourar a memória não
 
 /**
  * @param {Buffer} buffer a imagem como chegou
@@ -13,10 +14,10 @@ const sharp = require('sharp');
  * @throws se a imagem não decodifica (quem chama transforma em 400)
  */
 async function orientarSePreciso(buffer) {
-  const meta = await sharp(buffer).metadata();
+  const meta = await sharp(buffer, { limitInputPixels: LIMITE_PIXELS }).metadata();
   const precisaGirar = meta.orientation != null && meta.orientation !== 1;
   if (!meta.exif && !precisaGirar) return buffer;
-  return sharp(buffer).rotate().toBuffer();
+  return sharp(buffer, { limitInputPixels: LIMITE_PIXELS }).rotate().toBuffer();
 }
 
 module.exports = { orientarSePreciso };

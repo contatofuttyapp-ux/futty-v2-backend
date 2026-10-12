@@ -10,6 +10,7 @@
 //   é só por deteção positiva, nunca por avaria.
 const path = require('node:path');
 const sharp = require('sharp');
+const { LIMITE_PIXELS } = require('./imagemReal'); // o teto de pixels da casa: foto de celular cabe, imagem fabricada para estourar a memória não
 const { HttpError } = require('./http');
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ async function carregarModelo() {
  */
 async function classificar(buffer) {
   const modelo = await carregarModeloInterno();
-  const { data } = await sharp(buffer)
+  const { data } = await sharp(buffer, { limitInputPixels: LIMITE_PIXELS })
     .flatten({ background: '#ffffff' })
     .resize(224, 224, { fit: 'fill' })
     .removeAlpha()

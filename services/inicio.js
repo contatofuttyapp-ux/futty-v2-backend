@@ -698,9 +698,17 @@ function escolherAd(pagina, { store, adulto, plano, hoje }, userId) {
   return {
     ad: {
       id: c.id, anunciante: c.anunciante || '', imagem_url: c.imagem_url || null,
-      texto: c.texto || c.nome || '', sub: c.sub || c.anunciante || '', cta: c.cta || 'Ver', link: c.link || null,
+      texto: c.texto || c.nome || '', sub: c.sub || c.anunciante || '', cta: c.cta || 'Ver', link: linkServido(c.link),
     },
   };
+}
+
+/**
+ * O link que o anúncio leva ao app: o gravado SÓ se passa na mesma regra da gravação (http(s) ou caminho do app). Uma campanha gravada
+ * antes da trava (ou à mão, direto no arquivo) com `javascript:` sai sem link, em vez de chegar ao toque.
+ */
+function linkServido(link) {
+  try { return gabineteStore.validarLinkDaCampanha(link) || null; } catch { return null; }
 }
 
 async function obterAd(pagina, userId) {

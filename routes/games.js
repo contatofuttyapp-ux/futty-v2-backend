@@ -9,6 +9,7 @@ const { RATING_DEFAULT } = require('../utils/helpers');
 const { executarSorteio } = require('../utils/sorteio');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
+const { nomePublico, mapaDeNomesPublicos, comNomesPublicos } = require('../utils/nomePublico');
 const { enviarNotificacao } = require('./push');
 const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso, partesNoFuso, instanteNoFuso } = require('../utils/fuso');
@@ -29,7 +30,8 @@ const MAX_JOGADORES_POR_TIME = 30;
 /** Quem fez a ação, com o nome de guerra DE AGORA — o selo grava este nome e não muda se a pessoa o trocar depois. */
 async function quemFez(userId) {
   const { data } = await supabase.from('users').select('nome, nome_jogador').eq('id', userId).maybeSingle();
-  return { id: userId, nome: data?.nome_jogador || data?.nome || null };
+  // O registro do sorteio sai na página pública: o apelido (ou só o primeiro nome), nunca o nome completo.
+  return { id: userId, nome: data ? nomePublico(data) : null };
 }
 
 const round1 = (n) => Math.round(n * 10) / 10;
@@ -227,7 +229,11 @@ router.get(
 
     // O sorteio guardou o avatar de quando foi feito; quem trocou a foto depois aparece com a de hoje
     // (utils/avataresDoSorteio.js). Vem do mesmo game_players que a lista de presença: sem ida nova.
-    const timesResultado = comAvataresAtuais(game.times_resultado, new Map((gp || []).filter((p) => p.users).map((p) => [p.users.id, p.users.avatar_url || null])));
+    const timesResultado = comNomesPublicos(
+      comAvataresAtuais(game.times_resultado, new Map((gp || []).filter((p) => p.users).map((p) => [p.users.id, p.users.avatar_url || null]))),
+      // O cartão 9:16 sai do app para o WhatsApp: quem tem conta leva o apelido (ou o primeiro nome), como na página pública.
+      mapaDeNomesPublicos((gp || []).map((p) => p.users).filter(Boolean)),
+    );
 
     const team = game.teams;
     res.json({
@@ -315,9 +321,10 @@ router.get(
     if (game.resultado_nivel === 3) {
       const { data } = await supabase
         .from('gols_jogadores')
-        .select('user_id, gols, users ( nome )')
+        .select('user_id, gols, users ( nome, nome_jogador )')
         .eq('game_id', game.id);
-      gols = (data || []).map((g) => ({ user_id: g.user_id, gols: g.gols || 0, nome: g.users?.nome || null }));
+      // O apelido, não o nome completo: quem recebe o link não é do time.
+      gols = (data || []).map((g) => ({ user_id: g.user_id, gols: g.gols || 0, nome: g.users ? nomePublico(g.users) : null }));
     }
 
     // PRIVACIDADE /p/ (Opção B): decide POR JOGADOR se o rosto entra — adulto E
@@ -331,21 +338,27 @@ router.get(
       const original = game.times_resultado.registro?.original;
       (original?.times || []).forEach((t) => (t.jogadores || []).forEach(colher));
       (original?.reservas || []).forEach(colher);
+      // Quem sorteou/ajustou também aparece no selo do registro: os nomes deles seguem a mesma regra do apelido.
+      const reg = game.times_resultado.registro;
+      [reg?.por, ...((reg?.ajustes) || []).map((a) => a?.por)].forEach((p) => { if (p && p.id) ids.add(p.id); });
       const usersById = new Map();
       if (ids.size) {
         // Se a coluna mostrar_rosto_publico ainda não existir (DDL por correr), a query
         // devolve erro → mapa vazio → TODOS caem em silhueta (fail-closed, seguro).
         const { data: donos } = await supabase
           .from('users')
-          .select('id, birthdate, mostrar_rosto_publico, avatar_url')
+          .select('id, nome, nome_jogador, birthdate, mostrar_rosto_publico, avatar_url')
           .in('id', [...ids]);
         (donos || []).forEach((u) => usersById.set(u.id, u));
       }
       // A foto de hoje, não a de quando o sorteio foi feito (utils/avataresDoSorteio.js); a regra de
       // privacidade abaixo decide depois se ela pode aparecer.
       game.times_resultado = comAvataresAtuais(game.times_resultado, new Map([...usersById].map(([id, u]) => [id, u.avatar_url || null])));
+      // O apelido de hoje, nunca o nome completo (utils/nomePublico.js): o snapshot guarda o nome de quando o sorteio foi feito.
+      const nomesPublicos = mapaDeNomesPublicos([...usersById.values()]);
+      game.times_resultado = comNomesPublicos(game.times_resultado, nomesPublicos);
       aplicarRostoPublico(game.times_resultado, usersById, `${req.protocol}://${req.get('host')}`);
-      if (game.times_resultado.registro) game.times_resultado = { ...game.times_resultado, registro: registroPublico(game.times_resultado.registro) };
+      if (game.times_resultado.registro) game.times_resultado = { ...game.times_resultado, registro: registroPublico(game.times_resultado.registro, nomesPublicos) };
     }
 
     res.json({
@@ -687,7 +700,7 @@ router.post(
     const ratings = await computeRatings(game.teams.id, userIds);
     const toPlayer = (p) => ({
       user_id: p.users.id,
-      nome: p.users.nome_jogador || p.users.nome || 'Jogador',
+      nome: nomePublico(p.users), // o snapshot alimenta o cartão 9:16 e a página pública: apelido, ou só o primeiro nome
       avatar_url: p.users.avatar_url || null,
       rating: round1(ratings[p.users.id] ?? RATING_DEFAULT),
       goleiro: p.goleiro,

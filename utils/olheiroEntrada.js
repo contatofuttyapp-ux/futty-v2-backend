@@ -12,6 +12,7 @@
 // (ficheiro corrompido nunca vai gerar nada de bom). Só um erro INESPERADO no
 // próprio filtro (bug aqui, não na imagem) falha aberto.
 const sharp = require('sharp');
+const { LIMITE_PIXELS } = require('./imagemReal'); // o teto de pixels da casa: foto de celular cabe, imagem fabricada para estourar a memória não
 const { HttpError } = require('./http');
 
 const LADO_MIN = 200; // px — menor lado abaixo disto não dá para nada
@@ -32,7 +33,7 @@ async function olheiroEntrada(req, res, next) {
 
   let metadata;
   try {
-    metadata = await sharp(file.buffer).metadata();
+    metadata = await sharp(file.buffer, { limitInputPixels: LIMITE_PIXELS }).metadata();
   } catch (e) {
     console.warn('[olheiro-entrada] REPROVADA: não decodifica', { user: req.user?.id, erro: e.message });
     return next(new HttpError(400, MSG, 'FOTO_FRACA'));
@@ -45,7 +46,7 @@ async function olheiroEntrada(req, res, next) {
       return next(new HttpError(400, MSG, 'FOTO_FRACA'));
     }
 
-    const { channels } = await sharp(file.buffer).greyscale().stats();
+    const { channels } = await sharp(file.buffer, { limitInputPixels: LIMITE_PIXELS }).greyscale().stats();
     const brilho = channels[0].mean;
     if (brilho < BRILHO_MIN || brilho > BRILHO_MAX) {
       console.warn('[olheiro-entrada] REPROVADA: brilho fora do intervalo', { user: req.user?.id, brilho: Number(brilho.toFixed(1)) });
