@@ -9,8 +9,14 @@ const store = require('../utils/campeonatoStore');
 const selosCache = require('../utils/selosCache');
 const { buildRanking } = require('./ranking');
 const { sincronizarPostDoCampeao, apagarPostDoCampeao } = require('../utils/postDoCampeao');
+const { textoCurto } = require('../utils/entrada');
+const { urlDeAvatarValida } = require('../utils/validarUrl');
+const { MAX_GOLS } = require('../utils/resultadoDoJogo');
 
 const router = express.Router();
+
+// O nome do campeonato: texto de verdade, aparado e cortado em 60 (o campo do app já limita; um nome maior que isso sempre foi cortado).
+const nomeDoCampeonato = (valor) => (valor == null ? '' : textoCurto(valor, Infinity, 'Nome do campeonato').slice(0, 60));
 
 const MIN_TIMES = 2;
 const MAX_TIMES = 8;
@@ -196,7 +202,7 @@ router.post(
     const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só o admin do time cria campeonatos.');
 
-    const gameId = String(req.body?.game_id || '');
+    const gameId = typeof req.body?.game_id === 'string' ? req.body.game_id : '';
     if (!gameId) throw new HttpError(400, 'game_id em falta.');
     const formato = store.lerFormato(req.body?.formato);
 
@@ -221,7 +227,7 @@ router.post(
 
     // O nome é do admin (a tela o traz preenchido com "Campeonato <time>"); sem nome, o mesmo padrão. A data do jogo não entra no
     // nome: vai gravada em `origem_data` e a página do campeonato a mostra como subtítulo.
-    const nome = String(req.body?.nome || '').trim().slice(0, 60) || `Campeonato ${team.nome}`.slice(0, 60);
+    const nome = nomeDoCampeonato(req.body?.nome) || `Campeonato ${team.nome}`.slice(0, 60);
 
     const origem = { game_id: game.id, assinatura: store.assinaturaDosTimes(timesSorteio), data: game.data || null };
     const camp = await store.criar(team.id, req.user.id, { nome, formato, nomes, plantel, origem });
@@ -276,25 +282,35 @@ router.post(
     if (b.modo === 'sorteio') {
       throw new HttpError(400, 'Para sortear, marque um jogo e sorteie por lá; no resultado do sorteio, toque em Criar campeonato.');
     }
-    const nome = String(b.nome || '').trim();
+    const nome = nomeDoCampeonato(b.nome);
     if (!nome) throw new HttpError(400, 'Dê um nome ao campeonato.');
     const formato = store.lerFormato(b.formato);
 
-    const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => String(x || '').trim()).filter(Boolean).slice(0, MAX_TIMES);
+    // O nome de cada time cabe em 40 (o campo do app); texto de qualquer outro tipo é erro de quem mandou.
+    const nomes = (Array.isArray(b.nomes) ? b.nomes : []).map((x) => textoCurto(x, 40, 'Nome do time')).filter(Boolean).slice(0, MAX_TIMES);
     if (nomes.length < minTimesDe(formato)) throw new HttpError(400, mensagemMinTimes(formato));
     // Composição à mão (OPCIONAL): plantel[i] = jogadores do time i
     // (membros por user_id + convidados por nome). Times só com nome continuam
     // válidos. Sanitiza: 22 por time, só campos conhecidos.
     let plantel;
     if (Array.isArray(b.plantel)) {
+      // Quem tem conta tem de ser do time (um id de fora ganharia selo e card de campeão num time que não é o dele); o nome comprido de
+      // um membro (até 60) é cortado em 40, como sempre; a foto só vale se for foto nossa — o resto vira "sem foto".
+      const { data: doTime } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
+      const ids = new Set((doTime || []).map((m) => m.user_id));
       plantel = nomes.map((_, i) => (Array.isArray(b.plantel[i]) ? b.plantel[i] : [])
         .slice(0, 22)
-        .map((p) => ({
-          user_id: p && p.user_id ? String(p.user_id) : null,
-          nome: String((p && p.nome) || '').trim().slice(0, 40) || 'Jogador',
-          avatar_url: p && p.avatar_url ? String(p.avatar_url) : null,
-          convidado: !!(p && p.convidado),
-        })));
+        .map((p) => {
+          if (p !== null && typeof p !== 'object') throw new HttpError(400, 'Um dos jogadores veio num formato que não dá para ler.');
+          const userId = p && p.user_id ? p.user_id : null;
+          if (userId !== null && (typeof userId !== 'string' || !ids.has(userId))) throw new HttpError(400, 'Esse jogador não é do time.');
+          return {
+            user_id: userId,
+            nome: (p && typeof p.nome === 'string' ? p.nome.trim().slice(0, 40) : '') || 'Jogador',
+            avatar_url: p && p.avatar_url && urlDeAvatarValida(p.avatar_url, req) ? String(p.avatar_url) : null,
+            convidado: !!(p && p.convidado),
+          };
+        }));
     }
 
     const camp = await store.criar(team.id, req.user.id, { nome, formato, nomes, plantel });
@@ -323,9 +339,14 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só o admin lança resultados.');
     const camp = await store.obter(team.id, req.params.id);
     if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
-    const pa = Math.max(0, Math.floor(Number(req.body?.placar_a)));
-    const pb = Math.max(0, Math.floor(Number(req.body?.placar_b)));
-    if (!Number.isFinite(pa) || !Number.isFinite(pb)) throw new HttpError(400, 'Placar inválido.');
+    // O placar é inteiro de 0 a 99 (duas casas, como no cartão do jogo): negativo, decimal, texto ou 999 é erro de digitação, não "0".
+    const lerPlacar = (v) => {
+      const n = typeof v === 'number' ? v : typeof v === 'string' && /^\s*\d+\s*$/.test(v) ? Number(v) : NaN;
+      if (!Number.isInteger(n) || n < 0 || n > MAX_GOLS) throw new HttpError(400, 'Placar inválido.');
+      return n;
+    };
+    const pa = lerPlacar(req.body?.placar_a);
+    const pb = lerPlacar(req.body?.placar_b);
 
     // Placar empatado numa final ou num jogo do mata-mata só vale com o vencedor dos pênaltis (o placar fica como foi digitado).
     const penaltis = req.body?.penaltis_vencedor_id ? String(req.body.penaltis_vencedor_id) : null;

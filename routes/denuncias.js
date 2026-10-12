@@ -11,6 +11,7 @@ const { removerFicheirosPorUrl } = require('../utils/storage');
 const { triar } = require('../utils/triagem');
 const store = require('../utils/denunciaStore');
 const plataforma = require('../utils/plataformaStore');
+const { ehUuid } = require('../utils/entrada');
 
 const router = express.Router();
 const STORAGE_BUCKET = 'resenha';
@@ -39,6 +40,10 @@ async function resolverAlvo(targetType, targetId) {
     if (c.parent_type === 'post') {
       const { data: p } = await supabase.from('feed_posts').select('team_id').eq('id', c.parent_id).maybeSingle();
       teamId = p?.team_id || null;
+    } else if (c.parent_type === 'game') {
+      // Sem o time do jogo, o teste "quem denuncia é do time" era pulado, e qualquer pessoa denunciava o comentário de outro time.
+      const { data: g } = await supabase.from('games').select('team_id').eq('id', c.parent_id).maybeSingle();
+      teamId = g?.team_id || null;
     }
     return { teamId, tipo: 'texto', conteudo: c.body || '[comentário]', urls: [] };
   }
@@ -73,7 +78,9 @@ router.post(
   asyncHandler(async (req, res) => {
     const { target_type: targetType, target_id: targetId, categoria, descricao } = req.body || {};
     if (!targetId) throw new HttpError(400, 'Alvo em falta.');
+    if (!ehUuid(targetId)) throw new HttpError(404, 'Alvo não encontrado.');
     if (!store.CATEGORIAS.includes(categoria)) throw new HttpError(400, 'Categoria inválida.');
+    if (descricao != null && typeof descricao !== 'string') throw new HttpError(400, 'A descrição precisa ser texto.');
 
     const { teamId, tipo, conteudo, urls } = await resolverAlvo(targetType, targetId);
     // SEGURANCA-REVISAO-10SET.md secção 3: sem isto qualquer
@@ -166,6 +173,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { slug, acao } = req.body || {};
     if (!['remover', 'manter', 'avisar'].includes(acao)) throw new HttpError(400, 'Ação inválida.');
+    if (!ehUuid(req.params.id)) throw new HttpError(404, 'Denúncia não encontrada.');
     const team = await getTeamBySlug(String(slug || ''));
     if (!team) throw new HttpError(404, 'Time não encontrado.');
     if ((await getRole(team.id, req.user.id)) !== 'admin') throw new HttpError(403, 'Só o admin do time.');

@@ -78,6 +78,12 @@ function registrarCache(nome, acertou, esperaMs = 0) {
   t.fases[fase] = (t.fases[fase] || 0) + esperaMs;
 }
 
+/**
+ * Onde o pedido bateu, para o log: o DESENHO da rota (`/api/convite/:token`), nunca o endereço pedido — o caminho real leva o token do
+ * convite, o do proxy de mídia, o slug do time, e a busca digitada vai na query. É o mesmo cuidado do tratador de erros (middleware/erros.js).
+ */
+const ondeBateu = (req) => `${req.method} ${req.route?.path ? `${req.baseUrl || ''}${req.route.path}` : '(sem rota)'}`;
+
 function tempoPorRota(req, res, next) {
   const inicio = AGORA();
   const logar = process.env.NODE_ENV !== 'production';
@@ -104,7 +110,7 @@ function tempoPorRota(req, res, next) {
       // Em produção, um pedido lento diz POR ONDE se perdeu o tempo — sem isto,
       // saber que "demorou 700 ms" não leva a lado nenhum.
       if (!logar && total > 300 && partes.length > 1) {
-        console.log(`[tempo] ${req.method} ${req.originalUrl} ${Math.round(total)}ms — ${partes.join(' ')}`);
+        console.log(`[tempo] ${ondeBateu(req)} ${Math.round(total)}ms — ${partes.join(' ')}`);
       }
     }
     return enviarOriginal.apply(res, args);
@@ -113,10 +119,10 @@ function tempoPorRota(req, res, next) {
   if (logar) {
     res.on('finish', () => {
       const ms = MS(inicio, AGORA());
-      if (ms > 500) console.log(`[tempo] ${req.method} ${req.originalUrl} ${Math.round(ms)}ms`);
+      if (ms > 500) console.log(`[tempo] ${ondeBateu(req)} ${Math.round(ms)}ms`);
     });
   }
   pedidoAtual.run(res.locals._tempo, next);
 }
 
-module.exports = { tempoPorRota, marcarFase, medir, registrarCache };
+module.exports = { tempoPorRota, marcarFase, medir, registrarCache, ondeBateu };

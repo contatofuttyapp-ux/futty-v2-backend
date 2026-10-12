@@ -51,6 +51,10 @@ router.post(
   asyncHandler(async (req, res) => {
     const { endpoint, keys } = req.body || {};
     if (!endpoint || !keys?.p256dh || !keys?.auth) throw new HttpError(400, 'Subscrição inválida.');
+    // Os tamanhos de uma subscrição de verdade (endpoint ~200–600, p256dh 88, auth 22) com folga: o resto é lixo, não dado.
+    if (typeof endpoint !== 'string' || endpoint.length > 1000 || typeof keys.p256dh !== 'string' || keys.p256dh.length > 200 || typeof keys.auth !== 'string' || keys.auth.length > 100) {
+      throw new HttpError(400, 'Subscrição inválida.');
+    }
     // SEGURANCA-REVISAO-10SET.md secção 3: sem isto o servidor fazia
     // POST (webpush.sendNotification) para qualquer endpoint que mandassem —
     // só aceita hosts de serviços de push conhecidos.
@@ -79,6 +83,7 @@ router.delete(
   asyncHandler(async (req, res) => {
     const { endpoint } = req.body || {};
     if (!endpoint) throw new HttpError(400, 'endpoint em falta.');
+    if (typeof endpoint !== 'string' || endpoint.length > 1000) throw new HttpError(400, 'endpoint inválido.');
     const { error } = await supabase
       .from('push_subscriptions')
       .delete()

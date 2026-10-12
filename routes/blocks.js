@@ -6,6 +6,7 @@ const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
+const { ehUuid } = require('../utils/entrada');
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const blockedId = String(req.body?.blocked_id || '');
     if (!blockedId) throw new HttpError(400, 'blocked_id em falta.');
+    if (!ehUuid(blockedId)) throw new HttpError(400, 'blocked_id inválido.');
     if (blockedId === req.user.id) throw new HttpError(400, 'Você não pode bloquear a si mesmo.');
 
     const { error } = await supabase
@@ -32,6 +34,7 @@ router.delete(
   '/api/blocks/:blockedId',
   requireAuth,
   asyncHandler(async (req, res) => {
+    if (!ehUuid(req.params.blockedId)) throw new HttpError(400, 'blocked_id inválido.');
     const { error } = await supabase
       .from('user_blocks')
       .delete()

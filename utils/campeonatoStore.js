@@ -46,6 +46,11 @@ async function ensureCampeonatosBucket() {
   }
 }
 
+// O id do campeonato chega do endereço (req.params.id, já decodificado: "..%2F" vira "../") e entra no caminho do Storage. Só um uuid de
+// verdade vale, para um "../" nunca sair da pasta do time e alcançar o documento de outro.
+const ID_DE_CAMPEONATO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const idValido = (id) => typeof id === 'string' && ID_DE_CAMPEONATO.test(id);
+
 function caminho(teamId, id) {
   return `t/${teamId}/${id}.json`;
 }
@@ -65,6 +70,7 @@ async function guardar(camp) {
 // plataformaStore). Se o prazo vencer, rejeita como uma falha normal do Storage
 // já rejeitaria — quem chama (asyncHandler das rotas) já sabe tratar isso.
 async function obter(teamId, id) {
+  if (!idValido(id)) return null;
   const { data, error } = await comPrazo(supabase.storage.from(BUCKET).download(caminho(teamId, id)), 3000, 'campeonatos/obter');
   if (error || !data) return null;
   const txt = await data.text();
@@ -85,6 +91,7 @@ async function listar(teamId) {
 }
 
 async function apagar(teamId, id) {
+  if (!idValido(id)) return;
   await supabase.storage.from(BUCKET).remove([caminho(teamId, id)]);
   esquecerCacheDoInicio(teamId);
 }

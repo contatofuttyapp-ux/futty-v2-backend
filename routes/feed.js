@@ -6,14 +6,15 @@ const crypto = require('crypto');
 const multer = require('multer');
 const sharp = require('sharp');
 const { requireAuth } = require('../middleware/auth');
-const { denunciaLimiter } = require('../middleware/limiters');
+const { denunciaLimiter, uploadResenhaLimiter } = require('../middleware/limiters');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
 const { filtroNSFW } = require('../utils/nsfwFilter');
-const { exigirImagemReal } = require('../utils/imagemReal');
+const { exigirImagemReal, formatoReal, MSG_FORMATO } = require('../utils/imagemReal');
 const { removerFicheirosPorUrl } = require('../utils/storage');
-const { urlDeMidiaValida } = require('../utils/validarUrl');
+const { urlDeMidiaValida, midiaEhDe } = require('../utils/validarUrl');
+const { inteiroEmFaixa, ehUuid } = require('../utils/entrada');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
@@ -192,12 +193,12 @@ async function comprimirImagem(buffer, mimetypeOriginal, extOriginal) {
   }
 }
 
-/** Garante (uma vez por processo) que o bucket público da Resenha existe. */
+/** Garante (uma vez por processo) que o bucket da Resenha existe — PRIVADO: as fotos saem só pelo proxy assinado (/api/media). */
 let bucketReady = false;
 async function ensureBucket() {
   if (bucketReady) return;
   // Ignora erro caso o bucket já exista (idempotente).
-  await supabase.storage.createBucket(STORAGE_BUCKET, { public: true }).catch(() => {});
+  await supabase.storage.createBucket(STORAGE_BUCKET, { public: false }).catch(() => {});
   bucketReady = true;
 }
 
@@ -443,18 +444,14 @@ router.post(
   asyncHandler(async (req, res) => {
     const { team_id: teamId, body, media } = req.body || {};
     if (!teamId) throw new HttpError(400, 'team_id é obrigatório.');
+    if (!ehUuid(teamId)) throw new HttpError(400, 'team_id inválido.');
+    if (body != null && typeof body !== 'string') throw new HttpError(400, 'O texto do post precisa ser texto.');
     const texto = String(body ?? '').trim();
     const mediaList = (Array.isArray(media) ? media : []).filter((m) => m && m.url);
     // Texto é opcional QUANDO há média; vazio total é rejeitado.
     if (!texto && mediaList.length === 0) throw new HttpError(400, 'O post precisa de texto ou média.');
     if (texto.length > 2000) throw new HttpError(400, 'Máximo 2000 caracteres.');
     if (mediaList.length > 4) throw new HttpError(400, 'Máximo 4 anexos por post.');
-    // SEGURANCA-REVISAO-10SET.md secção 3: só aceita URLs https do
-    // Storage do Supabase ou do proxy do próprio backend (/api/media/) —
-    // impede que o campo vire um redirect/SSRF para qualquer host.
-    if (mediaList.some((m) => !urlDeMidiaValida(m.url, req))) {
-      throw new HttpError(400, 'URL de mídia inválida.');
-    }
 
     // Permissão: admin OU pode_postar
     const { data: membership } = await supabase
@@ -466,6 +463,14 @@ router.post(
     if (!membership) throw new HttpError(403, 'Você não é membro deste time.');
     if (membership.role !== 'admin' && !membership.pode_postar) {
       throw new HttpError(403, 'Você não tem permissão para publicar neste time.');
+    }
+
+    // SEGURANCA-REVISAO-10SET.md secção 3: só aceita URLs https do
+    // Storage do Supabase ou do proxy do próprio backend (/api/media/) —
+    // impede que o campo vire um redirect/SSRF para qualquer host. E só mídia que a própria pessoa subiu (o nome do arquivo leva o
+    // id de quem subiu): anexar a foto de outra pessoa e depois apagar o post apagava a foto dela do Storage.
+    if (mediaList.some((m) => !midiaEhDe(m.url, req, req.user.id))) {
+      throw new HttpError(400, 'URL de mídia inválida.');
     }
 
     // Cota de 500 MB por time (Rodada 15) — checada ANTES de criar o post,
@@ -670,22 +675,27 @@ router.patch(
       }
       patch.campeao_foto_url = b.campeao_foto_url || null;
     }
-    if ('artilheiro_user_id' in b) patch.artilheiro_user_id = b.artilheiro_user_id || null;
+    // Os prêmios do dia são de gente do time: um id de fora ia virar, na resposta, o nome de uma pessoa de outro time.
+    // (O que já estava gravado continua valendo: quem saiu do time depois do jogo não trava a edição do resultado.)
+    const premiado = async (valor, atual) => {
+      if (!valor) return null;
+      if (valor === atual) return valor;
+      if (!ehUuid(valor)) throw new HttpError(400, 'Esse jogador não é do time.');
+      if (!(await getRole(game.teams.id, valor))) throw new HttpError(400, 'Esse jogador não é do time.');
+      return valor;
+    };
+    if ('artilheiro_user_id' in b) patch.artilheiro_user_id = await premiado(b.artilheiro_user_id, game.artilheiro_user_id);
     if ('artilheiro_gols' in b) {
       if (b.artilheiro_gols === null || b.artilheiro_gols === '') patch.artilheiro_gols = null;
-      else {
-        const gols = parseInt(b.artilheiro_gols, 10);
-        if (!Number.isFinite(gols) || gols < 0) throw new HttpError(400, 'artilheiro_gols inválido.');
-        patch.artilheiro_gols = gols;
-      }
+      else patch.artilheiro_gols = inteiroEmFaixa(b.artilheiro_gols, { min: 0, max: 99, rotulo: 'artilheiro_gols' });
     }
-    if ('destaque_user_id' in b) patch.destaque_user_id = b.destaque_user_id || null;
+    if ('destaque_user_id' in b) patch.destaque_user_id = await premiado(b.destaque_user_id, game.destaque_user_id);
     if ('destaque_titulo' in b) {
       const titulo = b.destaque_titulo == null ? null : String(b.destaque_titulo).trim();
       if (titulo && titulo.length > 60) throw new HttpError(400, 'destaque_titulo: máximo 60 caracteres.');
       patch.destaque_titulo = titulo || null;
     }
-    if ('rodada_user_id' in b) patch.rodada_user_id = b.rodada_user_id || null;
+    if ('rodada_user_id' in b) patch.rodada_user_id = await premiado(b.rodada_user_id, game.rodada_user_id);
     if ('rodada_foto_url' in b) {
       if (b.rodada_foto_url && !urlDeMidiaValida(b.rodada_foto_url, req)) {
         throw new HttpError(400, 'URL de mídia inválida.');
@@ -745,6 +755,7 @@ router.patch(
 router.post(
   '/api/feed/upload',
   requireAuth,
+  uploadResenhaLimiter,
   receberFicheiro,
   exigirImagemReal(IMAGENS_DA_RESENHA), // SVG (ou outro formato) com Content-Type de imagem: 400, antes de qualquer sharp
   filtroNSFW, // bloqueia imagem explícita da resenha antes de guardar
@@ -753,6 +764,13 @@ router.post(
     const mimetypeOriginal = req.file.mimetype;
     const extOriginal = UPLOAD_MIME[mimetypeOriginal];
     if (!extOriginal) throw new HttpError(400, 'Tipo de arquivo não permitido.');
+    // A Resenha só guarda imagem que abre. A compressão mais abaixo é fail-open de propósito (melhor uma foto grande que nenhuma), mas só
+    // vale para foto de verdade: um arquivo vazio, ou bytes que nenhum leitor decodifica, entrariam no bucket com o tipo que o cliente
+    // declarou. (Vídeo segue como estava: o upload de vídeo está dormente na v1.)
+    if (mimetypeOriginal.startsWith('image/')) {
+      const formato = await formatoReal(req.file.buffer);
+      if (!formato || formato === 'marcacao') throw new HttpError(400, MSG_FORMATO);
+    }
 
     // GIF: fica animado, não passa por sharp — mas tem teto PRÓPRIO, mais
     // apertado que o geral (a lei do app leve não abre exceção pra "é GIF").
@@ -766,7 +784,8 @@ router.post(
 
     await ensureBucket();
 
-    const filename = `${crypto.randomUUID()}.${ext}`;
+    // O id de quem subiu vai no nome: é assim que o post sabe que a mídia é de quem a anexa (utils/validarUrl.js#midiaEhDe).
+    const filename = `${req.user.id}-${crypto.randomUUID()}.${ext}`;
     const { error } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(filename, buffer, { contentType: mimetype, upsert: false });
@@ -923,6 +942,7 @@ router.post(
     const { parent_type: parentType, parent_id: parentId, body, reply_to: replyTo, anexos } = req.body || {};
     if (!['game', 'post'].includes(parentType)) throw new HttpError(400, 'parent_type inválido.');
     if (!parentId) throw new HttpError(400, 'parent_id é obrigatório.');
+    if (body != null && typeof body !== 'string') throw new HttpError(400, 'O comentário precisa ser texto.');
     const texto = String(body ?? '').trim();
     if (!texto) throw new HttpError(400, 'O comentário não pode estar vazio.');
     if (texto.length > 500) throw new HttpError(400, 'Máximo 500 caracteres.');
@@ -931,6 +951,10 @@ router.post(
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
     if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+
+    // Os anexos valem o mesmo que a mídia de um post: do Storage da Resenha e subida por quem comenta (a v1 do app só manda texto).
+    const anexosPedidos = (Array.isArray(anexos) ? anexos : []).filter((a) => a && a.url).slice(0, 8);
+    if (anexosPedidos.some((a) => !midiaEhDe(a.url, req, req.user.id))) throw new HttpError(400, 'URL de mídia inválida.');
 
     // reply_to tem de pertencer ao mesmo parent
     if (replyTo) {
@@ -964,9 +988,7 @@ router.post(
     if (error) throw new HttpError(500, error.message);
 
     // Anexos (máx 8)
-    const anexoRows = (Array.isArray(anexos) ? anexos : [])
-      .filter((a) => a && a.url)
-      .slice(0, 8)
+    const anexoRows = anexosPedidos
       .map((a, i) => ({
         comentario_id: c.id,
         url: String(a.url),

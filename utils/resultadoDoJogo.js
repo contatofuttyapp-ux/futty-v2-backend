@@ -32,6 +32,16 @@ function quantosTimes(timesResultado) {
 
 const { HttpError } = require('./http');
 const { chaveDoJogador } = require('./registroDoSorteio');
+const { textoCurto } = require('./entrada');
+
+// Placar e gols de verdade cabem em dois dígitos (o cartão do jogo e a tabela do campeonato têm duas casas): acima disso é erro de digitação.
+const MAX_GOLS = 99;
+// Gol vazio, negativo ou ilegível vale 0 (como sempre valeu: o campo em branco do app); acima de 99 é erro de digitação e o admin é avisado.
+const golsDe = (valor) => {
+  const n = Math.max(0, Math.floor(Number(valor)) || 0);
+  if (n > MAX_GOLS) throw new HttpError(400, `Gols: use um número de 0 a ${MAX_GOLS}.`);
+  return n;
+};
 
 const indiceValido = (n) => Number.isInteger(n) && n >= 0;
 
@@ -131,17 +141,27 @@ function escolhaDoCorpo(b = {}) {
  * (id de quem tem conta, nome de quem é convidado sem app): os dois times caem no mesmo objeto sem um sobrescrever o outro. Quem não está
  * nos dois primeiros times fica com `time: null` (a coluna só conhece A e B) — o gol vale para o artilheiro, não para o placar.
  */
-function linhasDeGols(timesResultado, gols) {
+function linhasDeGols(timesResultado, gols, membros = null) {
   const times = Array.isArray(timesResultado?.times) ? timesResultado.times : [];
   const timeDe = {};
   times.slice(0, 2).forEach((t, i) => (t?.jogadores || []).forEach((j) => { timeDe[chaveDoJogador(j)] = i === 0 ? 'A' : 'B'; }));
+  // Quem marca é gente do time: os membros de hoje e quem jogou os times do sorteio (um jogador que saiu do time depois do jogo continua
+  // podendo ter o gol). Sem esta conta, o admin de um time gravava gols para o id de qualquer pessoa — e a tela do jogo mostrava o nome dela.
+  let permitidos = null;
+  if (membros) {
+    permitidos = new Set(membros);
+    times.forEach((t) => (t?.jogadores || []).forEach((j) => { if (j?.user_id) permitidos.add(j.user_id); }));
+    (timesResultado?.reservas || []).forEach((j) => { if (j?.user_id) permitidos.add(j.user_id); });
+  }
   return (Array.isArray(gols) ? gols : [])
     .map((g) => {
-      if (!g) return null;
-      const convidadoNome = g.user_id ? null : String(g.convidado_nome || '').trim();
+      if (!g || typeof g !== 'object') return null;
+      if (g.user_id && permitidos && !permitidos.has(g.user_id)) throw new HttpError(400, 'Esse jogador não é do time.');
+      if (g.user_id && typeof g.user_id !== 'string') throw new HttpError(400, 'Esse jogador não é do time.');
+      const convidadoNome = g.user_id ? null : textoCurto(g.convidado_nome, 60, 'Nome do convidado');
       if (!g.user_id && !convidadoNome) return null;
       const chave = chaveDoJogador({ user_id: g.user_id || null, nome: convidadoNome });
-      return { user_id: g.user_id || null, convidado_nome: convidadoNome || null, gols: Math.max(0, Math.floor(Number(g.gols)) || 0), time: timeDe[chave] || null };
+      return { user_id: g.user_id || null, convidado_nome: convidadoNome || null, gols: golsDe(g.gols), time: timeDe[chave] || null };
     })
     .filter(Boolean);
 }
@@ -168,7 +188,7 @@ function placarDoCorpo(b = {}) {
   if (vazio(b.placar_a) && vazio(b.placar_b)) return null;
   const a = vazio(b.placar_a) ? 0 : Number(b.placar_a);
   const c = vazio(b.placar_b) ? 0 : Number(b.placar_b);
-  if (!Number.isInteger(a) || a < 0 || !Number.isInteger(c) || c < 0) throw new HttpError(400, 'Placar inválido.');
+  if (!Number.isInteger(a) || a < 0 || a > MAX_GOLS || !Number.isInteger(c) || c < 0 || c > MAX_GOLS) throw new HttpError(400, 'Placar inválido.');
   return { a, b: c };
 }
 
@@ -217,5 +237,5 @@ function decidirResultado({ nTimes, campeaoIdx = null, empate = false, placar = 
 
 module.exports = {
   ESPERA_DO_RESULTADO_MS, resultadoAbreEm, resultadoJaAbriu, quantosTimes, vencedorDerivado, resultadoGravado, temResultado, jogadoresDoCampeao, desfechoDoJogo, resultadoDoJogador,
-  escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado,
+  escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado, MAX_GOLS, golsDe,
 };

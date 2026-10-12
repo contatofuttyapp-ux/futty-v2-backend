@@ -13,8 +13,16 @@ const { optionalAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../utils/http');
 const { obterAd, obterAdsSessao } = require('../services/inicio');
 const adsStore = require('../utils/adsStore');
+const gabineteStore = require('../utils/gabineteStore');
 
 const router = express.Router();
+
+// A medição é pública (o app conta impressão e clique com ou sem login) — por isso só conta campanha que existe. Sem esta conta, qualquer
+// um mandava ids inventados e o arquivo de métricas (lido e regravado inteiro a cada 30 s, e aberto pelo Gabinete) crescia sem limite.
+async function idsDeCampanhas() {
+  const operacao = await gabineteStore.ler();
+  return new Set((operacao.campanhas || []).map((c) => c.id));
+}
 
 /** GET /api/ads?pagina=inicio|resenha|ranking|figurinha|sorteio|p — devolve o anúncio a mostrar (ou {ad:null}). */
 router.get(
@@ -45,7 +53,7 @@ router.post(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const { id, tipo } = req.body || {};
-    await adsStore.registar(id, tipo === 'cli' ? 'cli' : 'imp');
+    if (typeof id === 'string' && (await idsDeCampanhas()).has(id)) adsStore.registar(id, tipo === 'cli' ? 'cli' : 'imp');
     res.json({ ok: true });
   }),
 );
@@ -64,8 +72,9 @@ router.post(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const eventos = Array.isArray(req.body?.eventos) ? req.body.eventos.slice(0, 50) : [];
+    const conhecidas = await idsDeCampanhas();
     for (const e of eventos) {
-      if (!e?.id) continue;
+      if (typeof e?.id !== 'string' || !conhecidas.has(e.id)) continue;
       // Em série de propósito: o adsStore agrega no MESMO documento do dia, e
       // duas escritas em paralelo perderiam uma das contagens.
       // eslint-disable-next-line no-await-in-loop

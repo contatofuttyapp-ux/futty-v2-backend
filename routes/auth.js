@@ -223,7 +223,7 @@ router.get(
 
 /**
  * PATCH /api/me — atualiza o perfil do utilizador (só os campos enviados).
- * Body (todos opcionais): nome, nome_jogador, cor_preferida, avatar_url, telefone.
+ * Body (todos opcionais): nome, nome_jogador, cor_preferida, fundo_figurinha, avatar_generico, birthdate… (avatar_url só aceita null, para limpar).
  */
 router.patch(
   '/api/me',
@@ -247,11 +247,10 @@ router.patch(
       if (v && !CORES_UNIFORME.includes(v)) throw new HttpError(400, 'Cor de uniforme inválida.');
       patch.cor_preferida = v;
     }
-    if ('avatar_url' in b) {
-      const v = b.avatar_url == null ? null : String(b.avatar_url).trim();
-      if (v && v.length > 500) throw new HttpError(400, 'avatar_url: máximo 500 caracteres.');
-      patch.avatar_url = v || null;
-    }
+    // O avatar nunca vem do corpo: quem o grava é o upload da foto, a geração da figurinha e a escolha no histórico (cada um com um arquivo
+    // NOSSO e DA PRÓPRIA pessoa). Um endereço qualquer aqui destrancava os fundos pagos (basta o nome parecer uma figurinha), mandava a
+    // exclusão da conta apagar o arquivo de outra pessoa e deixava o "Ajustar enquadramento" mexer na miniatura dela. Só limpar vale.
+    if ('avatar_url' in b && (b.avatar_url === null || b.avatar_url === '')) patch.avatar_url = null;
     // telefone removido: já não é guardado pelo perfil.
     if ('cor_frame' in b) {
       const v = String(b.cor_frame);

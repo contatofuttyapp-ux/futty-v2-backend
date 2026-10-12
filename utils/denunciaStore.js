@@ -6,6 +6,7 @@
 const crypto = require('crypto');
 const { supabase } = require('./db');
 const { comPrazo } = require('./comPrazo');
+const { ehUuid } = require('./entrada');
 
 const BUCKET = 'denuncias';
 
@@ -82,6 +83,8 @@ async function guardarCaso(caso) {
   return caso;
 }
 async function obterCaso(teamId, id) {
+  // O id vem do endereço e vira parte do caminho no Storage: só um uuid de verdade, para um "../" nunca sair da pasta do time.
+  if (!ehUuid(id) || (teamId && !ehUuid(teamId))) return null;
   const { data } = await comPrazo(supabase.storage.from(BUCKET).download(caminhoCaso(teamId, id)), 3000, 'denuncias/caso');
   if (!data) return null;
   try { return JSON.parse(await data.text()); } catch { return null; }

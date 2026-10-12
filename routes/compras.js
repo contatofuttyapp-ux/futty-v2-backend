@@ -62,6 +62,8 @@ function atributo(atributos, nome) {
   return v == null || v === '' ? null : String(v);
 }
 
+// O que o RevenueCat manda é texto curto; o resto (objeto, lista, texto gigante) não é identificador de nada e vira "sem".
+const textoOuNull = (v, max = 200) => (typeof v === 'string' && v.length <= max ? v : null);
 const numeroOuNull = (v) => (v == null || v === '' || Number.isNaN(Number(v)) ? null : Number(v));
 
 function notificarReal(ids, payload) {
@@ -121,18 +123,19 @@ function criarRotasCompras({
     if (!ev || typeof ev !== 'object' || !ev.type) return res.status(400).json({ error: 'Evento em falta.' });
     if (ev.type === 'TEST') return res.json({ ok: true, teste: true });
 
-    const loja = LOJAS_RC[ev.store] || 'outra';
+    // hasOwn: "__proto__" e "constructor" não são lojas nem produtos (a tabela é um objeto comum).
+    const loja = (typeof ev.store === 'string' && Object.hasOwn(LOJAS_RC, ev.store) && LOJAS_RC[ev.store]) || 'outra';
     const ambiente = ev.environment === 'SANDBOX' ? 'sandbox' : 'producao';
-    const produto = PRODUTOS_LOJA[ev.product_id] || null;
+    const produto = (typeof ev.product_id === 'string' && Object.hasOwn(PRODUTOS_LOJA, ev.product_id) && PRODUTOS_LOJA[ev.product_id]) || null;
     const base = {
       loja,
       ambiente,
       produto,
-      eventoId: ev.id || null,
-      transacaoId: ev.transaction_id || null,
-      transacaoOriginalId: ev.original_transaction_id || null,
-      appUserId: ev.app_user_id || null,
-      moeda: ev.currency || null,
+      eventoId: textoOuNull(ev.id),
+      transacaoId: textoOuNull(ev.transaction_id),
+      transacaoOriginalId: textoOuNull(ev.original_transaction_id),
+      appUserId: textoOuNull(ev.app_user_id),
+      moeda: textoOuNull(ev.currency, 10),
       preco: numeroOuNull(ev.price_in_purchased_currency),
       precoUsd: numeroOuNull(ev.price),
       payload: req.body,

@@ -55,6 +55,14 @@ const denunciaLimiter = criarLimiter({
   mensagem: 'Muitas denúncias. Tente de novo daqui a uma hora.',
 });
 
+// POST /api/feed/upload — 60/hora por utilizador. Cada envio gasta CPU (compressão) e Storage (até 12 MB), e a cota de 500 MB do time só
+// conta o que vira post: sem teto por pessoa, uma conta nova enchia o bucket sem anexar nada. Quatro anexos por post cabem 15 posts por hora.
+const uploadResenhaLimiter = criarLimiter({
+  windowMs: HORA,
+  max: 60,
+  mensagem: 'Muitas fotos enviadas. Tente de novo daqui a uma hora.',
+});
+
 // DELETE /api/me — 3/hora por usuário. Ação irreversível (LGPD/exigência das
 // lojas): o limite não é sobre abuso de custo, é um freio de segurança contra
 // automação/erro (um clique perdido não pode virar uma corrida de exclusões).
@@ -257,6 +265,7 @@ module.exports = {
   conviteLimiter,
   pushAdminLimiter,
   denunciaLimiter,
+  uploadResenhaLimiter,
   excluirContaLimiter,
   diagnosticoLimiter,
   LIMITES,

@@ -99,8 +99,9 @@ async function ensureUserRow(user) {
 async function ensureAvatarsBucket() {
   const { data: existente } = await supabase.storage.getBucket('avatars');
   if (existente) return;
+  // PRIVADO: as fotos saem só pelo proxy assinado (/api/media). Um projeto novo que nascesse público ficaria aberto até o próximo reinício.
   const { error } = await supabase.storage.createBucket('avatars', {
-    public: true,
+    public: false,
     fileSizeLimit: '5MB',
     allowedMimeTypes: ['image/jpeg', 'image/png', 'image/webp'],
   });

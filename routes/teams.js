@@ -24,6 +24,7 @@ const { FUSO_PADRAO, fusoDoTime, fusoDaCoordenada, horaNoFuso, erroDaColunaFuso,
 const { PALETA, CORES_ANTIGAS, lerEscudo, erroDeEscudoSemMigracao, escudoDoTime } = require('../utils/escudo'); // o escudo do time
 const { lerJogadoresPorTime, jogadoresPorTimeDoTime, erroDaColunaJogadoresPorTime } = require('../utils/jogadoresPorTime');
 const { recusaDoWaf } = require('../utils/recusaDoWaf');
+const { textoCurto } = require('../utils/entrada');
 
 const router = express.Router();
 
@@ -57,7 +58,9 @@ const CONVITE_DIAS = 30;
 // aspas duplas (sintaxe suportada pelo PostgREST) para ser lido como valor
 // literal em vez de sintaxe de filtro.
 function valorFiltroOr(valor) {
-  if (/[,.()]/.test(valor)) return `"${valor.replace(/"/g, '\\"')}"`;
+  // A barra invertida escapa a si mesma ANTES das aspas: sem isso, o texto `a\"` virava `a\\"`, que o PostgREST lê como "barra, fecha as aspas" e o
+  // resto da busca passava a valer como condição nova do filtro.
+  if (/[,.()"\\]/.test(valor)) return `"${valor.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
   return valor;
 }
 
@@ -83,8 +86,10 @@ router.post(
   '/api/teams',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { nome, cor, publica, localizacao, descricao } = req.body || {};
-    if (!nome || !nome.trim()) throw new HttpError(400, 'O nome do time é obrigatório.');
+    const { cor, publica, localizacao, descricao } = req.body || {};
+    // Mesmo teto do PATCH /api/teams/:slug (60): o app limita a 40, mas o corpo aceita qualquer coisa — e o nome vai para o slug e para todo o time.
+    const nomeDoTime = textoCurto(req.body?.nome, 60, 'Nome');
+    if (!nomeDoTime) throw new HttpError(400, 'O nome do time é obrigatório.');
     const corFinal = CORES_VALIDAS.includes(cor) ? cor : 'verde';
     const localizacaoFinal = localizacao ? String(localizacao).trim().slice(0, 100) : null;
     const descricaoFinal = descricao ? String(descricao).trim().slice(0, 300) : null;
@@ -119,9 +124,9 @@ router.post(
     let team = null;
     let lastError = null;
     for (let attempt = 0; attempt < 3 && !team; attempt += 1) {
-      const slug = slugify(nome);
+      const slug = slugify(nomeDoTime);
       const linhaDoTime = {
-        nome: nome.trim(),
+        nome: nomeDoTime,
         slug,
         cor: corFinal,
         criado_por: req.user.id,
@@ -166,7 +171,7 @@ router.post(
         ({ data, error } = await supabase
           .from('teams')
           .insert({
-            nome: nome.trim(),
+            nome: nomeDoTime,
             slug,
             cor: linhaDoTime.cor,
             criado_por: req.user.id,
@@ -660,6 +665,20 @@ router.put(
   })
 );
 
+/** Só o admin do time passa — e ANTES de ler e analisar a imagem: a análise de conteúdo (NSFW) custa CPU, e quem não é do time não deve poder gastá-la. */
+async function soAdminDoTime(req, res, next) {
+  try {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem mudar o logo.');
+    req.timeDoLogo = team;
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
 /**
  * POST /api/teams/:slug/logo — carrega o logo da equipa (só admin; PNG/JPG/WEBP, máx 2MB).
  * LEIS DA SEGURANÇA: filtro NSFW (explícito → 403) ANTES de guardar; ficheiro no bucket
@@ -669,6 +688,7 @@ router.put(
 router.post(
   '/api/teams/:slug/logo',
   requireAuth,
+  soAdminDoTime,
   logoMiddleware,
   // SEGURANCA-REVISAO-10SET.md secção 3: além do mimetype declarado pelo multer,
   // confirma que decodifica como imagem de verdade (mesmo princípio do avatar, utils/olheiroEntrada.js).
@@ -678,12 +698,7 @@ router.post(
   // em vez de deixar passar.
   filtroNSFWFailClosed,
   asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Time não encontrado.');
-
-    const role = await getRole(team.id, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só admins podem mudar o logo.');
-
+    const team = req.timeDoLogo; // já conferido por soAdminDoTime, antes de a imagem ser lida
     if (!req.file) throw new HttpError(400, 'Envie uma imagem PNG, JPG ou WEBP (máx 2MB).');
     const ext = LOGO_EXT[req.file.mimetype];
 
@@ -963,29 +978,8 @@ router.patch(
   })
 );
 
-/** DELETE /api/teams/:slug/membros/:userId — remove um membro (só admin). */
-router.delete(
-  '/api/teams/:slug/membros/:userId',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const team = await getTeamBySlug(req.params.slug, 'id, slug');
-    if (!team) throw new HttpError(404, 'Time não encontrado.');
-
-    const role = await getRole(team.id, req.user.id);
-    if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover membros.');
-    if (req.params.userId === req.user.id) throw new HttpError(400, 'Você não pode remover a si mesmo.');
-
-    const { error } = await supabase
-      .from('team_members')
-      .delete()
-      .eq('team_id', team.id)
-      .eq('user_id', req.params.userId);
-    if (error) throw new HttpError(500, error.message);
-    selosCache.invalidarMembro(team.id, req.params.userId);
-    res.json({ removed: true });
-  })
-);
-
+// "me" vem ANTES de ":userId": no Express a primeira rota que casa ganha, e com ":userId" na frente o "me" virava um id
+// (um membro comum levava 403 "só admins" ao tentar sair do time).
 /**
  * DELETE /api/teams/:slug/membros/me — SAIR da equipa pelo próprio (SPEC-EQUIPAS).
  * História preservada (mesmo efeito da remoção pelo admin: o passado fica; sai do
@@ -1025,6 +1019,29 @@ router.delete(
     if (error) throw new HttpError(500, error.message);
     selosCache.invalidarMembro(team.id, req.user.id);
     res.json({ saiu: true });
+  })
+);
+
+/** DELETE /api/teams/:slug/membros/:userId — remove um membro (só admin). */
+router.delete(
+  '/api/teams/:slug/membros/:userId',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const team = await getTeamBySlug(req.params.slug, 'id, slug');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+
+    const role = await getRole(team.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover membros.');
+    if (req.params.userId === req.user.id) throw new HttpError(400, 'Você não pode remover a si mesmo.');
+
+    const { error } = await supabase
+      .from('team_members')
+      .delete()
+      .eq('team_id', team.id)
+      .eq('user_id', req.params.userId);
+    if (error) throw new HttpError(500, error.message);
+    selosCache.invalidarMembro(team.id, req.params.userId);
+    res.json({ removed: true });
   })
 );
 

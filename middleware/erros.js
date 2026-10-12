@@ -21,9 +21,26 @@ const STATUS_COM_FRASE_PROPRIA = new Set([502, 503, 504]);
 // Uma página de WAF inteira tem milhares de caracteres: no log basta o começo.
 const TETO_DO_TEXTO_NO_LOG = 500;
 
-/** Status que o erro leva ao cliente: o do HttpError, ou 500 para qualquer outra coisa que tenha estourado. */
+// O corpo do pedido que não dá para ler (JSON torto, grande demais, charset que o parser não conhece) chega do body-parser como um erro
+// comum com `status` 4xx e `expose: true`. É erro de quem pediu, não do servidor: sai 4xx, e a frase é nossa — a do parser cita o que
+// foi digitado ("Unexpected token } in JSON at position 5").
+const FRASES_DO_PEDIDO = {
+  400: 'Não deu para ler o que foi enviado. Confira e tente de novo.',
+  413: 'O pedido é grande demais.',
+  415: 'Esse formato de pedido não é aceito.',
+};
+function statusDoPedidoIlegivel(err) {
+  const s = Number(err?.status ?? err?.statusCode);
+  // `expose`: o body-parser e o http-errors marcam assim o erro de quem pediu. O roteador do Express não marca o endereço com
+  // percentual quebrado ("%E0%A4%A"): é um URIError com status 400.
+  const doCliente = err?.expose === true || err instanceof URIError;
+  return doCliente && Number.isInteger(s) && s >= 400 && s < 500 ? s : null;
+}
+
+/** Status que o erro leva ao cliente: o do HttpError, o 4xx do parser de corpo, ou 500 para qualquer outra coisa que tenha estourado. */
 function statusDoErro(err) {
-  return err instanceof HttpError ? err.status : 500;
+  if (err instanceof HttpError) return err.status;
+  return statusDoPedidoIlegivel(err) || 500;
 }
 
 /** O corpo JSON da resposta: o texto de quem escreveu a rota (4xx e 502/503/504) ou a frase da casa (o resto do 5xx). */
@@ -31,6 +48,7 @@ function corpoDoErro(err, status = statusDoErro(err)) {
   if (status >= 500 && !STATUS_COM_FRASE_PROPRIA.has(status)) {
     return { error: MENSAGEM_ERRO_INTERNO, code: CODIGO_ERRO_INTERNO };
   }
+  if (!(err instanceof HttpError) && status < 500) return { error: FRASES_DO_PEDIDO[status] || FRASES_DO_PEDIDO[400] };
   const corpo = { error: err.message || MENSAGEM_SEM_TEXTO };
   if (err instanceof HttpError && err.code) corpo.code = err.code;
   return corpo;

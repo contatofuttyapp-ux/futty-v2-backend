@@ -30,7 +30,8 @@ let temporizador = null;
 
 /** Regista um evento (tipo 'imp' | 'cli') numa campanha, no dia de hoje. */
 function registar(id, tipo) {
-  if (!id) return;
+  // Defesa em profundidade (a rota já só passa campanha que existe): id é texto curto, e o acumulador em memória tem teto.
+  if (typeof id !== 'string' || !id || id.length > 64 || pendentes.size >= 2000) return;
   const dia = new Date().toISOString().slice(0, 10);
   const chave = `${id}|${dia}`;
   const acc = pendentes.get(chave) || { imp: 0, cli: 0 };

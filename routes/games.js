@@ -17,10 +17,14 @@ const { registroDeSorteio, registroDeMontagem, resultadoAjustado, registroPublic
 const { quantosTimes, escolhaDoCorpo, linhasDeGols, somaDeGols, placarDoCorpo, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo: uma regra só
+const { textoCurto, ehUuid } = require('../utils/entrada'); // o que a pessoa digita: texto com teto, número em faixa
+const { limparTimes, limparReservas } = require('../utils/timesDoCorpo'); // os times que o app manda à mão
 
 const router = express.Router();
 
 const MSG_RESULTADO_FECHADO = 'O resultado abre 5 minutos depois do início do jogo.';
+// O sorteio faz no máximo 28 jogadores em 4 times; um "jogadores por time" acima de 30 não existe.
+const MAX_JOGADORES_POR_TIME = 30;
 
 /** Quem fez a ação, com o nome de guerra DE AGORA — o selo grava este nome e não muda se a pessoa o trocar depois. */
 async function quemFez(userId) {
@@ -62,13 +66,20 @@ router.post(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar jogos.');
 
+    // O que o admin digitou, conferido antes de gravar: data que existe, local com teto, jogadores por time em faixa.
+    if (typeof data !== 'string' && typeof data !== 'number') throw new HttpError(400, 'Data inválida.');
+    const quando = new Date(data);
+    if (Number.isNaN(quando.getTime())) throw new HttpError(400, 'Data inválida.');
+    const localTexto = textoCurto(local, 120, 'Local');
+    if (porTime > MAX_JOGADORES_POR_TIME) throw new HttpError(400, `Jogadores por time: use um número de 1 a ${MAX_JOGADORES_POR_TIME}.`);
+
     // LEI (jogo histórico/retroativo): carregamento de dados — NÃO notifica ninguém.
     const eHistorico = historico === true;
     // num_times fica por definir; é calculado no sorteio conforme os confirmados.
     const linha = {
       team_id: team.id,
-      data: new Date(data).toISOString(),
-      local: local?.trim() || null,
+      data: quando.toISOString(),
+      local: localTexto || null,
       jogadores_por_time: porTime,
     };
     if (eHistorico) linha.historico = true; // coluna opcional (migração à mão); ver nota abaixo
@@ -405,7 +416,7 @@ router.patch(
     // placar e o placar define o vencedor); sem gols, vale o placar digitado; sem placar, o vencedor tocado.
     const escolha = limpar ? { campeaoIdx: null, empate: false, informado: false } : escolhaDoCorpo(b);
     if (nivelPedido >= 1 && !escolha.informado) throw new HttpError(400, 'Indique quem venceu.');
-    const linhas = limpar ? [] : linhasDeGols(game.times_resultado, b.gols);
+    const linhas = limpar ? [] : linhasDeGols(game.times_resultado, b.gols, new Set(await membrosDaEquipa(game.teams.id)));
     const { porTime, temGols } = somaDeGols(linhas);
     const decisao = decidirResultado({
       nTimes: quantosTimes(game.times_resultado),
@@ -450,6 +461,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const { user_id: userId, goleiro, cabeca_chave: cabecaChave } = req.body || {};
     if (!userId) throw new HttpError(400, 'user_id em falta.');
+    if (!ehUuid(userId)) throw new HttpError(400, 'user_id inválido.');
 
     const game = await loadGame(req.params.id);
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
@@ -578,12 +590,8 @@ router.post(
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem definir os times.');
 
-    const times = Array.isArray(req.body?.times) ? req.body.times : null;
-    if (!times || !times.length) throw new HttpError(400, 'Indique os times.');
-    const reservas = Array.isArray(req.body?.reservas) ? req.body.reservas : [];
-    for (const t of times) {
-      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) throw new HttpError(400, 'Cada time deve ter pelo menos 1 jogador.');
-    }
+    const times = limparTimes(req.body?.times, req, (i) => NOMES_TIMES[i] || `Time ${i + 1}`);
+    const reservas = limparReservas(req.body?.reservas, req);
     const todos = [...times.flatMap((t) => t.jogadores || []), ...reservas];
     const ids = todos.map((j) => j.user_id).filter(Boolean);
     if (new Set(ids).size !== ids.length) throw new HttpError(400, 'Há jogadores repetidos entre os times.');
@@ -595,21 +603,12 @@ router.post(
       if (!confirmados.has(id)) throw new HttpError(400, 'Marque as presenças antes: todos os jogadores com conta devem estar confirmados.');
     }
 
-    const nomear = (t, i) => ({
-      nome: (t.nome || NOMES_TIMES[i] || `Time ${i + 1}`),
-      jogadores: (t.jogadores || []).map((j) => ({
-        user_id: j.user_id || null,
-        convidado: j.convidado || undefined,
-        nome: j.nome,
-        avatar_url: j.avatar_url || null,
-      })),
-    });
     const tr = {
       num_times: times.length,
       total_jogadores: ids.length + todos.filter((j) => !j.user_id).length,
       manual: true, // sem seed → sem cerimónia/replay (o frontend gateia por seed)
-      times: times.map(nomear),
-      reservas: reservas.map((j) => ({ user_id: j.user_id || null, convidado: j.convidado || undefined, nome: j.nome, avatar_url: j.avatar_url || null })),
+      times,
+      reservas,
       registro: registroDeMontagem(await quemFez(req.user.id), new Date().toISOString(), game.times_resultado),
     };
 
@@ -700,7 +699,7 @@ router.post(
     // CONVIDADOS SEM APP (SPEC-SORTEIO §11): nomes soltos do organizador — entram
     // no sorteio como linha, sem user_id, zero impacto em users/ranking.
     const convidados = Array.isArray(req.body?.convidados)
-      ? req.body.convidados.map((n) => String(n).trim()).filter(Boolean).slice(0, 28)
+      ? req.body.convidados.map((n) => (typeof n === 'string' ? n.trim().slice(0, 40) : '')).filter(Boolean).slice(0, 28)
       : [];
 
     // TECTOS FORMAIS (SPEC-SORTEIO §14): 3..28 participantes; 2..4 times.
@@ -802,17 +801,11 @@ router.patch(
     const role = await getRole(game.teams.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ajustar os times.');
 
-    const tr = req.body?.times_resultado;
-    if (!tr || !Array.isArray(tr.times)) throw new HttpError(400, 'times_resultado inválido.');
-
-    const reservas = Array.isArray(tr.reservas) ? tr.reservas : [];
-
-    // Cada time tem pelo menos 1 jogador.
-    for (const t of tr.times) {
-      if (!Array.isArray(t.jogadores) || t.jogadores.length < 1) {
-        throw new HttpError(400, 'Cada time deve ter pelo menos 1 jogador.');
-      }
-    }
+    const corpoTimes = req.body?.times_resultado;
+    if (!corpoTimes || !Array.isArray(corpoTimes.times)) throw new HttpError(400, 'times_resultado inválido.');
+    // Do corpo só valem os times e as reservas, reconstruídos com tipo e teto (utils/timesDoCorpo.js); cada time tem pelo menos 1 jogador.
+    const tr = { times: limparTimes(corpoTimes.times, req, (i) => NOMES_TIMES[i] || `Time ${i + 1}`) };
+    const reservas = limparReservas(corpoTimes.reservas, req);
 
     // Recolhe todos os jogadores (times + reservas) e valida duplicados. Quem tem conta, pelo id; o convidado sem app
     // (sem id), pelo nome — é por ele que o registro do ajuste o reconhece (utils/registroDoSorteio.js), e dois "Beto"
@@ -892,10 +885,10 @@ router.patch(
       if (!combinado) throw new HttpError(400, 'Data/hora inválida.');
       patch.data = combinado.toISOString();
     }
-    if ('location' in b) patch.local = b.location ? String(b.location).trim() : null;
+    if ('location' in b) patch.local = textoCurto(b.location, 120, 'Local') || null;
     if ('players_per_team' in b) {
       const n = parseInt(b.players_per_team, 10);
-      if (!Number.isFinite(n) || n < 1) throw new HttpError(400, 'players_per_team inválido.');
+      if (!Number.isFinite(n) || n < 1 || n > MAX_JOGADORES_POR_TIME) throw new HttpError(400, 'players_per_team inválido.');
       patch.jogadores_por_time = n;
     }
 
@@ -997,6 +990,7 @@ router.patch(
     const raw = req.body?.max_jogadores;
     let max = null;
     if (raw !== null && raw !== undefined && raw !== '') {
+      if (typeof raw !== 'number' && typeof raw !== 'string') throw new HttpError(400, 'Máximo de jogadores inválido.');
       const n = Number(raw);
       if (!Number.isInteger(n) || n < 1) throw new HttpError(400, 'Máximo de jogadores inválido.');
       max = n;
