@@ -23,7 +23,10 @@ const valorDe = (linha, coluna) => (coluna.includes('.') ? coluna.split('.').red
 // Sem a opção, o falso devolve tudo, como antes. O teste de contagem passa 1000 para simular o teto de verdade.
 function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO, tetoLinhas = Infinity } = {}) {
   const tabelas = {};
-  for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map((l) => ({ ...l }));
+  // Cópia FUNDA, dos dois lados: o PostgREST devolve JSON novo, e uma rota que muda o que recebeu (o proxy de mídia reescreve os
+  // endereços da resposta no lugar) não pode mexer no que o banco guarda.
+  const copia = (l) => structuredClone(l);
+  for (const [nome, linhas] of Object.entries(inicial)) tabelas[nome] = linhas.map(copia);
   const linhasDe = (nome) => (tabelas[nome] ||= []);
 
   function builder(tabela) {
@@ -35,7 +38,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       if (erroForcado) return { data: null, error: erroForcado };
       const todas = linhasDe(tabela);
       if (e.op === 'insert') {
-        const novas = e.linhas.map((l) => ({ id: crypto.randomUUID(), criada_em: new Date().toISOString(), ...l }));
+        const novas = e.linhas.map((l) => copia({ id: crypto.randomUUID(), criada_em: new Date().toISOString(), ...l }));
         for (const n of novas) {
           for (const cols of unicos[tabela] || []) {
             if (todas.some((l) => cols.every((c) => l[c] === n[c]))) {
@@ -44,27 +47,27 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
           }
         }
         todas.push(...novas);
-        return { data: e.retorna ? novas.map((l) => ({ ...l })) : null, error: null };
+        return { data: e.retorna ? novas.map(copia) : null, error: null };
       }
       if (e.op === 'upsert') {
         const saida = [];
         for (const nova of e.linhas) {
           const i = todas.findIndex((l) => e.onConflict.every((c) => l[c] === nova[c]));
           if (i >= 0) {
-            if (!e.ignorarDuplicadas) Object.assign(todas[i], nova);
-            saida.push({ ...todas[i] });
+            if (!e.ignorarDuplicadas) Object.assign(todas[i], copia(nova));
+            saida.push(copia(todas[i]));
           } else {
-            const criada = { id: crypto.randomUUID(), ...nova };
+            const criada = copia({ id: crypto.randomUUID(), ...nova });
             todas.push(criada);
-            saida.push({ ...criada });
+            saida.push(copia(criada));
           }
         }
         return { data: e.retorna ? saida : null, error: null };
       }
       let alvo = todas.filter(passa);
       if (e.op === 'update') {
-        for (const l of alvo) Object.assign(l, e.patch);
-        return { data: e.retorna ? alvo.map((l) => ({ ...l })) : null, error: null };
+        for (const l of alvo) Object.assign(l, copia(e.patch));
+        return { data: e.retorna ? alvo.map(copia) : null, error: null };
       }
       if (e.op === 'delete') {
         tabelas[tabela] = todas.filter((l) => !passa(l));
@@ -88,7 +91,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
           alvo = alvo.map((l) => ({ ...l, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null }));
         }
       }
-      return { data: e.head ? null : alvo.map((l) => ({ ...l })), error: null, count: e.count ? alvo.length : undefined };
+      return { data: e.head ? null : alvo.map(copia), error: null, count: e.count ? alvo.length : undefined };
     }
 
     const umSo = (obrigatorio) => async () => {
