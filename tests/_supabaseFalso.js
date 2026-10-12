@@ -87,8 +87,11 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
       if (e.limite != null) alvo = alvo.slice(0, e.limite);
       if (alvo.length > tetoLinhas) alvo = alvo.slice(0, tetoLinhas);
       for (const [nome, def] of Object.entries(relacoes[tabela] || {})) {
-        if (new RegExp(`\\b${nome}\\s*\\(`).test(e.cols || '')) {
+        // `teams!inner(...)` é o embed com junção interna: o mesmo objeto, e a linha sem par some do resultado.
+        const m = new RegExp(`\\b${nome}(!inner)?\\s*\\(`).exec(e.cols || '');
+        if (m) {
           alvo = alvo.map((l) => ({ ...l, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null }));
+          if (m[1]) alvo = alvo.filter((l) => l[nome] !== null);
         }
       }
       return { data: e.head ? null : alvo.map(copia), error: null, count: e.count ? alvo.length : undefined };
