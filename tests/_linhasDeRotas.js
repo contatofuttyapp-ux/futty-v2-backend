@@ -64,6 +64,8 @@ const LINHAS = [
   L('membro', 'POST', (m) => `/api/games/${m.ids.jogoAbertoA}/confirmar`, () => ({ confirmado: true })),
   L('admin', 'POST', (m) => `/api/games/${m.ids.jogoAbertoA}/presencas`, (m) => ({ jogadores: [{ user_id: m.p.memA.id }] })),
   L('admin', 'POST', (m) => `/api/games/${m.ids.jogoAbertoA}/times-manuais`, (m) => ({ times: [{ nome: 'Ouro', jogadores: [{ user_id: m.p.memA.id, nome: 'Alice' }] }, { nome: 'Roxo', jogadores: [{ nome: 'Zeca', convidado: true }] }] })),
+  L('admin', 'POST', (m) => `/api/games/${m.ids.jogoPassadoA}/associar-jogador`, (m) => ({ convidado_nome: 'Zeca', user_id: m.p.memA.id })),
+  L('admin', 'POST', (m) => `/api/games/${m.ids.jogoPassadoA}/associar-jogador/desfazer`, (m) => ({ user_id: m.p.memA.id })),
   L('admin', 'POST', (m) => `/api/games/${m.ids.jogoAbertoA}/sortear`, () => ({ convidados: ['Zeca', 'Beto', 'Caio', 'Dani', 'Edu', 'Fábio'] })),
   L('admin', 'PATCH', (m) => `/api/games/${m.ids.jogoPassadoA}/times`, (m) => ({ times_resultado: { times: [{ nome: 'Time 1', jogadores: [{ user_id: m.p.admA.id, nome: 'Ana' }] }, { nome: 'Time 2', jogadores: [{ user_id: m.p.memA.id, nome: 'Alice' }] }], reservas: [] } })),
   L('admin', 'PATCH', (m) => `/api/games/${m.ids.jogoAbertoA}`, () => ({ location: 'Quadra nova' })),

@@ -750,6 +750,7 @@ module.exports = {
   MSG_FINAL_JOGADA,
   lerFormato,
   assinaturaDosTimes,
+  campeonatoVemDoSorteio,
   jogosElegiveisParaCampeonato,
   JOGO_RECENTE_DIAS,
   enriquecer,

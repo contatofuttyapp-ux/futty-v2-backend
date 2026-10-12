@@ -93,8 +93,10 @@ function resultadoAjustado(anterior, { times, reservas }, quem, agora) {
 function registroPublico(registro, nomePorUsuario = null) {
   if (!registro || typeof registro !== 'object') return registro;
   const semId = (p) => (p ? { nome: (p.id && nomePorUsuario?.get(p.id)) || p.nome || null } : null);
+  // As associações de convidado (utils/associarJogador.js) levam ids de contas e o que havia antes: coisa do admin, não da página pública.
+  const { associacoes: _associacoes, ...aberto } = registro;
   return {
-    ...registro,
+    ...aberto,
     por: semId(registro.por),
     ajustes: (registro.ajustes || []).map((a) => ({ ...a, por: semId(a.por) })),
   };
