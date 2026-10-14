@@ -65,6 +65,22 @@ test('lerCodigo: qualquer caixa e espaços das pontas valem; uuid, token estranh
   assert.equal(lerCodigo(undefined), null);
 });
 
+test('lerCodigo: o link com o nome do time na frente (/c/<nome>-<código>) vale pelo último pedaço; o nome é só enfeite', () => {
+  assert.equal(lerCodigo('domingueira-fc-epbgx5b3'), 'epbgx5b3');
+  assert.equal(lerCodigo('Domingueira-FC-EPBGX5B3'), 'epbgx5b3', 'a caixa não importa');
+  assert.equal(lerCodigo('missa-de-quinta-k7m2p9qx'), 'k7m2p9qx');
+  assert.equal(lerCodigo('qualquer-nome-errado-k7m2p9qx'), 'k7m2p9qx', 'o nome não precisa ser o do time');
+  assert.equal(lerCodigo('café-é-bom-k7m2p9'), 'k7m2p9', 'acento no nome não atrapalha (6 posições)');
+  assert.equal(lerCodigo('-k7m2p9qx'), 'k7m2p9qx');
+  assert.equal(lerCodigo('domingueira-fc'), null, 'só o nome, sem código');
+  assert.equal(lerCodigo('k7m2p9qx-'), null, 'o código tem de ser o ÚLTIMO pedaço');
+  assert.equal(lerCodigo('domingueira-fc-k7m2p9qxz'), null, '9 posições no fim');
+  assert.equal(lerCodigo('domingueira-fc-k7m2p9q0'), null, 'o 0 não existe no alfabeto');
+  // O token longo (uuid) e o id de jogo do link do sorteio (utils/sorteioCodigo.js, que usa esta leitura) terminam num pedaço de 12.
+  assert.equal(lerCodigo(TOKEN), null);
+  assert.equal(lerCodigo('9f1c2d3e-4b5a-4c6d-8e7f-a1b2c3d4e5f6'), null);
+});
+
 test('criarCodigo: colisão tenta outro; tabela ausente devolve null sem lançar', async () => {
   const { cliente } = carregar({ convite_codigos: [{ codigo: 'aaaaaaaa', convite_id: 'outro' }] }, []);
   const sequencia = ['aaaaaaaa', 'bbbbbbbb'];
@@ -114,6 +130,27 @@ test('GET /api/convite/<código> abre o MESMO convite que o uuid (time, quem con
   assert.deepEqual(peloCodigo.json, pelaUuid.json, 'o link curto e o longo mostram exatamente o mesmo convite');
   const maiuscula = await pedir('GET', '/api/convite/K7M2P9QX');
   assert.equal(maiuscula.json.valido, true, 'a caixa não importa');
+});
+
+test('GET /api/convite/<nome-do-time>-<código> abre o mesmo convite (o link novo; o app antigo manda o pedaço inteiro)', async (t) => {
+  const { pedir } = cenario(t);
+  const pelaUuid = await pedir('GET', `/api/convite/${TOKEN}`);
+  for (const comNome of ['varzea-fc-k7m2p9qx', 'Varzea-FC-K7M2P9QX', 'outro-nome-qualquer-k7m2p9qx', encodeURIComponent('várzea-fc-k7m2p9qx')]) {
+    const r = await pedir('GET', `/api/convite/${comNome}`);
+    assert.equal(r.status, 200, comNome);
+    assert.deepEqual(r.json, pelaUuid.json, comNome);
+  }
+  const soONome = await pedir('GET', '/api/convite/varzea-fc');
+  assert.deepEqual([soONome.json.valido, soONome.json.motivo], [false, 'nao_encontrado'], 'sem código no fim: não encontrado');
+});
+
+test('POST /api/convite/<nome-do-time>-<código>/aceitar entra no time pelo convite certo', async (t) => {
+  const { pedir, tabelas } = cenario(t);
+  const r = await pedir('POST', '/api/convite/varzea-fc-k7m2p9qx/aceitar', null, QUEM_ENTRA);
+  assert.equal(r.status, 201);
+  assert.equal(r.json.team.slug, 'varzea-fc');
+  assert.ok(tabelas.team_members.some((m) => m.user_id === QUEM_ENTRA && m.team_id === TIME));
+  assert.deepEqual(tabelas.convite_usos.map((u) => [u.convite_id, u.user_id]), [[CONVITE, QUEM_ENTRA]]);
 });
 
 test('o prazo é o do convite: expirado pelo código também diz "expirado" (e mostra o time, para pedir entrada)', async (t) => {

@@ -1,5 +1,7 @@
 // Futty v2.0 — O link curto do convite, futtyapp.com.br/c/<código>.
 //
+// O link que o app compartilha leva o nome do time na frente do código, só de enfeite: futtyapp.com.br/c/<nome-do-time>-<código>.
+//
 // O convite continua sendo uma linha de `convites` com o token longo (uuid) — o link /convite/<uuid> segue válido, igual. O
 // código é só outro jeito de chegar à MESMA linha (tabela `convite_codigos`, migração 072): mesmo prazo (vale o
 // `expires_at` do convite), some junto se o admin cancela o convite (ON DELETE CASCADE). Aqui vivem as quatro peças pequenas disso:
@@ -21,10 +23,16 @@ function gerarCodigo(tamanho = TAMANHO) {
   return saida;
 }
 
-/** O código normalizado (minúsculo, sem espaço) se tem a cara de um código; senão null (é o token longo, ou lixo). */
+/**
+ * O código normalizado (minúsculo, sem espaço) se tem a cara de um código; senão null (é o token longo, ou lixo).
+ * O link pode levar o nome do time na frente (/c/domingueira-fc-epbgx5b3): o nome é enfeite e vale o último pedaço depois do último
+ * hífen (o alfabeto do código não tem hífen). Assim o app antigo, que manda o pedaço inteiro, abre o link novo. O token longo (uuid)
+ * termina num pedaço de 12 posições e nunca passa por código.
+ */
 function lerCodigo(parametro) {
   const c = String(parametro ?? '').trim().toLowerCase();
-  return RE_CODIGO.test(c) ? c : null;
+  const ultimo = c.slice(c.lastIndexOf('-') + 1);
+  return RE_CODIGO.test(ultimo) ? ultimo : null;
 }
 
 /**

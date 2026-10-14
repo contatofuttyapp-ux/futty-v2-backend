@@ -1467,6 +1467,10 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   Alfabeto: minúsculas e números sem os que se confundem (0/o, 1/l/i): 31 símbolos; 8 posições ≈ 8,5 × 10^11 combinações.
   O link vai pro WhatsApp e às vezes é ditado: nada de maiúscula/minúscula para errar. A leitura aceita 6–8 posições e
   qualquer caixa (digitaram "K7M2P9QX" no celular).
+- (linha ~35, `const ultimo = c.slice(c.lastIndexOf('-') + 1);`) Rodada 31N (14-out, pedido do dono): o link que o app compartilha passa a
+  levar o nome do time — /c/domingueira-fc-epbgx5b3. lerCodigo aceita "<qualquer-coisa>-<código>" pelo último pedaço, para o app com o
+  bundle antigo (que manda o pedaço inteiro ao motor) abrir o link novo. /c/<código> sozinho continua valendo. O link do sorteio
+  (utils/sorteioCodigo.js) usa a mesma leitura e herdou a tolerância, sem efeito: o id de jogo é uuid (último pedaço de 12 posições).
 
 ## utils/custoPorTime.js
 
