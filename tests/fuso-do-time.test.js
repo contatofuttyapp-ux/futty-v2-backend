@@ -259,6 +259,60 @@ test('Resenha: o jogo e o post trazem o fuso do time, e a hora (time) é a do ca
   assert.equal(jogo.time, '20:00'); // era "23:00" (UTC)
 });
 
+// O teste acima não enxerga um select que esqueceu o fuso: o time é de São Paulo (o próprio padrão) e o banco falso devolve a linha
+// inteira. Por isso a Resenha leu todo time no fuso de São Paulo sem nenhum teste reclamar. Os de baixo usam um time de Lisboa e o
+// banco falso devolvendo, como o PostgREST, SÓ as colunas pedidas — o time vem do embed `teams ( … )`, não da linha de team_members.
+const COMO_O_POSTGREST = { projetar: true, relacoes: { team_members: { teams: { tabela: 'teams', local: 'team_id', remota: 'id' } } } };
+const MISSA_LISBOA = { id: 'time-missa', nome: 'Missa de Quinta', slug: 'missa-de-quinta', cidade: 'Lisboa, Portugal', fuso: 'Europe/Lisbon' };
+const JOGO_10_SET = '2026-09-10T20:00:00Z'; // quinta, 21:00 em Lisboa (horário de verão, UTC+1); 17:00 em São Paulo
+
+test('Resenha de um time de Lisboa: o jogo e o post do campeão vêm no fuso dele (21:00), em toda página — não no padrão (17:00)', async (t) => {
+  esquecerFaltaDaColuna(); // nenhum teste anterior pode ter deixado o fuso "ausente"
+  const { carregados } = carregar({
+    users: [{ id: ADMIN, nome: 'Chavo' }],
+    teams: [MISSA_LISBOA],
+    team_members: [{ team_id: MISSA_LISBOA.id, user_id: ADMIN, role: 'admin' }],
+    games: [{
+      id: 'jogo-10-set', team_id: MISSA_LISBOA.id, data: JOGO_10_SET, local: 'Relvado', created_at: '2026-09-10T22:30:00Z',
+      campeao_time_index: 0, times_resultado: { times: [] },
+    }],
+    feed_posts: [{
+      id: 'post-campeao', team_id: MISSA_LISBOA.id, author_id: ADMIN, body: '', tipo: 'post', created_at: '2026-09-11T10:00:00Z',
+      conteudo: { tipo: 'campeao_campeonato', campeonato_nome: 'Copa da Missa', campeao: { nome: 'Time Ouro', jogadores: [] } },
+    }],
+    feed_post_media: [], reacoes: [], comentarios: [], user_blocks: [],
+  }, ['routes/feed'], COMO_O_POSTGREST);
+  const pedir = subir([carregados['routes/feed']], t);
+
+  // O app já publicado (tudo de uma vez) e o app novo (1ª página de 20).
+  for (const rota of ['/api/feed', '/api/feed?limite=20']) {
+    const r = await pedir('GET', rota, null, ADMIN);
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const jogo = r.json.items.find((i) => i.kind === 'jogo');
+    assert.equal(jogo.fuso, 'Europe/Lisbon', rota);
+    assert.equal(jogo.time, '21:00', `${rota}: a hora do jogo é a do campo de Lisboa`);
+    assert.equal(r.json.items.find((i) => i.id === 'post-campeao').fuso, 'Europe/Lisbon', `${rota}: o post do campeão também`);
+  }
+
+  // "Ver mais antigos" (cursor `antes`): o jogo chega na 2ª página e continua no fuso do time.
+  const p1 = await pedir('GET', '/api/feed?limite=1', null, ADMIN);
+  assert.deepEqual(p1.json.items.map((i) => i.id), ['post-campeao']);
+  const p2 = await pedir('GET', `/api/feed?limite=1&antes=${encodeURIComponent(p1.json.proximo)}`, null, ADMIN);
+  assert.deepEqual(p2.json.items.map((i) => [i.id, i.fuso, i.time]), [['jogo-10-set', 'Europe/Lisbon', '21:00']]);
+});
+
+test('jogos do Início pela leitura avulsa (rota antiga /api/games/my-invites): o jogo de um time de Lisboa leva o fuso dele', async () => {
+  esquecerFaltaDaColuna();
+  const { carregados } = carregar({
+    users: [{ id: ADMIN, nome: 'Chavo' }],
+    teams: [MISSA_LISBOA],
+    team_members: [{ team_id: MISSA_LISBOA.id, user_id: ADMIN, role: 'admin', created_at: '2026-01-01T00:00:00Z' }],
+    games: [{ id: 'jogo-10-set', team_id: MISSA_LISBOA.id, data: JOGO_10_SET, local: 'Relvado', status: 'terminado', game_players: [] }],
+  }, ['services/inicio'], COMO_O_POSTGREST);
+  const { games } = await carregados['services/inicio'].obterConvites(ADMIN);
+  assert.deepEqual(games.map((g) => [g.id, g.fuso]), [['jogo-10-set', 'Europe/Lisbon']]);
+});
+
 test('criar time: o fuso nasce da cidade (Lisboa → Europe/Lisbon; São Paulo → o padrão); sem cidade, o padrão', async (t) => {
   const { carregados, tabelas } = carregar({ users: [{ id: ADMIN }], teams: [], team_members: [] }, ['routes/teams']);
   const pedir = subir([carregados['routes/teams']], t);

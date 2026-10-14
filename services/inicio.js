@@ -18,7 +18,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time"
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
-const { normalizarFuso, lerComFuso } = require('../utils/fuso');
+const { normalizarFuso, lerComFuso, temColuna } = require('../utils/fuso');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo no rótulo e na lista: uma regra só
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
@@ -344,7 +344,7 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
     : await Promise.all([
       lerComFuso((novas) => supabase
         .from('team_members')
-        .select(/fuso/.test(novas) ? 'team_id, ausente_proximo, teams ( id, nome, slug, cidade, fuso )' : 'team_id, ausente_proximo, teams ( id, nome, slug, cidade )')
+        .select(temColuna(novas, 'fuso') ? 'team_id, ausente_proximo, teams ( id, nome, slug, cidade, fuso )' : 'team_id, ausente_proximo, teams ( id, nome, slug, cidade )')
         .eq('user_id', userId)).then((r) => r.data),
       timesEmQueSoOrganiza(userId),
     ]);

@@ -18,7 +18,7 @@ const { inteiroEmFaixa, ehUuid } = require('../utils/entrada');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 const { marcarFase } = require('../middleware/tempo');
 const { cotaBytesPorTime, bytesUsadosPeloTime, tamanhoNoStorage } = require('../utils/resenhaCota');
-const { fusoDoTime, horaNoFuso, lerComFuso } = require('../utils/fuso');
+const { fusoDoTime, horaNoFuso, lerComFuso, temColuna } = require('../utils/fuso');
 const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 
@@ -227,7 +227,7 @@ router.get(
     // O fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
     const { data: memberships } = await lerComFuso((novas) => supabase
       .from('team_members')
-      .select(/fuso/.test(novas) ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
+      .select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
       .eq('user_id', req.user.id));
     marcarFase(res, 'equipas');
     const teamMap = {};

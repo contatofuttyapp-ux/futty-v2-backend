@@ -679,6 +679,10 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   Devolve { buffer, mimetype, ext }.
 - (linha ~219, `const { data: memberships } = await lerComFuso((novas) => supabase`) Equipas do utilizador
   29I (achado 83): o fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
+- (linha ~230, `.select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : …`) Rodada 31L (14-out): desde o
+  bloco 3 da 29I (3-out) o select testava `/\bfuso\b/.test(novas)` com as duas barras invertidas trocadas pelo byte 0x08 (edição pelo
+  terminal). A regex nunca casava: a Resenha pedia o time SEM o fuso e todo jogo e post saía em America/Sao_Paulo. Visto no Missa de
+  Quinta (Europe/Lisbon): jogo de 10/09 às 21:00 de Lisboa aparecia "17:00" no cartão. Ver utils/fuso.js (temColuna).
 - (linha ~239, `const paginado = req.query.limite != null;`) VELOCIDADE 6A (15-set): eram 10 idas ao banco EM SÉRIE. Agora são 3 ondas.
 
   Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (created_at).
@@ -1674,6 +1678,14 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   e os jogadores por time padrão (079). Elas viajam juntas nas leituras do time (a mesma ida ao banco); a que faltar sai da leitura
   SOZINHA (o erro do banco diz qual é) e as outras continuam valendo — com a 076 aplicada e a 077 não, o fuso vale e o escudo fica
   sólido. Cada uma que falta vale o seu padrão (fuso de São Paulo, escudo sólido, 5 por time) até o Pedro aplicar a migração dela.
+- (linha ~147, `const temColuna = (novas, coluna) => String(novas || '').split(', ').includes(coluna);`) Rodada 31L (14-out): as duas
+  leituras que pedem só o fuso (routes/feed.js, a Resenha; services/inicio.js#obterConvites, a leitura avulsa de /api/games/my-invites)
+  testavam `/\bfuso\b/.test(novas)` — e as barras invertidas tinham virado o byte 0x08 numa edição pelo terminal (29I, bloco 3, 3-out).
+  O editor mostra `/fuso/`; a regex nunca casou e as duas leituras saíam sem o fuso (time de Lisboa lido em São Paulo). Nenhum teste
+  viu: o banco falso devolvia a linha inteira, qualquer que fosse o select, e o teste da Resenha usava um time de São Paulo (o
+  próprio padrão). Consertos: temColuna (comparação de nomes, sem regex); o banco falso ganhou `projetar` (devolve só as colunas do
+  select, como o PostgREST); testes com time de Lisboa em tests/fuso-do-time.test.js; e tests/sem-bytes-de-controle.test.js reprova
+  qualquer byte de controle no código do motor.
 
 ## utils/gabineteStore.js
 

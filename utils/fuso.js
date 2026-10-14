@@ -139,6 +139,13 @@ function colunasPresentes() {
   return COLUNAS_NOVAS_DO_TIME.filter((c) => !(faltaAte.get(c) > agora)).join(', ');
 }
 
+/**
+ * A leitura pode pedir esta coluna nova? (`novas` é o que lerComFuso passa à consulta.) Compara nomes inteiros, sem regex: uma regex
+ * com `\b` que passa pelo terminal perde as barras invertidas (viram bytes de controle invisíveis) e deixa de casar sem erro nenhum —
+ * a leitura sai sem o fuso e o time inteiro vale o padrão de São Paulo.
+ */
+const temColuna = (novas, coluna) => String(novas || '').split(', ').includes(coluna);
+
 /** Qual das colunas novas o erro do banco diz que não existe (a primeira citada), ou null. */
 function colunaQueFalta(erro) {
   const m = RE_COLUNA_NOVA.exec(erro?.message || '');
@@ -180,6 +187,7 @@ module.exports = {
   erroDeColunaNova,
   COLUNAS_NOVAS_DO_TIME,
   COLUNAS_NOVAS_DO_TIME_SQL,
+  temColuna,
   lerComFuso,
   esquecerFaltaDaColuna,
 };

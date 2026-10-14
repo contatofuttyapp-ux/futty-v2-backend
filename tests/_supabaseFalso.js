@@ -19,9 +19,53 @@ const RELACOES_PADRAO = { convite_codigos: { convites: { tabela: 'convites', loc
 // Coluna com caminho pontuado ("teams.brilhante_ativo", o filtro sobre um embed do PostgREST) lê dentro da linha.
 const valorDe = (linha, coluna) => (coluna.includes('.') ? coluna.split('.').reduce((o, k) => o?.[k], linha) : linha[coluna]);
 
+// Divide um select no nível de cima: "a, b ( c, d ), e" → ['a', 'b ( c, d )', 'e'].
+function partesDoSelect(sel) {
+  const partes = [];
+  let nivel = 0;
+  let atual = '';
+  for (const ch of String(sel)) {
+    if (ch === '(') nivel += 1;
+    if (ch === ')') nivel -= 1;
+    if (ch === ',' && nivel === 0) { partes.push(atual.trim()); atual = ''; } else atual += ch;
+  }
+  if (atual.trim()) partes.push(atual.trim());
+  return partes;
+}
+
+/**
+ * A linha com SÓ o que o select pediu, como o PostgREST devolve. `*` traz a linha como está (o falso não sabe quais chaves são
+ * colunas e quais são embeds de mentira); `nome ( … )` e `apelido:nome!inner ( … )` projetam o embed (objeto ou lista);
+ * `apelido:coluna->campo` lê dentro do JSON; `coluna::tipo` ignora a conversão. Coluna que a linha não tem fica de fora.
+ */
+function projetarLinha(linha, sel) {
+  if (linha == null || typeof linha !== 'object') return linha;
+  if (Array.isArray(linha)) return linha.map((l) => projetarLinha(l, sel));
+  const partes = partesDoSelect(sel);
+  const saida = partes.includes('*') ? { ...linha } : {};
+  for (const parte of partes) {
+    if (parte === '*') continue;
+    const embed = /^(?:(\w+):)?(\w+)(?:!\w+)?\s*\(([\s\S]*)\)$/.exec(parte);
+    if (embed) {
+      const [, apelido, nome, dentro] = embed;
+      saida[apelido || nome] = linha[nome] == null ? null : projetarLinha(linha[nome], dentro);
+      continue;
+    }
+    const m = /^(?:(\w+):)?(\w+)((?:->>?\w+)*)(?:::\w+)?$/.exec(parte);
+    if (!m) throw new Error(`select do Supabase falso não entende "${parte}"`);
+    const [, apelido, coluna, caminho] = m;
+    const campos = caminho ? caminho.split(/->>?/).filter(Boolean) : [];
+    if (!(coluna in linha)) continue;
+    saida[apelido || (campos.length ? campos[campos.length - 1] : coluna)] = campos.reduce((o, k) => o?.[k], linha[coluna]);
+  }
+  return saida;
+}
+
 // `tetoLinhas` (Rodada 29Y): o PostgREST nunca devolve mais de N linhas por resposta (o Supabase corta em 1.000), com ou sem .range.
 // Sem a opção, o falso devolve tudo, como antes. O teste de contagem passa 1000 para simular o teto de verdade.
-function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO, tetoLinhas = Infinity } = {}) {
+// `projetar`: a leitura devolve SÓ as colunas do select (projetarLinha). Sem a opção, a linha inteira, como antes — e aí um select
+// que esqueceu uma coluna passa no teste sem ninguém ver.
+function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = false, falhar = null, relacoes = RELACOES_PADRAO, tetoLinhas = Infinity, projetar = false } = {}) {
   const tabelas = {};
   // Cópia FUNDA, dos dois lados: o PostgREST devolve JSON novo, e uma rota que muda o que recebeu (o proxy de mídia reescreve os
   // endereços da resposta no lugar) não pode mexer no que o banco guarda.
@@ -103,6 +147,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
           if (m[1]) alvo = alvo.filter((l) => l[nome] !== null);
         }
       }
+      if (projetar && e.cols) alvo = alvo.map((l) => projetarLinha(l, e.cols));
       return { data: e.head ? null : alvo.map(copia), error: null, count: e.count ? alvo.length : undefined };
     }
 
