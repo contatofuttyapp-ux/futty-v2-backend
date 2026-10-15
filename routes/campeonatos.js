@@ -101,8 +101,10 @@ async function computeSelos(uid, teamIds) {
       }
 
       // --- ranking (posição atual, vivo) ---
+      // Quem ainda não jogou está no ranking, mas no fim e sem pódio: num time com menos de 3 jogadores com jogo
+      // ele cairia no 3º lugar só por existir — o selo é de quem chegou lá jogando.
       const eu = (rk || []).find((r) => r.sou_eu);
-      if (eu && eu.posicao >= 1 && eu.posicao <= 3) {
+      if (eu && eu.presenca > 0 && eu.posicao >= 1 && eu.posicao <= 3) {
         selosDaEquipa.push({
           id: `rank:${teamId}`,
           fonte: 'ranking',

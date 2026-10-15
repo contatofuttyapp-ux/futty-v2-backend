@@ -78,10 +78,10 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = Number(v.nota);
   }
 
-  // ── RANKING v2 — TUDO por jogo, mín. 3 jogos para entrar. Cada eixo NORMALIZADO
-  // (0..1) antes de ponderar → os pesos são verdade. Rácios por jogo (não totais) →
-  // o veterano não "acumula" vantagem; a fidelidade (jogos totais) SATURA aos 30. ──
-  const MIN_JOGOS = 3;
+  // ── RANKING v2 — TUDO por jogo. Cada eixo NORMALIZADO (0..1) antes de ponderar → os pesos são verdade.
+  // Rácios por jogo (não totais) → o veterano não "acumula" vantagem; a fidelidade (jogos totais) SATURA aos 30.
+  // Todo membro que joga entra desde o dia em que chega ao time (decisão do dono): quem ainda não jogou fica
+  // com os eixos de jogo zerados (os rácios guardam a divisão por zero) e vai para o fim da lista. ──
   const elig = rows.map((m) => {
     const u = m.users;
     const a = agg[u.id];
@@ -104,7 +104,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
       destJogo: jogos ? destaques / jogos : 0,
       fidelidade: Math.min(jogos, 30) / 30, // satura aos 30 — 200 não supera 30
     };
-  }).filter((p) => p.jogos >= MIN_JOGOS);
+  });
 
   // Normalização por eixo (÷ máximo do time nesse eixo). Fidelidade já é 0..1 absoluto.
   const maxDe = (f) => Math.max(1e-9, ...elig.map(f));
@@ -146,7 +146,12 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     };
   });
 
+  // Quem ainda não jogou vem depois de todos os que jogaram (uma nota recebida não o põe à frente de quem tem jogo);
+  // entre eles vale a mesma ordem, que acaba no nome — estável de uma abertura para a outra.
   base.sort((x, y) => {
+    const jogouX = x.presenca > 0 ? 1 : 0;
+    const jogouY = y.presenca > 0 ? 1 : 0;
+    if (jogouY !== jogouX) return jogouY - jogouX;
     if (y.score !== x.score) return y.score - x.score;
     if ((y.nota || 0) !== (x.nota || 0)) return (y.nota || 0) - (x.nota || 0);
     return x.nome.localeCompare(y.nome);
@@ -161,7 +166,7 @@ function noTimeCampeao(g, userId) {
 }
 
 /**
- * A pessoa sempre vê a PRÓPRIA vitrine. O ranking só leva quem tem 3 jogos, é visível, está ativo e joga
+ * A pessoa sempre vê a PRÓPRIA vitrine. O ranking só leva quem é visível, está ativo e joga
  * (quem só organiza o time sai dele) — quem ficasse de fora daria 404 e a tela diria
  * "Perfil só entre companheiros", como se a regra de dividir time valesse contra o dono do perfil.
  * Aqui monta-se a linha do próprio jogador com os números DELE (os que a vitrine já mostra: jogos,
@@ -315,7 +320,7 @@ router.get(
     marcarFase(res, 'onda3');
 
     let jogador = ranking.find((r) => r.user_id === userId);
-    // Fora do ranking (menos de 3 jogos, oculto, inativo ou só organiza o time): a PRÓPRIA pessoa ainda vê a vitrine.
+    // Fora do ranking (oculto, inativo ou só organiza o time): a PRÓPRIA pessoa ainda vê a vitrine.
     if (!jogador && ehOProprio) jogador = await montarJogadorForaDoRanking({ teamId: team.id, userId, games, parts, votosRecebidos });
     if (!jogador) throw new HttpError(404, 'Jogador não encontrado neste time.');
 

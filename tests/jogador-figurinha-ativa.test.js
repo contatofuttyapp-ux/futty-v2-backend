@@ -56,8 +56,8 @@ before(async () => {
   const { error: memErr } = await supabase.from('team_members').insert({ team_id: teamId, user_id: userId, role: 'admin', categoria: 'linha' });
   if (memErr) throw memErr;
 
-  // MIN_JOGOS (buildRanking) exige 3 jogos com presença confirmada para o jogador entrar no
-  // ranking — sem isto, GET .../jogador/:userId dá 404 ("Jogador não encontrado neste time").
+  // Três jogos com presença confirmada: a vitrine do jogador tem números de verdade para mostrar
+  // (o ranking já o leva desde a entrada no time, sem mínimo de jogos).
   const daquiADias = (n) => new Date(Date.now() + n * 864e5).toISOString();
   for (let i = 0; i < 3; i += 1) {
     // eslint-disable-next-line no-await-in-loop

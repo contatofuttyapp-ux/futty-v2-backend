@@ -433,8 +433,8 @@ function distribuirGols(jogadores, quantos, rng) {
 // Monta o elenco de UM jogo com o total EXATO de porTime*2, para o sorteio dar
 // sempre 2 times (executarSorteio faz numTimes = floor(total/porTime); com 21
 // jogadores e 6 por time dariam 3 times, e o placar A/B deixaria de fazer sentido).
-// Rotaciona a linha a cada jogo: assim todos os 21 acumulam jogos e entram no
-// ranking, que exige 3 jogos por pessoa (routes/ranking.js MIN_JOGOS).
+// Rotaciona a linha a cada jogo: assim todos os 21 acumulam jogos e o ranking
+// da demo tem números de verdade para todo mundo.
 function elencoDoJogo(i, porTime, ids, ratings, donos) {
   const goleiros = JOGADORES.filter((j) => j.gr);
   const linha = JOGADORES.filter((j) => !j.gr);

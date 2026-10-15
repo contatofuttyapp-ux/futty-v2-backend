@@ -1,7 +1,7 @@
 // Futty v2.0 — Rodada 29I (achado 97): a pessoa sempre vê a PRÓPRIA vitrine.
 //
 // A varredura da Freaky (3-out): "Ver minha vitrine de jogador" abria a tela "Perfil só entre companheiros — Não compartilham
-// nenhum time", como se a regra de dividir time valesse contra o dono do perfil. O ranking só leva quem tem 3 jogos, é visível,
+// nenhum time", como se a regra de dividir time valesse contra o dono do perfil. O ranking só leva quem é visível,
 // está ativo e joga (quem só organiza o time sai dele); GET /api/teams/:slug/jogador/:userId dava 404 para esse dono, e a tela
 // escrevia a mesma frase para qualquer erro. O próprio id tem de passar SEMPRE, antes de qualquer verificação de time em comum.
 // Sem banco e sem rede (Supabase falso em memória).
@@ -39,7 +39,7 @@ function mundo(t) {
     games: jogos,
     game_players: [
       { game_id: 'jogo-1', user_id: VETERANO, confirmado: true }, { game_id: 'jogo-2', user_id: VETERANO, confirmado: true }, { game_id: 'jogo-3', user_id: VETERANO, confirmado: true },
-      { game_id: 'jogo-1', user_id: NOVO, confirmado: true }, // só 1 jogo: fica fora do ranking (mínimo de 3)
+      { game_id: 'jogo-1', user_id: NOVO, confirmado: true }, // só 1 jogo: já está no ranking (não há mínimo de jogos)
       { game_id: 'jogo-2', user_id: OUTRO_NOVO, confirmado: true },
     ],
     votes: [], gols_jogadores: [], champion_photos: [], feed_posts: [], feed_post_media: [], comentarios: [],
@@ -60,7 +60,7 @@ test('quem só organiza o time (fora do ranking) vê a PRÓPRIA vitrine — ante
   assert.equal(r.json.team.role, 'admin');
 });
 
-test('quem tem menos de 3 jogos vê a própria vitrine, com os números dele', async (t) => {
+test('quem tem poucos jogos vê a própria vitrine, com os números dele', async (t) => {
   const pedir = mundo(t);
   const r = await pedir('GET', `/api/teams/missa/jogador/${NOVO}`, null, NOVO);
   assert.equal(r.status, 200, JSON.stringify(r.json));
@@ -92,15 +92,19 @@ test('a regra de companheiros continua valendo para o perfil dos OUTROS: não-me
   const pedir = mundo(t);
   const deFora = await pedir('GET', `/api/teams/missa/jogador/${VETERANO}`, null, FORA);
   assert.equal(deFora.status, 403, 'quem não é do time não vê o perfil de ninguém');
-  const foraDoRanking = await pedir('GET', `/api/teams/missa/jogador/${NOVO}`, null, VETERANO);
-  assert.equal(foraDoRanking.status, 404, 'perfil de outra pessoa fora do ranking segue não encontrado');
+  const foraDoRanking = await pedir('GET', `/api/teams/missa/jogador/${DONO}`, null, VETERANO);
+  assert.equal(foraDoRanking.status, 404, 'perfil de outra pessoa fora do ranking (o dono que só organiza) segue não encontrado');
+  // O novato (1 jogo) está no ranking desde que entrou no time: o perfil dele abre para os companheiros.
+  const novato = await pedir('GET', `/api/teams/missa/jogador/${NOVO}`, null, VETERANO);
+  assert.equal(novato.status, 200, JSON.stringify(novato.json));
 });
 
 test('quem ver a vitrine de outra pessoa não muda a lista nem as posições do ranking', async (t) => {
   const pedir = mundo(t);
   const antes = await pedir('GET', '/api/teams/missa/ranking', null, VETERANO);
-  await pedir('GET', `/api/teams/missa/jogador/${NOVO}`, null, NOVO);
+  await pedir('GET', `/api/teams/missa/jogador/${DONO}`, null, DONO);
   const depois = await pedir('GET', '/api/teams/missa/ranking', null, VETERANO);
   assert.deepEqual(depois.json.ranking.map((r) => r.user_id), antes.json.ranking.map((r) => r.user_id));
-  assert.equal(antes.json.ranking.some((r) => r.user_id === NOVO), false, 'o novato continua fora do ranking');
+  assert.equal(antes.json.ranking.some((r) => r.user_id === DONO), false, 'quem só organiza continua fora do ranking');
+  assert.deepEqual(antes.json.ranking.map((r) => r.user_id).sort(), [NOVO, VETERANO, OUTRO_NOVO].sort(), 'os de poucos jogos estão no ranking (sem mínimo de jogos)');
 });
