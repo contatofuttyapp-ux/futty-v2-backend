@@ -101,10 +101,11 @@ const TIME = {
 
 // Times públicos: são o que o Explorar mostra. Criados por outros jogadores do
 // demo (o Bruninho não é membro, para a tela mostrar "Entrar" e "Pedir entrada").
+// Só com APROVAÇÃO: time de mentira aberto aparece no Radar de quem está em Brasília
+// e um jogador de verdade entrava nele com um toque (por isso os dois abertos, a Pelada
+// do Guará e o Society Lago Sul, saíram desta lista).
 const TIMES_PUBLICOS = [
-  { nome: 'Pelada do Guará', slug: 'pelada-do-guara-demo', cor: 'azul', modo: 'publico_aberto', localizacao: 'Guará I, Brasília, DF', geo: [-15.82, -47.97], descricao: 'Quarta e sábado à noite, society sintético. Tem colete, traz só a chuteira.', admin: 'Tiago', membros: ['Carlos', 'Dudu', 'Fabinho', 'Diguinho'] },
   { nome: 'Racha da Asa Norte', slug: 'racha-da-asa-norte-demo', cor: 'vermelho', modo: 'publico_aprovacao', localizacao: 'Asa Norte, Brasília, DF', geo: [-15.77, -47.88], descricao: 'Sábado 16h no campo da 410 Norte. Nível intermediário, sem carrinho.', admin: 'Marquinhos', membros: ['Renatinho', 'Paulinho'] },
-  { nome: 'Society Lago Sul', slug: 'society-lago-sul-demo', cor: 'preto', modo: 'publico_aberto', localizacao: 'Lago Sul, Brasília, DF', geo: [-15.84, -47.87], descricao: 'Domingo 17h, campo com iluminação. Churrasco depois é tradição.', admin: 'Roberto', membros: ['Paredão', 'Gonçalo', 'Carlos', 'Dudu', 'Tiago'] },
 ];
 
 // placar = [gols do time do Bruninho, gols do outro]: o time dele ganha 4, perde 1 e
