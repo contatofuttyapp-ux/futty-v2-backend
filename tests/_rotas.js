@@ -17,6 +17,7 @@ const RECARREGAR = [
   'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth', 'routes/inicio', 'routes/feed', 'utils/blocksStore',
   'routes/superadmin', 'utils/resenhaCota', 'utils/plataformaStore', // Rodada 29Y: guardam o supabase no require, como os de cima
   'routes/campeonatos', 'utils/campeonatoStore', 'utils/selosCache', // campeonatos no Storage: guardam o supabase no require
+  'utils/presencaDeFundador', // a presença de fundador lê o time e os jogos com o supabase do require
 ];
 const caminho = (m) => require.resolve(`../${m}`);
 

@@ -260,8 +260,9 @@ router.get(
           'rodada_user_id, rodada_foto_url, created_at'
       )
       .in('team_id', teamIds)
-      // Entra na Resenha o jogo que tem resultado: campeão marcado OU empate explícito (`>= 0` é "não nulo" para o índice).
-      .or('campeao_time_index.gte.0,time_vencedor.eq.empate')
+      // Entra na Resenha o jogo que tem resultado (campeão marcado OU empate explícito; `>= 0` é "não nulo" para o índice) e também o
+      // jogo antigo que só tem a foto do campeão: o cartão mostra a foto sem dizer quem ganhou, e o ranking não ganha vitória nenhuma.
+      .or('campeao_time_index.gte.0,time_vencedor.eq.empate,campeao_foto_url.not.is.null')
       .order('created_at', { ascending: false })
       .limit(quantos);
     let consultaPosts = supabase

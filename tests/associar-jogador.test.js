@@ -48,7 +48,7 @@ function storageFalso() {
   };
 }
 
-function cenario(extra = {}) {
+function cenario(extra = {}, opcoes = {}) {
   const t = carregar({
     teams: [{ id: TIME, nome: 'Várzea FC', slug: 'varzea-fc' }, { id: OUTRO_TIME, nome: 'Outro FC', slug: 'outro-fc' }],
     users: [usuario(DONO, 'Chavo'), usuario(A, 'Magrão'), usuario(B, 'Zé'), usuario(BETO, 'Roberto', 'Betão'), usuario(CAIO, 'Caio'), usuario(FORA, 'Fora')],
@@ -63,7 +63,7 @@ function cenario(extra = {}) {
     ],
     gols_jogadores: extra.gols || [],
     feed_posts: extra.feed_posts || [],
-  }, ['routes/games', 'routes/campeonatos', 'utils/campeonatoStore', 'utils/agregados']);
+  }, ['routes/games', 'routes/campeonatos', 'utils/campeonatoStore', 'utils/agregados'], opcoes);
   t.cliente.storage = storageFalso();
   return t;
 }
@@ -261,6 +261,16 @@ test('a lista: convidados do jogo e membros com o motivo de quem não pode ser e
   // os disponíveis vêm primeiro
   const ordem = r.json.membros.map((m) => m.disponivel);
   assert.deepEqual(ordem, [...ordem].sort((a, b) => Number(b) - Number(a)));
+});
+
+test('a lista dos membros que não dá para ler é erro, nunca "ninguém do time" (a janela mostrava vazio como se fosse verdade)', async (t) => {
+  // Só a leitura dos membros COM o apelido falha (a do papel do admin passa): é ela que enche a lista.
+  const falhar = (tabela, op, e) => (tabela === 'team_members' && op === 'select' && /users\s*\(/.test(e.cols || '') ? { message: 'falha de leitura' } : null);
+  const { carregados } = cenario({}, { falhar });
+  const pedir = subir([carregados['routes/games']], t);
+  const r = await pedir('GET', rota, null, DONO);
+  assert.equal(r.status, 500, JSON.stringify(r.json));
+  assert.equal(r.json.membros, undefined);
 });
 
 test('a página pública do jogo não leva as associações (ids de conta e o que havia antes são do admin)', async (t) => {

@@ -84,7 +84,7 @@ router.get(
     ]));
 
     const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2, seu_time] = await Promise.all([
-      medir(res, 'me', seguro(inicioService.obterMe(req.user))),
+      medir(res, 'me', seguro(inicioService.obterMe(req.user, { base: baseP }))),
       teamsP,
       pendentesP,
       convitesP,

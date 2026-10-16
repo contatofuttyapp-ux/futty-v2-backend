@@ -1123,10 +1123,12 @@ const MSG_SO_ADMIN_ASSOCIA = 'Só admins podem associar jogadores.';
 
 /** Os membros do time como a lista "Associar jogador" os mostra: apelido e foto, nunca o e-mail. */
 async function membrosParaAssociar(teamId) {
-  const { data } = await supabase
+  // Uma leitura que falha é erro, não "ninguém no time": a janela mostraria a lista vazia como se fosse verdade.
+  const { data, error } = await supabase
     .from('team_members')
     .select('user_id, users ( id, nome, nome_jogador, avatar_url, avatar_generico )')
     .eq('team_id', teamId);
+  if (error) throw new HttpError(500, error.message);
   return (data || []).filter((m) => m.users).map((m) => ({
     user_id: m.user_id,
     nome: nomePublico(m.users),

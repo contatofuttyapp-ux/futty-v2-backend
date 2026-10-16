@@ -128,7 +128,8 @@ const erroDaColunaFuso = (erro) => !!erro && /\bfuso\b/i.test(erro.message || ''
 // e os jogadores por time padrão (079). Elas viajam juntas nas leituras do time (a mesma ida ao banco); a que faltar sai da leitura
 // SOZINHA (o erro do banco diz qual é) e as outras continuam valendo — com a 076 aplicada e a 077 não, o fuso vale e o escudo fica
 // sólido. Cada uma que falta vale o seu padrão (fuso de São Paulo, escudo sólido, 5 por time) até o Pedro aplicar a migração dela.
-const COLUNAS_NOVAS_DO_TIME = ['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time'];
+// A data de corte da presença de fundador (083) viaja junto: sem ela, não há regra (utils/presencaDeFundador.js).
+const COLUNAS_NOVAS_DO_TIME = ['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time', 'presenca_fundador_ate'];
 const COLUNAS_NOVAS_DO_TIME_SQL = COLUNAS_NOVAS_DO_TIME.join(', ');
 const RE_COLUNA_NOVA = new RegExp(`\\b(${COLUNAS_NOVAS_DO_TIME.join('|')})\\b`, 'i');
 const erroDeColunaNova = (erro) => !!erro && RE_COLUNA_NOVA.test(erro.message || '');

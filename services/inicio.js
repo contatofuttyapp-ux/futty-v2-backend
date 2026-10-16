@@ -18,6 +18,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time"
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
+const { jogosDeFundadorDaPessoa } = require('../utils/presencaDeFundador'); // os jogos do "N jogos" do Início
 const { normalizarFuso, lerComFuso, temColuna } = require('../utils/fuso');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo no rótulo e na lista: uma regra só
 
@@ -95,16 +96,19 @@ function calcFigurinhaStatus(status, statusEm) {
   return status || null;
 }
 
-/** Utilizador autenticado + stats agregadas. Garante a linha em public.users. */
-async function obterMe(user) {
+/**
+ * Utilizador autenticado + stats agregadas. Garante a linha em public.users.
+ * @param {{ base?: Promise<[object[]|null, Set<string>|null]> }} [opts] os vínculos e quem só organiza que o /api/inicio já leu
+ */
+async function obterMe(user, { base = null } = {}) {
   const userId = user.id;
   await ensureUserRow(user);
 
-  const [perfil, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows] = await Promise.all([
+  const [perfil, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows, jogosFundador] = await Promise.all([
     obterPerfilResiliente(userId),
     supabase
       .from('game_players')
-      .select('games ( data, status, cancelado )')
+      .select('game_id, games ( data, status, cancelado )')
       .eq('user_id', userId)
       .eq('confirmado', true)
       .then((r) => r.data),
@@ -116,14 +120,20 @@ async function obterMe(user) {
     // nenhum", nunca erro (mesmo padrão de slotRows acima).
     supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(1).then((r) => r.data),
     supabase.from('user_avatar_historico').select('id').eq('user_id', userId).limit(1).then((r) => r.data),
+    // Presença de fundador: conta como jogo, igual ao ranking. Com os vínculos do /api/inicio, sem ler team_members de novo.
+    base
+      ? base.then(([vinculos, soOrganiza]) => jogosDeFundadorDaPessoa(userId, vinculos ? { vinculos, soOrganiza: soOrganiza || new Set() } : {}))
+      : jogosDeFundadorDaPessoa(userId),
   ]);
 
   const agora = Date.now();
-  const jogos = (jogosRows || []).filter((r) => {
+  const jogados = (jogosRows || []).filter((r) => {
     const g = r.games;
     if (!g || g.cancelado || g.status === 'cancelado') return false;
     return g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora);
-  }).length;
+  }).map((r) => r.game_id);
+  // Jogos diferentes: a presença confirmada e a de fundador do mesmo jogo contam uma vez.
+  const jogos = new Set([...jogados, ...jogosFundador]).size;
 
   const totalVotos = voteRows ? voteRows.length : 0;
   const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;

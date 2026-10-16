@@ -14,6 +14,7 @@ const { round2, notaParaExibir } = require('../utils/helpers');
 const { enviarNotificacao } = require('./push');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { jogadoresDoCampeao, resultadoDoJogador } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
+const { jogosDeFundadorDoTime, comPresencaDeFundador, presencasPorPessoa } = require('../utils/presencaDeFundador');
 
 const router = express.Router();
 
@@ -31,12 +32,14 @@ function notaValida(n) {
  * @param {Promise} [opts.jogosPromessa] leitura de `games` deste time já em voo
  *   (tem de trazer COLUNAS_JOGOS) — quem também precisa dos jogos partilha a sua
  *   em vez de mandar ler a mesma tabela outra vez.
+ * @param {Promise<string[]>} [opts.jogosFundadorPromessa] os jogos de presença de fundador
+ *   (utils/presencaDeFundador.js) já em voo, pelo mesmo motivo.
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
-async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
+async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorPromessa } = {}) {
   // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado dos outros, então saem
   // juntos em vez de awaits em série.
-  const [{ data: membros }, { data: votos }, { data: jogos }, organizam] = await Promise.all([
+  const [{ data: membros }, { data: votos }, { data: jogos }, organizam, jogosFundador] = await Promise.all([
     // Membros (+ categoria). RANKING VIVO: os agregados gols/vitórias/artilharia/destaque
     // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
     // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
@@ -49,6 +52,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
     jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
     idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
+    jogosFundadorPromessa || jogosDeFundadorDoTime(teamId), // presença de fundador: todo membro presente nos jogos até a data de corte do time
   ]);
   const gameIds = (jogos || []).map((g) => g.id);
 
@@ -60,14 +64,15 @@ async function buildRanking(teamId, meUserId, { jogosPromessa } = {}) {
     // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
     // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
     gameIds.length
-      ? supabase.from('game_players').select('user_id').in('game_id', gameIds).eq('confirmado', true)
+      ? supabase.from('game_players').select('game_id, user_id').in('game_id', gameIds).eq('confirmado', true)
       : { data: [] },
   ]);
-  const jogosMap = {};
-  for (const gp of gps || []) jogosMap[gp.user_id] = (jogosMap[gp.user_id] || 0) + 1;
 
   // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false && !organizam.has(m.user_id));
+  // Jogos por jogador = jogos DIFERENTES com presença: a confirmada e a de fundador (que não duplica quem também confirmou).
+  const presencas = comPresencaDeFundador((gps || []).map((gp) => ({ ...gp, confirmado: true })), jogosFundador, rows.map((m) => m.user_id));
+  const jogosMap = presencasPorPessoa(presencas);
 
   const agg = {};
   const minhaNota = {};
@@ -259,8 +264,10 @@ router.get(
         .select(`${COLUNAS_JOGOS}, data, status, cancelado, rodada_user_id`)
         .eq('team_id', team.id)
     );
+    // Os jogos de presença de fundador servem o ranking e o "jogos" desta vitrine: uma leitura só.
+    const fundadorP = jogosDeFundadorDoTime(team.id);
     // O ranking atravessa as ondas 2 e 3 (é a parte mais pesada) — daí a medida própria.
-    const rankingP = medir(res, 'ranking', buildRanking(team.id, req.user.id, { jogosPromessa: jogosP }));
+    const rankingP = medir(res, 'ranking', buildRanking(team.id, req.user.id, { jogosPromessa: jogosP, jogosFundadorPromessa: fundadorP }));
     rankingP.catch(() => {}); // se a onda 2 sair por 403, ninguém fica com a rejeição na mão
 
     const [role, { data: fotos }, { data: votosRecebidos }, { data: minhasEquipas }, { data: equipasDele }, { data: teamGames }] = await Promise.all([
@@ -297,7 +304,7 @@ router.get(
 
     // ── ONDA 3 — precisa dos gameIds e dos times partilhados (onda 2). O ranking
     // acaba aqui: arrancou na onda 2 e ainda lhe faltava uma ida (golos + presenças).
-    const [ranking, { data: parts }, { data: eqs }, { data: posts }] = await Promise.all([
+    const [ranking, { data: partsLidas }, { data: eqs }, { data: posts }, jogosFundador] = await Promise.all([
       rankingP,
       // Participações do jogador nos jogos do time.
       gameIds.length
@@ -316,10 +323,13 @@ router.get(
           .order('created_at', { ascending: false })
           .limit(5)
         : { data: [] },
+      fundadorP,
     ]);
     marcarFase(res, 'onda3');
 
     let jogador = ranking.find((r) => r.user_id === userId);
+    // Quem está no ranking (joga, visível, ativo) ganha a presença de fundador também aqui: os "jogos" e o histórico da vitrine batem com o ranking.
+    const parts = jogador ? comPresencaDeFundador(partsLidas || [], jogosFundador, [userId]) : partsLidas;
     // Fora do ranking (oculto, inativo ou só organiza o time): a PRÓPRIA pessoa ainda vê a vitrine.
     if (!jogador && ehOProprio) jogador = await montarJogadorForaDoRanking({ teamId: team.id, userId, games, parts, votosRecebidos });
     if (!jogador) throw new HttpError(404, 'Jogador não encontrado neste time.');

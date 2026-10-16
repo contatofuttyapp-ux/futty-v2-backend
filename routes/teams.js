@@ -18,6 +18,7 @@ const selosCache = require('../utils/selosCache');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
+const { jogosDeFundadorDoTime, comPresencaDeFundador, presencasPorPessoa } = require('../utils/presencaDeFundador');
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código>
 const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols
@@ -760,7 +761,7 @@ router.get(
 
     // Estas 4 leituras só dependem de team.id, nenhuma do resultado das outras — em paralelo; só a busca
     // de presenças (que precisa dos IDs dos "últimos jogos") fica sequencial a seguir.
-    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam, { data: todosOsJogos }] = await Promise.all([
+    const [{ data, error }, { data: votos }, { data: ultimosJogos }, agregados, organizam, { data: todosOsJogos }, jogosFundador] = await Promise.all([
       supabase
         .from('team_members')
         .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
@@ -776,9 +777,12 @@ router.get(
       idsQueSoOrganizam(team.id),
       // Todos os jogos, para contar as PRESENÇAS de cada um (a aba Estatísticas do admin).
       supabase.from('games').select('id, data, status, cancelado').eq('team_id', team.id),
+      jogosDeFundadorDoTime(team.id), // presença de fundador: a mesma conta do ranking
     ]);
     if (error) throw new HttpError(500, error.message);
     const { golsMap, vitoriasMap, artilhariaMap, destaquesMap } = agregados;
+    // Quem joga (não só organiza) ganha a presença de fundador — os mesmos números do ranking.
+    const jogamIds = (data || []).map((m) => m.users?.id).filter((id) => id && !organizam.has(id));
 
     // Presenças = jogos em que a pessoa ESTEVE: confirmada num jogo já encerrado e não cancelado (a mesma conta do perfil do
     // jogador). Antes a seção "Presença" das Estatísticas listava vitórias.
@@ -786,10 +790,12 @@ router.get(
     const idsEncerrados = (todosOsJogos || [])
       .filter((g) => !(g.cancelado || g.status === 'cancelado') && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora)))
       .map((g) => g.id);
-    const presencasTotais = {}; // user_id -> n de jogos
+    let presencasTotais = {}; // user_id -> n de jogos
     if (idsEncerrados.length) {
-      const { data: confirmadas } = await supabase.from('game_players').select('user_id').in('game_id', idsEncerrados).eq('confirmado', true);
-      for (const gp of confirmadas || []) presencasTotais[gp.user_id] = (presencasTotais[gp.user_id] || 0) + 1;
+      const { data: confirmadas } = await supabase.from('game_players').select('game_id, user_id').in('game_id', idsEncerrados).eq('confirmado', true);
+      const encerrados = new Set(idsEncerrados);
+      const linhas = (confirmadas || []).map((gp) => ({ ...gp, confirmado: true }));
+      presencasTotais = presencasPorPessoa(comPresencaDeFundador(linhas, jogosFundador.filter((id) => encerrados.has(id)), jogamIds));
     }
 
     const MIN_VOTOS = 3;
@@ -808,7 +814,8 @@ router.get(
         .select('game_id, user_id, confirmado')
         .in('game_id', jogos.map((g) => g.id))
         .eq('confirmado', true);
-      for (const gp of gps || []) {
+      const daLista = new Set(jogos.map((g) => g.id));
+      for (const gp of comPresencaDeFundador(gps || [], jogosFundador.filter((id) => daLista.has(id)), jogamIds)) {
         (presentesPorJogo[gp.game_id] = presentesPorJogo[gp.game_id] || new Set()).add(gp.user_id);
       }
     }

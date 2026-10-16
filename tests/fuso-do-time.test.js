@@ -103,17 +103,18 @@ test('lerComFuso (29I, bloco 3): só a coluna que falta sai — com a 076 aplica
   const so076 = bancoCom(['fuso'], chamadas);
   assert.deepEqual((await lerComFuso(so076)).data, { colunas: 'fuso' });
   assert.deepEqual(chamadas, [
-    'fuso, escudo_cor2, escudo_padrao, jogadores_por_time',
-    'fuso, escudo_padrao, jogadores_por_time',
-    'fuso, jogadores_por_time',
+    'fuso, escudo_cor2, escudo_padrao, jogadores_por_time, presenca_fundador_ate',
+    'fuso, escudo_padrao, jogadores_por_time, presenca_fundador_ate',
+    'fuso, jogadores_por_time, presenca_fundador_ate',
+    'fuso, presenca_fundador_ate',
     'fuso',
   ]);
   const n = chamadas.length;
   await lerComFuso(so076);
-  assert.deepEqual(chamadas.slice(n), ['fuso'], 'lembrou das três que faltam: uma ida só');
+  assert.deepEqual(chamadas.slice(n), ['fuso'], 'lembrou das quatro que faltam: uma ida só');
   esquecerFaltaDaColuna();
-  const tudo = bancoCom(['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time'], []);
-  assert.deepEqual((await lerComFuso(tudo)).data, { colunas: 'fuso, escudo_cor2, escudo_padrao, jogadores_por_time' });
+  const tudo = bancoCom(['fuso', 'escudo_cor2', 'escudo_padrao', 'jogadores_por_time', 'presenca_fundador_ate'], []);
+  assert.deepEqual((await lerComFuso(tudo)).data, { colunas: 'fuso, escudo_cor2, escudo_padrao, jogadores_por_time, presenca_fundador_ate' });
   esquecerFaltaDaColuna();
 });
 
