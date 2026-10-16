@@ -417,3 +417,43 @@ test('POST /api/teams não devolve mais presente_brilhante nem chama presentearC
   const fonte = require('node:fs').readFileSync(path.join(__dirname, '..', 'routes', 'teams.js'), 'utf8');
   assert.ok(!/presente_brilhante|presentearCriador/.test(fonte), 'criar time não dá nada de graça');
 });
+
+// ─── O "Restam N gerações": N = TUDO o que a pessoa pode gerar ───────────────
+// Quem comprou a Minha Figurinha (45 → 55) e ainda tinha 3 no pacote do time via "Restam 3" — o número do direito gasto primeiro. O contador
+// é a soma (pacotes + créditos); qual direito gasta continua decidido por baixo.
+const TIME_B = '33333333-3333-3333-3333-333333333333';
+const pacoteDe = (id, porJogador) => ({ id, brilhante_ativo: true, brilhante_kit: 'dark-gold', brilhante_limite: 25, brilhante_por_jogador: porJogador });
+const comDireitos = (creditos, times) => carregarCom((tabela, estado) => {
+  if (tabela === 'users') return semErro({ brilhante_creditos: creditos });
+  if (tabela === 'team_members') return semErro(times.map((t) => ({ team_id: t.id, teams: t })));
+  if (tabela === 'brilhantes_time') return estado.count ? semErro(null, { count: 1 }) : semErro(null);
+  return semErro(null);
+});
+
+test('3 do pacote do time + 55 de crédito → total 58 (e o time continua sendo gasto primeiro)', async () => {
+  const { mod } = comDireitos(55, [pacoteDe(TIME, 3)]);
+  const d = await mod.temDireito(PESSOA);
+  assert.equal(d.total, 58);
+  assert.equal(d.fonte, 'time');
+  assert.equal(d.restantes, 3, 'o direito gasto primeiro segue com o próprio saldo');
+});
+
+test('só o pacote do time → total 3; só crédito → total 55; nada → total 0', async () => {
+  assert.equal((await comDireitos(0, [pacoteDe(TIME, 3)]).mod.temDireito(PESSOA)).total, 3);
+  assert.equal((await comDireitos(55, []).mod.temDireito(PESSOA)).total, 55);
+  assert.equal((await comDireitos(0, []).mod.temDireito(PESSOA)).total, 0);
+});
+
+test('dois times com pacote + crédito → total soma os três', async () => {
+  const d = await comDireitos(10, [pacoteDe(TIME, 2), pacoteDe(TIME_B, 3)]).mod.temDireito(PESSOA);
+  assert.equal(d.total, 15);
+  assert.equal(d.opcoes.length, 3);
+});
+
+test('o /api/brilhantes/estado e o /api/inicio levam o total', () => {
+  const fs = require('node:fs');
+  const estado = fs.readFileSync(path.join(__dirname, '..', 'routes', 'brilhantes.js'), 'utf8');
+  const inicio = fs.readFileSync(path.join(__dirname, '..', 'routes', 'inicio.js'), 'utf8');
+  assert.match(estado, /total: direito\.total/);
+  assert.match(inicio, /total: brilhante\.total/);
+});

@@ -130,8 +130,8 @@ router.get(
       // deste payload e decide aqui se o convite é "Comprar" ou "Pedir ativação", sem pedir o /estado.
       brilhante: {
         ...(brilhante
-          ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos, restantes: brilhante.restantes }
-          : { fonte: null, team_id: null, kit_id: null, creditos: 0, restantes: 0 }),
+          ? { fonte: brilhante.fonte, team_id: brilhante.teamId, kit_id: brilhante.kitId, creditos: brilhante.creditos, restantes: brilhante.restantes, total: brilhante.total }
+          : { fonte: null, team_id: null, kit_id: null, creditos: 0, restantes: 0, total: 0 }),
         loja_pronta: lojaProntaDoPedido(req),
       },
       // Nome próprio: `pedidos` (acima) são os pedidos de ENTRADA em times —

@@ -91,6 +91,9 @@ function somarCusto(anteriorCents, destaCents) {
  *             contador e do diálogo de confirmação na Figurinha
  *   opcoes    todos os direitos encontrados — a rota usa isto para honrar um
  *             kit pedido que não seja o do time (ver POST /api/me/avatar/ai)
+ *   total     a SOMA de todas as opções (pacotes dos times + créditos): é o
+ *             "Restam N gerações" da tela. Quem compra tem de ver o número
+ *             subir na hora, mesmo quando o direito gasto primeiro é o do time.
  *
  * A PREFERÊNCIA é o time, não o crédito (a spec não diz qual gastar
  * primeiro): o direito do time é grátis para a pessoa, está limitado a 25 e
@@ -98,7 +101,7 @@ function somarCusto(anteriorCents, destaCents) {
  * primeiro o que não é dela é o lado generoso do erro.
  */
 async function temDireito(userId) {
-  const vazio = { fonte: null, teamId: null, kitId: null, creditos: 0, restantes: 0, opcoes: [] };
+  const vazio = { fonte: null, teamId: null, kitId: null, creditos: 0, restantes: 0, total: 0, opcoes: [] };
   if (!userId) return vazio;
 
   let creditos = 0;
@@ -173,7 +176,8 @@ async function temDireito(userId) {
   if (creditos > 0) opcoes.push({ fonte: 'credito', teamId: null, kitId: null, restantes: Math.max(0, creditos) });
 
   const escolhido = opcoes[0] || { fonte: null, teamId: null, kitId: null, restantes: 0 };
-  return { ...escolhido, creditos, opcoes };
+  const total = opcoes.reduce((soma, o) => soma + o.restantes, 0);
+  return { ...escolhido, creditos, total, opcoes };
 }
 
 /** A função creditar_brilhante (migração 064) ainda não existe neste banco? */

@@ -88,7 +88,8 @@ router.get(
     const [direito, times, pedidos, comprasAtivas] = await Promise.all([temDireito(userId), lerTimes(), pedidosVivos(userId), lerComprasAtivas()]);
 
     res.json({
-      direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId, restantes: direito.restantes },
+      // `total` = tudo o que a pessoa ainda pode gerar (pacotes + créditos): o "Restam N gerações". `restantes` segue sendo o do direito gasto primeiro.
+      direito: { fonte: direito.fonte, team_id: direito.teamId, kit_id: direito.kitId, restantes: direito.restantes, total: direito.total },
       creditos: direito.creditos,
       times,
       pedidos,
