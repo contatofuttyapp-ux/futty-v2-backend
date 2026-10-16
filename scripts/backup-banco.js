@@ -33,6 +33,10 @@ const TABELAS = [
   'compras',
   // Quem quer ser avisado do lançamento (068).
   'avisos_lancamento',
+  // Fotos recusadas pelo filtro (080) e o convite guardado de quem ainda não terminou o cadastro (084).
+  'fotos_recusadas', 'convites_pendentes',
+  // A fila das figurinhas (069), os links curtos do convite (072) e do sorteio (078).
+  'geracoes_jobs', 'convite_codigos', 'sorteio_codigos',
 ];
 
 // Modelo de campeonato N-times (migração 039) — fora de propósito (comentário acima),
