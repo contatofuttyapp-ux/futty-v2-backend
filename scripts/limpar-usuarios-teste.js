@@ -1,11 +1,17 @@
-// Futty v2.0 — Limpeza de usuários de teste (14-set). Apaga TODOS os
-// usuários do auth EXCETO os da lista MANTER e qualquer super-admin —
-// pré-lançamento, a base inteira (menos essas contas) é considerada teste.
+// Futty v2.0 — Limpeza de usuários de teste. Dois modos, e SEM modo não faz nada (com gente de verdade no app, "todo mundo menos
+// uma lista" deixou de ser um padrão seguro):
+//
+//   --do-dono  · só as contas de teste do dono (utils/contasDeTesteDoDono.js): os apelidos "+…" do Gmail dele, mais as que ele
+//                conferir e passar em --incluir. Mostra também o que FICA (protegido) e as contas sem nome recentes PARA CONFERIR.
+//   --todos-menos-manter · o modo de pré-lançamento: TODOS os usuários do auth EXCETO a lista MANTER, os super-admins e as
+//                contas protegidas do Gabinete (utils/contaProtegida.js).
 //
 // Uso:
-//   node scripts/limpar-usuarios-teste.js                       → SIMULAÇÃO (default). Não altera nada.
-//   node scripts/limpar-usuarios-teste.js --apagar --confirmo   → apaga de verdade. As DUAS flags juntas.
-//   ... --times-tambem (soma às duas acima, ou sozinha na simulação) → além
+//   node scripts/limpar-usuarios-teste.js --do-dono                          → SIMULAÇÃO. Não altera nada.
+//   node scripts/limpar-usuarios-teste.js --do-dono --incluir a@x.com,b@y.com → idem, com essas contas a mais
+//   node scripts/limpar-usuarios-teste.js --do-dono --apagar --confirmo      → apaga de verdade. As DUAS flags juntas.
+//   node scripts/limpar-usuarios-teste.js --todos-menos-manter [--apagar --confirmo]
+//   ... --times-tambem (só com --todos-menos-manter; soma às duas acima, ou sozinha na simulação) → além
 //       dos usuários de teste, apaga TAMBÉM todos os times que sobrariam —
 //       inclusive os criados pelas contas MANTER — com o Storage (logos) e
 //       os dependentes por cascade. As contas MANTER em si (perfil, e-mail,
@@ -39,6 +45,8 @@ const { execFileSync } = require('child_process');
 const { supabase } = require('../utils/db');
 const { removerFicheirosPorUrl, parseUrlPublico, bucketEcaminho } = require('../utils/storage');
 const { apagarUsuario } = require('../utils/apagarUsuario');
+const { motivoParaNaoExcluir, TIMES_PROTEGIDOS } = require('../utils/contaProtegida');
+const { separarContasDeTeste } = require('../utils/contasDeTesteDoDono');
 
 // demo-loja@futtymock.com (o revisor das lojas) é conta MANTER, por decisão do dono;
 // a conta de teste do próprio dono (phferreiraborgesbackup@) não é.
@@ -128,6 +136,15 @@ async function montarPlano({ timesTambem = false } = {}) {
     ...MANTER_EMAILS.map((e) => porEmail.get(e).id),
     ...(superAdmins || []).map((u) => u.id),
   ]);
+
+  // As contas protegidas do Gabinete (utils/contaProtegida.js: dono, demo das lojas, revisores da Apple, times protegidos) também ficam.
+  const linhasDeUsers = await selecionarEmLotes('users', 'id', 'id, nome, nome_jogador, is_super_admin', todosAuth.map((u) => u.id));
+  const usersPorId = new Map(linhasDeUsers.map((u) => [u.id, u]));
+  const slugsPorConta = await slugsProtegidosPorConta();
+  for (const u of todosAuth) {
+    const conta = { ...(usersPorId.get(u.id) || {}), id: u.id, email: u.email };
+    if (motivoParaNaoExcluir({ conta, slugsDosTimes: slugsPorConta.get(u.id) || [] })) manterIds.add(u.id);
+  }
 
   const aApagar = todosAuth
     .filter((u) => !manterIds.has(u.id))
@@ -399,17 +416,122 @@ async function executarApagar(plano) {
   console.log(`[limpar] times que ficam agora: ${planoFinal.timesFicam.length}.`);
 }
 
+// ─── --do-dono: só as contas de teste do dono (utils/contasDeTesteDoDono.js), com as proteções do Gabinete ────────────────────────────
+
+/** Map(user_id → [slug]) dos times protegidos (utils/contaProtegida.js) de que cada conta é membro. */
+async function slugsProtegidosPorConta() {
+  const { data: times, error } = await supabase.from('teams').select('id, slug').in('slug', TIMES_PROTEGIDOS.map((t) => t.slug));
+  if (error) throw new Error(`teams(protegidos): ${error.message}`);
+  const mapa = new Map();
+  if (!(times || []).length) return mapa;
+  const slugPorTime = new Map(times.map((t) => [t.id, t.slug]));
+  const vinculos = await selecionarEmLotes('team_members', 'team_id', 'team_id, user_id', [...slugPorTime.keys()]);
+  for (const v of vinculos) mapa.set(v.user_id, [...(mapa.get(v.user_id) || []), slugPorTime.get(v.team_id)]);
+  return mapa;
+}
+
+/** Todas as contas (Auth + o que public.users sabe delas: nomes, super-admin) e a separação saem / ficam / para conferir. */
+async function montarPlanoDoDono({ incluir }) {
+  const todosAuth = await listarTodosAuthUsers();
+  const linhas = await selecionarEmLotes('users', 'id', 'id, nome, nome_jogador, is_super_admin', todosAuth.map((u) => u.id));
+  const porId = new Map(linhas.map((u) => [u.id, u]));
+  const contas = todosAuth.map((u) => ({ ...(porId.get(u.id) || {}), id: u.id, email: u.email, created_at: u.created_at }));
+  const slugsPorConta = await slugsProtegidosPorConta();
+  const sep = separarContasDeTeste(contas, { slugsPorConta, incluir });
+  // O que cada uma que sai tem: times de que é membro (o apagarUsuario passa adiante ou apaga), para o dono ver antes.
+  const vinculos = sep.saem.length ? await selecionarEmLotes('team_members', 'user_id', 'user_id, team_id, role', sep.saem.map((c) => c.id)) : [];
+  const idsTimes = [...new Set(vinculos.map((v) => v.team_id))];
+  const times = idsTimes.length ? await selecionarEmLotes('teams', 'id', 'id, nome, slug', idsTimes) : [];
+  const nomeDoTime = new Map(times.map((t) => [t.id, t.nome]));
+  const timesPorConta = new Map();
+  for (const v of vinculos) timesPorConta.set(v.user_id, [...(timesPorConta.get(v.user_id) || []), `${nomeDoTime.get(v.team_id) || v.team_id}${v.role === 'admin' ? ' (admin)' : ''}`]);
+  return { ...sep, timesPorConta };
+}
+
+const nomeDaConta = (c) => String(c.nome_jogador || c.nome || '').trim() || '(sem nome)';
+// Data de sistema, no relógio de São Paulo (o do banco do dono), só para ele se achar na lista.
+const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '-');
+
+function imprimirPlanoDoDono(plano, { execucaoReal }) {
+  console.log(`\n[limpar] --do-dono · ${execucaoReal ? 'EXECUÇÃO' : 'SIMULAÇÃO (nada foi alterado)'}`);
+  console.log(`\n[limpar] SAEM — ${plano.saem.length} conta(s):`);
+  for (const c of plano.saem) {
+    const times = plano.timesPorConta.get(c.id) || [];
+    console.log(`  - ${c.email}  · ${nomeDaConta(c)} · criada ${quando(c.created_at)} · times: ${times.length ? times.join(', ') : '-'}`);
+  }
+  if (plano.ficam.length) {
+    console.log(`\n[limpar] FICAM (protegidas) — ${plano.ficam.length}:`);
+    for (const f of plano.ficam) console.log(`  - ${f.conta.email}  · ${nomeDaConta(f.conta)} — ${f.motivo}`);
+  }
+  console.log(`\n[limpar] PARA CONFERIR — contas sem nome desde 28/09 que NÃO saem sozinhas (${plano.paraConferir.length}):`);
+  for (const c of plano.paraConferir) console.log(`  - ${c.email}  · criada ${quando(c.created_at)}`);
+  if (plano.paraConferir.length) console.log('  Para tirar alguma: repita o comando com --incluir e1@x.com,e2@y.com (só as que forem mesmo do dono).');
+  if (plano.incluirSemConta.length) console.log(`\n[limpar] ⚠ --incluir sem conta no banco (conferir a grafia): ${plano.incluirSemConta.join(', ')}`);
+  console.log('');
+}
+
+async function executarDoDono(plano) {
+  if (!plano.saem.length) {
+    console.log('[limpar] nada a apagar.');
+    return;
+  }
+  rodarBackup(); // lança se o backup falhar — antes de tocar em nada
+  console.log(`[limpar] a apagar ${plano.saem.length} conta(s) (utils/apagarUsuario.js, a mesma de "Excluir minha conta")...`);
+  const sairam = [];
+  const falhas = [];
+  for (const c of plano.saem) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const r = await apagarUsuario(c.id);
+      sairam.push(c);
+      console.log(`  SAIU ${c.email} · times apagados: ${r.timesApagados.length ? r.timesApagados.join(', ') : '-'} · passados adiante: ${r.timesTransferidos.length ? r.timesTransferidos.map((t) => t.slug).join(', ') : '-'} · arquivos removidos: ${r.fotosRemovidas}`);
+    } catch (e) {
+      falhas.push({ email: c.email, erro: e.message });
+      console.error(`  FALHOU ${c.email}: ${e.message}`);
+    }
+  }
+  console.log(`\n[limpar] RELATÓRIO: ${sairam.length}/${plano.saem.length} conta(s) saíram.`);
+  sairam.forEach((c) => console.log(`  ✔ ${c.email}`));
+  if (falhas.length) {
+    console.log(`[limpar] ${falhas.length} falha(s) — rodar de novo tenta só essas (as que saíram já não aparecem):`);
+    falhas.forEach((f) => console.log(`  ✖ ${f.email}: ${f.erro}`));
+  }
+}
+
+const USO = `Uso:
+  node scripts/limpar-usuarios-teste.js --do-dono                          → SIMULAÇÃO: lista o que sai, o que fica e o que é para conferir
+  node scripts/limpar-usuarios-teste.js --do-dono --incluir a@x.com,b@y.com → idem, tirando também essas contas (as "sem nome" conferidas)
+  ... --apagar --confirmo                                                   → apaga de verdade (as DUAS flags), com backup antes
+  node scripts/limpar-usuarios-teste.js --todos-menos-manter [--times-tambem] → o modo antigo (pré-lançamento): TODOS menos MANTER e as protegidas`;
+
 async function main() {
   const args = process.argv.slice(2);
   const querApagar = args.includes('--apagar');
   const confirmou = args.includes('--confirmo');
   const timesTambem = args.includes('--times-tambem');
+  const doDono = args.includes('--do-dono');
+  const todos = args.includes('--todos-menos-manter');
   if (querApagar !== confirmou) {
     console.error('[limpar] Para apagar de verdade use as DUAS flags juntas: --apagar --confirmo');
-    console.error('[limpar] Sem flags, o script só simula (dry-run) e não altera nada.');
+    console.error('[limpar] Sem elas, o script só simula (dry-run) e não altera nada.');
+    process.exit(1);
+  }
+  // Sem dizer QUEM, não faz nada: com gente de verdade no app, "todo mundo menos uma lista" deixou de ser o padrão seguro.
+  if (doDono === todos) {
+    console.error(USO);
     process.exit(1);
   }
   const execucaoReal = querApagar && confirmou;
+
+  if (doDono) {
+    const i = args.indexOf('--incluir');
+    const incluir = i >= 0 ? String(args[i + 1] || '').split(',').map((s) => s.trim()).filter(Boolean) : [];
+    const plano = await montarPlanoDoDono({ incluir });
+    imprimirPlanoDoDono(plano, { execucaoReal });
+    if (execucaoReal) await executarDoDono(plano);
+    else console.log('[limpar] simulação concluída — nada foi alterado. Mostre a lista ao dono; com o OK dele, repita com --apagar --confirmo.');
+    return;
+  }
 
   const plano = await montarPlano({ timesTambem });
   imprimirRelatorio(plano, { execucaoReal });

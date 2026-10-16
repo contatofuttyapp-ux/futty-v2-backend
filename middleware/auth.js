@@ -169,4 +169,12 @@ function invalidarSessaoDoPedido(req) {
   if (userId) sessoes.invalidarSe((user) => user.id === userId);
 }
 
-module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido, getUserCacheado, bearerToken, sessaoConhecida };
+/**
+ * Esquece todas as sessões em cache de uma conta — usado quando o Gabinete exclui a conta de OUTRA pessoa (não há o token dela no pedido).
+ * Vale para esta instância do motor; nas outras, a sessão em cache acaba em até SESSAO_CACHE_TTL_MS e a conta já não existe.
+ */
+function esquecerSessoesDe(userId) {
+  if (userId) sessoes.invalidarSe((user) => user.id === userId);
+}
+
+module.exports = { requireAuth, optionalAuth, requireSuperAdmin, invalidarSessaoDoPedido, esquecerSessoesDe, getUserCacheado, bearerToken, sessaoConhecida };

@@ -8,13 +8,14 @@ const CAMINHO = '_gabinete/ads-metrics.json';
 
 async function ler() {
   try {
-    const { data } = await supabase.storage.from(BUCKET).download(CAMINHO);
+    const { data } = await supabase.storage.from(BUCKET).download(CAMINHO, { cacheNonce: String(Date.now()) });
     if (!data) return {};
     return JSON.parse(await data.text());
   } catch { return {}; }
 }
+// Lê → soma → grava: sem cache no CDN (cacheControl '0' e cacheNonce), senão a soma partia de uma cópia velha e perdia contagens.
 async function gravar(m) {
-  await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(m)), { contentType: 'application/json', upsert: true });
+  await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(m)), { contentType: 'application/json', upsert: true, cacheControl: '0' });
 }
 
 // registar() só toca num contador em memória e o POST /api/ads/evento responde na hora; o ficheiro é

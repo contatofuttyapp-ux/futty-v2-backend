@@ -133,7 +133,7 @@ const cache = criarCache({ nome: 'gabinete', ttlMs: TTL_MS, max: 1 });
  */
 async function lerRaw() {
   try {
-    const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO), 3000, 'gabinete/operacao');
+    const { data } = await comPrazo(supabase.storage.from(BUCKET).download(CAMINHO, { cacheNonce: String(Date.now()) }), 3000, 'gabinete/operacao');
     if (!data) return { ...SEED };
     const txt = await data.text();
     return { ...SEED, ...JSON.parse(txt) };
@@ -197,7 +197,9 @@ async function gravar(obj) {
     toggles: obj?.toggles && typeof obj.toggles === 'object' ? obj.toggles : SEED.toggles,
     protecao_dados: obj?.protecao_dados && typeof obj.protecao_dados === 'object' ? obj.protecao_dados : SEED.protecao_dados,
   };
-  await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true });
+  // Sem cache no CDN (cacheControl '0' aqui e cacheNonce na leitura): senão outra instância do motor seguia lendo a versão de
+  // antes da edição por até 1 h (o mesmo defeito que fazia uma suspensão apagar a outra — utils/plataformaStore.js).
+  await supabase.storage.from(BUCKET).upload(CAMINHO, Buffer.from(JSON.stringify(limpo)), { contentType: 'application/json', upsert: true, cacheControl: '0' });
   cache.definir(CHAVE, limpo); // o dono acabou de gravar: a próxima leitura é já a nova
   return limpo;
 }

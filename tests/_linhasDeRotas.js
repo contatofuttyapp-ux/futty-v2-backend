@@ -117,6 +117,8 @@ const LINHAS = [
   L('super', 'PATCH', (m) => `/api/super/users/${m.p.memA2.id}/ban`, () => ({ ban: true })),
   L('super', 'PATCH', (m) => `/api/super/teams/${m.B.id}/suspender`, () => ({ suspensa: true })),
   L('super', 'DELETE', (m) => `/api/super/teams/${m.B.id}`),
+  // a conta descartável é @futtymock (demo das lojas, protegida): o super passa da autorização e leva o 403 da regra de negócio
+  L('super', 'DELETE', (m) => `/api/super/users/${m.p.lixo.id}`, () => ({ confirmar: 'EXCLUIR' }), { regraDeNegocio403: true }),
   L('super', 'POST', (m) => `/api/super/contas-sem-time/${m.p.fora.id}/time`, (m) => ({ team_id: m.A.id })),
   L('super', 'PUT', () => '/api/super/gabinete/operacao', () => ({})),
   L('super', 'POST', () => '/api/super/gabinete/brilhantes/ativar-pacote', (m) => ({ team_id: m.A.id })),
