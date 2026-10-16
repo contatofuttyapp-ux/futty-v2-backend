@@ -117,6 +117,7 @@ const LINHAS = [
   L('super', 'PATCH', (m) => `/api/super/users/${m.p.memA2.id}/ban`, () => ({ ban: true })),
   L('super', 'PATCH', (m) => `/api/super/teams/${m.B.id}/suspender`, () => ({ suspensa: true })),
   L('super', 'DELETE', (m) => `/api/super/teams/${m.B.id}`),
+  L('super', 'POST', (m) => `/api/super/contas-sem-time/${m.p.fora.id}/time`, (m) => ({ team_id: m.A.id })),
   L('super', 'PUT', () => '/api/super/gabinete/operacao', () => ({})),
   L('super', 'POST', () => '/api/super/gabinete/brilhantes/ativar-pacote', (m) => ({ team_id: m.A.id })),
   L('super', 'POST', () => '/api/super/gabinete/brilhantes/creditos', (m) => ({ user_id: m.p.memA.id, quantidade: 1 })),
@@ -128,6 +129,7 @@ const LINHAS = [
 const PUBLICAS_DE_PROPOSITO = [
   'POST /api/ads/evento', 'POST /api/ads/eventos', 'POST /api/telemetria', 'POST /api/avise-me', 'POST /api/compras/webhook/revenuecat',
   'POST /api/interno/pintar/:jobId', // segredo + token do Cloud Tasks
+  'POST /api/convite/:token/pendente', // sem sessão de propósito (a página do convite ainda não tem conta); limite por IP, convite válido, nada volta na resposta
 ];
 // Rotas com login, mas cuja autorização é o próprio token/id da URL (provadas à parte).
 const POR_TOKEN = ['POST /api/convite/:token/aceitar'];

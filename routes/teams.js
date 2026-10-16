@@ -3,7 +3,9 @@ const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
 const { requireAuth, optionalAuth } = require('../middleware/auth');
-const { conviteLimiter } = require('../middleware/limiters');
+const { conviteLimiter, criarLimiteDeConvitePendente } = require('../middleware/limiters');
+const { ipRealDoPedido } = require('../utils/cloudflareIps');
+const { registrarPendente, pendentesDaRede, plataformaValida } = require('../utils/convitePendente'); // o convite que atravessa a instalação
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, requireTeamMember } = require('../utils/db');
 const { obterTeams, obterPedidos } = require('../services/inicio');
@@ -19,6 +21,7 @@ const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const { escolherUniforme } = require('../utils/uniformeDoPacote');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { jogosDeFundadorDoTime, comPresencaDeFundador, presencasPorPessoa } = require('../utils/presencaDeFundador');
+const { idsDosJogosQueAconteceram } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código>
 const { MSG_ARTILHEIRO_PRECISA_DOS_GOLS, combinacaoDePremiosCoerente } = require('../utils/premiosDoTime'); // o artilheiro depende dos gols
@@ -769,9 +772,9 @@ router.get(
       // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
       supabase.from('votes').select('para_user_id, nota').eq('team_id', team.id),
-      // Últimos 5 jogos da equipa (mais recente → mais antigo) para o histórico
-      // de presenças. Um jogador esteve presente se tem game_players.confirmado.
-      supabase.from('games').select('id, data, created_at').eq('team_id', team.id).order('created_at', { ascending: false }).limit(5),
+      // Últimos 5 jogos que já começaram (mais recente → mais antigo) para o histórico de presenças. Um jogador esteve presente se tem
+      // game_players.confirmado; jogo que ainda não aconteceu fica fora (confirmar é "vou", não "fui").
+      supabase.from('games').select('id, data, created_at').eq('team_id', team.id).lte('data', new Date().toISOString()).order('data', { ascending: false }).limit(5),
       // Agregados VIVOS (mesma fonte/critério do ranking — uma só verdade).
       agregadosDaEquipa(team.id),
       idsQueSoOrganizam(team.id),
@@ -786,10 +789,7 @@ router.get(
 
     // Presenças = jogos em que a pessoa ESTEVE: confirmada num jogo já encerrado e não cancelado (a mesma conta do perfil do
     // jogador). Antes a seção "Presença" das Estatísticas listava vitórias.
-    const agora = Date.now();
-    const idsEncerrados = (todosOsJogos || [])
-      .filter((g) => !(g.cancelado || g.status === 'cancelado') && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora)))
-      .map((g) => g.id);
+    const idsEncerrados = idsDosJogosQueAconteceram(todosOsJogos);
     let presencasTotais = {}; // user_id -> n de jogos
     if (idsEncerrados.length) {
       const { data: confirmadas } = await supabase.from('game_players').select('game_id, user_id').in('game_id', idsEncerrados).eq('confirmado', true);
@@ -1266,6 +1266,82 @@ router.post(
   })
 );
 
+const convitePendenteLimiter = criarLimiteDeConvitePendente();
+
+/**
+ * POST /api/convite/:token/pendente — a página do convite abriu no navegador de um celular (público, sem sessão). Body:
+ * { plataforma: 'ios' | 'android' }. O motor guarda o convite com a rede de quem abriu (utils/convitePendente.js) por 2 h, para o
+ * app o achar depois da instalação. Sempre 204: a resposta não diz se o convite existe nem se foi guardado.
+ */
+router.post(
+  '/api/convite/:token/pendente',
+  convitePendenteLimiter,
+  asyncHandler(async (req, res) => {
+    const daLoja = plataformaValida(req.body?.plataforma);
+    if (daLoja) {
+      const convite = await convitePorParametro(supabase, req.params.token, 'id, expires_at');
+      if (convite && new Date(convite.expires_at).getTime() >= Date.now()) {
+        await registrarPendente({ conviteId: convite.id, ip: ipRealDoPedido(req), plataforma: daLoja });
+      }
+    }
+    res.status(204).end();
+  })
+);
+
+/**
+ * GET /api/convite-pendente?plataforma=ios|android — quem acabou de se cadastrar pergunta se abriu um convite no navegador deste
+ * celular. Devolve { convites: [{ token, team, convidadoPor }] }: os convites válidos da mesma rede e plataforma nas últimas 2 h, um por
+ * time, sem os times de que a pessoa já é membro. `token` é o código curto (ou o token longo) — o app aceita com o POST de sempre.
+ * A plataforma vem da query; sem ela, do cabeçalho X-Futty-Plataforma do app.
+ */
+router.get(
+  '/api/convite-pendente',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const daLoja = plataformaValida(req.query.plataforma) || plataformaValida(req.get('x-futty-plataforma'));
+    const ids = daLoja ? await pendentesDaRede({ ip: ipRealDoPedido(req), plataforma: daLoja }) : [];
+    if (!ids.length) return res.json({ convites: [] });
+
+    const agora = Date.now();
+    const [{ data: convites }, { data: vinculos }, codigos] = await Promise.all([
+      supabase.from('convites').select('id, token, team_id, criado_por, expires_at').in('id', ids),
+      supabase.from('team_members').select('team_id').eq('user_id', req.user.id),
+      codigosDosConvites(supabase, ids),
+    ]);
+    const jaSou = new Set((vinculos || []).map((v) => v.team_id));
+    const ordem = new Map(ids.map((id, i) => [id, i]));
+    const vivos = (convites || [])
+      .filter((c) => new Date(c.expires_at).getTime() >= agora && !jaSou.has(c.team_id))
+      .sort((a, b) => ordem.get(a.id) - ordem.get(b.id));
+    // Um por time: o mais recente (dois links do mesmo time são o mesmo convite para quem chega).
+    const porTime = new Map();
+    for (const c of vivos) if (!porTime.has(c.team_id)) porTime.set(c.team_id, c);
+    const escolhidos = [...porTime.values()];
+    if (!escolhidos.length) return res.json({ convites: [] });
+
+    const { equipas: suspensas } = await plataforma.conjuntos();
+    const [{ data: times }, { data: quem }] = await Promise.all([
+      supabase.from('teams').select('id, nome, slug, logo_url, cor_fundo').in('id', escolhidos.map((c) => c.team_id)),
+      supabase.from('users').select('id, nome, nome_jogador').in('id', escolhidos.map((c) => c.criado_por).filter(Boolean)),
+    ]);
+    const timePorId = new Map((times || []).map((t) => [t.id, t]));
+    const quemPorId = new Map((quem || []).map((u) => [u.id, u]));
+    res.json({
+      convites: escolhidos
+        .filter((c) => timePorId.has(c.team_id) && !suspensas.has(c.team_id))
+        .map((c) => {
+          const t = timePorId.get(c.team_id);
+          const u = quemPorId.get(c.criado_por);
+          return {
+            token: codigos[c.id] || c.token,
+            team: { id: t.id, nome: t.nome, slug: t.slug, logo_url: t.logo_url || null, cor_fundo: t.cor_fundo || null },
+            convidadoPor: u ? nomePublico(u) : null,
+          };
+        }),
+    });
+  })
+);
+
 /**
  * Chegou pedido de entrada → push para os admins do time ("Fulano quer entrar no <time>"), que leva à aba
  * Elenco, onde se aceita. Tipo "pedidos" em Perfil → Notificações: quem desligou não recebe. Nunca lança.
@@ -1585,9 +1661,11 @@ router.get(
     // Jogos da equipa.
     const { data: games } = await supabase
       .from('games')
-      .select('id, data, local, status')
+      .select('id, data, local, status, cancelado')
       .eq('team_id', team.id);
     const ativos = (games || []).filter((g) => g.status !== 'cancelado');
+    // "Mais presente" e a média de confirmações só contam jogo que já aconteceu (confirmar é "vou", não "fui").
+    const aconteceram = new Set(idsDosJogosQueAconteceram(games));
 
     // Membros (com stats + dados do utilizador).
     const { data: members } = await supabase
@@ -1608,12 +1686,13 @@ router.get(
       for (const p of gp || []) {
         if (!p.confirmado) continue;
         confByGame[p.game_id] = (confByGame[p.game_id] || 0) + 1;
-        confByUser[p.user_id] = (confByUser[p.user_id] || 0) + 1;
+        if (aconteceram.has(p.game_id)) confByUser[p.user_id] = (confByUser[p.user_id] || 0) + 1;
       }
     }
 
-    const totalConf = ativos.reduce((s, g) => s + (confByGame[g.id] || 0), 0);
-    const media_confirmacoes = ativos.length ? Math.round((totalConf / ativos.length) * 10) / 10 : 0;
+    const jaJogados = ativos.filter((g) => aconteceram.has(g.id));
+    const totalConf = jaJogados.reduce((s, g) => s + (confByGame[g.id] || 0), 0);
+    const media_confirmacoes = jaJogados.length ? Math.round((totalConf / jaJogados.length) * 10) / 10 : 0;
 
     // Artilheiro: membro com mais gols.
     let artilheiro = null;

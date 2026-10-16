@@ -186,22 +186,22 @@ const LIMITES_IA_APOSENTADO = { free: 2, pro: 10, elite: 20 };
 const PERFIL_COLS =
   'id, nome, email, avatar_url, foto_url, nome_jogador, cor_preferida, telefone, avatar_ia_creditos, cor_frame, fundo_figurinha, plan, avatar_ia_mes, avatar_ia_reset, is_super_admin, birthdate, kit_ativo, mostrar_rosto_publico, avatar_generico';
 
-// O Futty é para maiores de 18 anos (utils/idade.js). "Cadastro em curso" = o
+// O Futty é para quem tem 13 anos ou mais (IDADE_MINIMA, utils/idade.js). "Cadastro em curso" = o
 // onboarding dia-1 ainda não foi concluído: é aí que a data chega (e-mail: no formulário; Google/Apple:
 // no passo "Quando você nasceu?"). Contas que já existiam (onboarding concluído) o motor não apaga:
-// com data menor de 18, o app mostra a tela com "Excluir minha conta".
+// com data abaixo da idade mínima, o app mostra a tela com "Excluir minha conta".
 function cadastroEmCurso(user) {
   return user?.user_metadata?.onboarding_completo !== true;
 }
 
-// Menor de 18 no cadastro: a conta que o Google/Apple (ou um cadastro forçado) acabou de criar não
+// Abaixo da idade mínima no cadastro: a conta que o Google/Apple (ou um cadastro forçado) acabou de criar não
 // fica — apaga-se tudo o que ela tiver (em geral nada além da linha e, talvez, uma foto) e a sessão
 // deixa de valer na hora.
 async function recusarMenor(req) {
-  console.log('[cadastro] menor de 18 no cadastro: conta apagada', { userId: req.user.id });
+  console.log('[cadastro] abaixo da idade mínima no cadastro: conta apagada', { userId: req.user.id });
   await apagarUsuario(req.user.id);
   invalidarSessaoDoPedido(req);
-  throw new HttpError(403, MSG_MENOR, 'MENOR_DE_18');
+  throw new HttpError(403, MSG_MENOR, 'MENOR_DE_IDADE');
 }
 
 /**
@@ -297,7 +297,7 @@ router.patch(
         if (!v) throw new HttpError(400, 'Data de nascimento inválida.');
         const atual = await getUserById(req.user.id, 'birthdate');
         if (atual && atual.birthdate) throw new HttpError(400, 'A data de nascimento já está definida.', 'NASCIMENTO_JA_DEFINIDO');
-        // No cadastro, menor de 18 não fica com conta.
+        // No cadastro, abaixo da idade mínima não fica com conta.
         if (cadastroEmCurso(req.user) && menorQueIdadeMinima(v)) await recusarMenor(req);
         patch.birthdate = v;
       }
@@ -354,7 +354,7 @@ router.post(
   requireAuth,
   asyncHandler(async (req, res) => {
     // A data do cadastro por e-mail (metadata → users.birthdate) ou a do
-    // passo do onboarding. Menor de 18: a conta não fica. Sem data nenhuma a conclusão passa — o
+    // passo do onboarding. Abaixo da idade mínima: a conta não fica. Sem data nenhuma a conclusão passa — o
     // app da loja que ainda não tem o passo (iOS 33, Android 15) não pode ficar preso aqui; o app
     // novo não deixa concluir sem ela. Quando só houver builds novos nas lojas, exigir aqui.
     const perfilIdade = await getUserById(req.user.id, 'birthdate');

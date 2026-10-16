@@ -15,6 +15,7 @@ const { enviarNotificacao } = require('./push');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { jogadoresDoCampeao, resultadoDoJogador } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { jogosDeFundadorDoTime, comPresencaDeFundador, presencasPorPessoa } = require('../utils/presencaDeFundador');
+const { jogoAconteceu, idsDosJogosQueAconteceram } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 
 const router = express.Router();
 
@@ -30,7 +31,7 @@ function notaValida(n) {
  * Constrói o ranking do time (score ponderado, separado por categoria).
  * @param {object} [opts]
  * @param {Promise} [opts.jogosPromessa] leitura de `games` deste time já em voo
- *   (tem de trazer COLUNAS_JOGOS) — quem também precisa dos jogos partilha a sua
+ *   (tem de trazer COLUNAS_JOGOS, data, status e cancelado) — quem também precisa dos jogos partilha a sua
  *   em vez de mandar ler a mesma tabela outra vez.
  * @param {Promise<string[]>} [opts.jogosFundadorPromessa] os jogos de presença de fundador
  *   (utils/presencaDeFundador.js) já em voo, pelo mesmo motivo.
@@ -50,11 +51,12 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
       .eq('team_id', teamId),
     // Votos do time (todos) — média + o meu voto por jogador.
     supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
-    jogosPromessa || supabase.from('games').select(COLUNAS_JOGOS).eq('team_id', teamId),
+    jogosPromessa || supabase.from('games').select(`${COLUNAS_JOGOS}, data, status, cancelado`).eq('team_id', teamId),
     idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
     jogosFundadorPromessa || jogosDeFundadorDoTime(teamId), // presença de fundador: todo membro presente nos jogos até a data de corte do time
   ]);
-  const gameIds = (jogos || []).map((g) => g.id);
+  // A presença só conta em jogo que já aconteceu: confirmar num jogo de amanhã ainda não é ter jogado.
+  const gameIds = idsDosJogosQueAconteceram(jogos);
 
   // Os golos (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
   // vez de em série.
@@ -185,12 +187,8 @@ async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosR
     // Os mesmos agregados do ranking (uma verdade só): vitórias, empates, derrotas, gols, artilharia e destaques da fonte.
     agregadosDaEquipa(teamId, { jogos: games }),
   ]);
-  const agora = Date.now();
   const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
-  const presenca = (parts || []).filter((p) => {
-    const g = gameById[p.game_id];
-    return p.confirmado && !!g && !(g.cancelado || g.status === 'cancelado') && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-  }).length;
+  const presenca = (parts || []).filter((p) => p.confirmado && jogoAconteceu(gameById[p.game_id])).length;
   const notas = (votosRecebidos || []).map((v) => Number(v.nota)).filter(Number.isFinite);
   const notaInterna = notas.length >= MIN_VOTOS ? notas.reduce((a, b) => a + b, 0) / notas.length : null;
   return {
@@ -359,17 +357,13 @@ router.get(
     if (!mostrarGols) { radar.gols = null; radar.artilharia = null; }
 
     const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
-    const agora = Date.now();
+    // Só jogo que já aconteceu entra nos "jogos" e no histórico: presença num jogo futuro é "vou", não "joguei".
     const partSet = new Set();
     let jogosConfirmados = 0;
     for (const p of parts || []) {
+      if (!jogoAconteceu(gameById[p.game_id])) continue;
       partSet.add(p.game_id);
-      // Só conta jogos já ENCERRADOS — presença num jogo futuro não
-      // infla a estatística "jogos".
-      const g = gameById[p.game_id];
-      const cancelado = !!g?.cancelado || g?.status === 'cancelado';
-      const encerrado = !!g && !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-      if (p.confirmado && encerrado) jogosConfirmados += 1;
+      if (p.confirmado) jogosConfirmados += 1;
     }
 
     // 'vitoria' | 'empate' | 'derrota' pelo campeão; null quando o jogo não tem resultado (ou ele não esteve nos times) — nunca "empate" por falta de dado.

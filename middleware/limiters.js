@@ -243,6 +243,21 @@ function criarLimiteDeAviseMe({ max = 10 } = {}) {
 }
 
 /**
+ * POST /api/convite/:token/pendente: a página do convite avisa o motor que abriu no celular. Pública, sem sessão: conta pelo IP
+ * real, 30 por hora (um time inteiro na mesma quadra abrindo o mesmo link cabe; quem martela a rota para encher a tabela, não).
+ */
+function criarLimiteDeConvitePendente({ max = 30 } = {}) {
+  return rateLimit({
+    windowMs: HORA,
+    max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveDoPedido,
+    message: { error: 'Muitos pedidos. Tente de novo mais tarde.' },
+  });
+}
+
+/**
  * POST /api/compras/webhook/revenuecat: sem sessão — a autorização é o segredo
  * no header. Conta por IP real, 120 por minuto.
  */
@@ -262,6 +277,7 @@ module.exports = {
   criarLimiteDeTelemetria,
   criarLimiteDeAviseMe,
   criarLimiteDeWebhook,
+  criarLimiteDeConvitePendente,
   conviteLimiter,
   pushAdminLimiter,
   denunciaLimiter,

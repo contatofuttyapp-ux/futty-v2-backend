@@ -17,6 +17,8 @@ const { supabase } = require('../utils/db');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const plataforma = require('../utils/plataformaStore');
 const { cotaBytesPorTime, bytesUsadosPorTodosOsTimes } = require('../utils/resenhaCota');
+const selosCache = require('../utils/selosCache');
+const { enviarNotificacao } = require('./push');
 
 const router = express.Router();
 
@@ -183,6 +185,74 @@ router.delete(
     if (error) throw new HttpError(500, error.message);
 
     res.json({ ok: true });
+  })
+);
+
+/**
+ * GET /api/super/contas-sem-time — quem criou conta e não está em time nenhum (o convite que se perdeu, o cadastro feito antes de
+ * abrir o link). Devolve { contas, times }: as contas da mais nova para a mais antiga e a lista de times para o "Pôr no time…".
+ * Só dados de plataforma (nome, apelido, e-mail, quando entrou) — nada do conteúdo da pessoa.
+ */
+router.get(
+  '/api/super/contas-sem-time',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const [users, vinculos, teams, { users: suspensos, equipas: suspensas }] = await Promise.all([
+      lerTudo(() => supabase.from('users').select('id, nome, nome_jogador, email, created_at').order('created_at', { ascending: false }).order('id')),
+      lerTudo(() => supabase.from('team_members').select('user_id').order('id')),
+      lerTudo(() => supabase.from('teams').select('id, slug, nome').order('nome', { ascending: true }).order('id')),
+      plataforma.conjuntos(),
+    ]);
+    const comTime = new Set(vinculos.map((v) => v.user_id));
+    res.json({
+      contas: users.filter((u) => !comTime.has(u.id)).map((u) => ({ ...u, suspenso: suspensos.has(u.id) })),
+      times: teams.filter((t) => !suspensas.has(t.id)),
+    });
+  })
+);
+
+/**
+ * POST /api/super/contas-sem-time/:userId/time — põe a conta no time escolhido, como membro (o mesmo que aceitar o convite). Body:
+ * { team_id }. Quem entrou recebe o push "Você entrou no time …", que abre o time com as boas-vindas. Conta que já é do time: 409.
+ */
+router.post(
+  '/api/super/contas-sem-time/:userId/time',
+  requireSuperAdmin,
+  asyncHandler(async (req, res) => {
+    const teamId = String(req.body?.team_id || '');
+    if (!teamId || teamId.length > 64) throw new HttpError(400, 'Escolha o time.');
+    const [{ data: u }, { data: team }] = await Promise.all([
+      supabase.from('users').select('id').eq('id', req.params.userId).maybeSingle(),
+      supabase.from('teams').select('id, slug, nome').eq('id', teamId).maybeSingle(),
+    ]);
+    if (!u) throw new HttpError(404, 'Conta não encontrada.');
+    if (!team) throw new HttpError(404, 'Time não encontrado.');
+
+    const { error } = await supabase.from('team_members').insert({ user_id: u.id, team_id: team.id, role: 'member' });
+    if (error) {
+      if (error.code === '23505') throw new HttpError(409, `A conta já é do ${team.nome}.`);
+      throw new HttpError(500, error.message);
+    }
+    selosCache.invalidarMembro(team.id, u.id);
+
+    // O push nunca derruba a entrada (já gravada) e não segura o Gabinete mais que 4 s.
+    let teto;
+    try {
+      await Promise.race([
+        Promise.resolve(enviarNotificacao([u.id], {
+          title: `Você entrou no time ${team.nome}!`,
+          body: 'Confirme presença e veja o próximo jogo.',
+          url: `/time/${team.slug}?entrou=1`,
+        })),
+        new Promise((resolve) => { teto = setTimeout(resolve, 4000); }),
+      ]);
+    } catch (e) {
+      console.warn('[super] push de "Pôr no time" falhou (a entrada foi gravada):', e?.message || e);
+    } finally {
+      clearTimeout(teto);
+    }
+
+    res.status(201).json({ ok: true, team: { id: team.id, slug: team.slug, nome: team.nome } });
   })
 );
 

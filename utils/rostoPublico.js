@@ -1,9 +1,9 @@
 // Futty v2.0 — Privacidade do rosto nas páginas públicas /p/ (Opção B aprovada).
 // REGRA DURA (fail-closed): um rosto só se revela numa partilha pública SE o dono
-// tiver IDADE_MINIMA anos (18, utils/idade.js; birthdate preenchida) E tiver o consentimento
+// tiver MAIORIDADE (18, utils/idade.js; birthdate preenchida) E tiver o consentimento
 // ligado (mostrar_rosto_publico, default TRUE). Sem 18 confirmados · sem birthdate · sem
-// consentimento · convidado sem conta → SILHUETA, sempre. A idade manda mesmo com a flag ligada.
-// O app é 18+: esta é a 2ª linha, para nunca depender só do cadastro.
+// consentimento · convidado sem conta → SILHUETA, sempre. A idade manda mesmo com a flag ligada:
+// o app aceita a partir de 13 anos, e o rosto de quem ainda não tem 18 nunca sai numa página pública.
 //
 // Mecânica: o times_resultado é um snapshot congelado com avatar_url = URL público
 // do bucket privado. Para quem PODE revelar, reescrevemos para um URL do PROXY
@@ -11,11 +11,11 @@
 // despublicarPayload, logo sobrevive à varredura do middleware. Para quem não pode,
 // pomos '' → o frontend cai na silhueta-casa. O middleware fica INTOCADO.
 const { parseUrlPublico, urlDoProxy } = require('./storage');
-const { temIdadeMinima } = require('./idade');
+const { temMaioridade } = require('./idade');
 
-/** IDADE_MINIMA anos ou mais hoje. Sem birthdate (ou ilegível) → false (fail-closed). Mesma régua do cadastro. */
+/** 18 anos ou mais hoje. Sem birthdate (ou ilegível) → false (fail-closed). */
 function ehAdulto(birthdate) {
-  return temIdadeMinima(birthdate);
+  return temMaioridade(birthdate);
 }
 
 /** Pode revelar o rosto? Adulto E consentimento (default TRUE se ausente). */

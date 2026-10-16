@@ -1,12 +1,17 @@
-// Futty v2.0 — A régua de idade do cadastro (o Futty é 18+ de ponta a ponta).
+// Futty v2.0 — As réguas de idade.
 //
-// O Futty é para maiores de 18 anos. A conta não nasce abaixo disso: o app pergunta a data no cadastro
-// (e-mail) e no onboarding (Google/Apple, que não trazem a data), e o motor confere de novo — ver
-// PATCH /api/me e POST /api/me/onboarding-completo. Conta que já existia com data menor de 18 não é
-// apagada pelo motor: o app mostra a tela com "Excluir minha conta". O número mora SÓ aqui (e no
-// espelho frontend/src/utils/idade.js); rostoPublico.js e services/inicio.js usam estas funções.
+// IDADE_MINIMA é a do CADASTRO: o Futty é para quem tem 13 anos ou mais. A conta não nasce abaixo disso: o app pergunta a data no
+// cadastro (e-mail) e no onboarding (Google/Apple, que não trazem a data), e o motor confere de novo — ver PATCH /api/me e
+// POST /api/me/onboarding-completo. Conta que já existia com data abaixo da mínima não é apagada pelo motor: o app mostra a tela com
+// "Excluir minha conta".
+//
+// MAIORIDADE é outra régua, a das proteções de quem ainda não tem 18: o rosto nas páginas públicas (utils/rostoPublico.js) e a
+// publicidade 18+ (services/inicio.js) só valem para quem tem 18 anos confirmados pela data — sem data, nunca.
+//
+// Os números moram SÓ aqui (e no espelho frontend/src/utils/idade.js).
 
-const IDADE_MINIMA = 18;
+const IDADE_MINIMA = 13;
+const MAIORIDADE = 18;
 
 /** "AAAA-MM-DD" válida, no passado e depois de 1900 → a própria string; qualquer outra coisa → null. */
 function dataDeNascimentoValida(valor) {
@@ -33,12 +38,12 @@ function menorQueIdadeMinima(nascimento, hoje = new Date()) {
   return v != null && idadeEm(v, hoje) < IDADE_MINIMA;
 }
 
-/** true se a data é válida e a pessoa já tem IDADE_MINIMA anos. Sem data ou data inválida → false (fail-closed). */
-function temIdadeMinima(nascimento, hoje = new Date()) {
+/** true se a data é válida e a pessoa já tem MAIORIDADE anos. Sem data ou data inválida → false (fail-closed). */
+function temMaioridade(nascimento, hoje = new Date()) {
   const v = dataDeNascimentoValida(nascimento);
-  return v != null && idadeEm(v, hoje) >= IDADE_MINIMA;
+  return v != null && idadeEm(v, hoje) >= MAIORIDADE;
 }
 
-const MSG_MENOR = 'O Futty é para maiores de 18 anos.';
+const MSG_MENOR = 'O Futty é para quem tem 13 anos ou mais.';
 
-module.exports = { IDADE_MINIMA, MSG_MENOR, dataDeNascimentoValida, idadeEm, menorQueIdadeMinima, temIdadeMinima };
+module.exports = { IDADE_MINIMA, MAIORIDADE, MSG_MENOR, dataDeNascimentoValida, idadeEm, menorQueIdadeMinima, temMaioridade };

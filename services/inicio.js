@@ -10,7 +10,7 @@ const { HttpError } = require('../utils/http');
 const { golosDoJogador } = require('../utils/agregados');
 const { notaParaExibir } = require('../utils/helpers');
 const { ehAdulto } = require('../utils/rostoPublico');
-const { temIdadeMinima } = require('../utils/idade');
+const { temMaioridade } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const gabineteStore = require('../utils/gabineteStore');
 const campeonatoStore = require('../utils/campeonatoStore'); // o campeonato novo no Início
@@ -19,6 +19,7 @@ const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { jogosDeFundadorDaPessoa } = require('../utils/presencaDeFundador'); // os jogos do "N jogos" do Início
+const { jogoAconteceu } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 const { normalizarFuso, lerComFuso, temColuna } = require('../utils/fuso');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo no rótulo e na lista: uma regra só
 
@@ -78,10 +79,10 @@ async function marcarFigurinhaStatus(userId, status) {
   }
 }
 
-// Maioridade (IDADE_MINIMA, 18) calculada em runtime pela régua do cadastro (utils/idade.js):
-// adulto se a data é válida e a pessoa já fez 18 anos. Sem data → false (fail-closed).
+// Maioridade (MAIORIDADE, 18 — utils/idade.js; o cadastro aceita a partir de 13): adulto se a data é válida e a
+// pessoa já fez 18 anos. Sem data → false (fail-closed). É o que libera a publicidade 18+.
 function calcIsAdult(birthdate) {
-  return temIdadeMinima(birthdate);
+  return temMaioridade(birthdate);
 }
 
 // Figurinha automática do cadastro: 'gerando' preso há mais de 3min
@@ -126,12 +127,7 @@ async function obterMe(user, { base = null } = {}) {
       : jogosDeFundadorDaPessoa(userId),
   ]);
 
-  const agora = Date.now();
-  const jogados = (jogosRows || []).filter((r) => {
-    const g = r.games;
-    if (!g || g.cancelado || g.status === 'cancelado') return false;
-    return g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora);
-  }).map((r) => r.game_id);
+  const jogados = (jogosRows || []).filter((r) => jogoAconteceu(r.games)).map((r) => r.game_id);
   // Jogos diferentes: a presença confirmada e a de fundador do mesmo jogo contam uma vez.
   const jogos = new Set([...jogados, ...jogosFundador]).size;
 
@@ -459,14 +455,11 @@ async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
     // ENCERRADOS em que ambos estiveram confirmados.
     supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
   ]);
-  const agora = Date.now();
   // Primeiro os jogos encerrados em que EU estive; depois, nesses mesmos jogos,
   // quem mais esteve — é essa gente que fica por avaliar.
   const meusJogos = [];
   for (const g of jogosDasEquipas || []) {
-    const cancelado = !!g.cancelado || g.status === 'cancelado';
-    const encerrado = !cancelado && (g.status === 'terminado' || (!!g.data && new Date(g.data).getTime() <= agora));
-    if (!encerrado) continue;
+    if (!jogoAconteceu(g)) continue;
     const presencas = g.game_players || [];
     if (presencas.some((p) => p.user_id === userId && p.confirmado)) meusJogos.push({ teamId: g.team_id, presencas });
   }

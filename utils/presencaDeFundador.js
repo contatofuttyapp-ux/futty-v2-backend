@@ -11,6 +11,7 @@
 // Sem a migração 083 a coluna não existe: a leitura falha, a regra fica desligada (um aviso no log) e o resto segue como era.
 const { supabase } = require('./db');
 const { partesNoFuso, normalizarFuso } = require('./fuso');
+const { jogoAconteceu } = require('./jogoAconteceu');
 
 let avisou = false;
 function avisar(mensagem) {
@@ -39,9 +40,8 @@ function jogosDeFundador(jogos, corte, agora = Date.now()) {
   if (!corte) return [];
   return (jogos || [])
     .filter((g) => {
-      if (!g?.id || !g.data || g.cancelado || g.status === 'cancelado') return false;
-      const inicio = new Date(g.data).getTime();
-      if (!Number.isFinite(inicio) || inicio > agora) return false;
+      // O dia do corte é o dia MARCADO do jogo; e ele só conta depois do horário (a mesma regra de toda presença, utils/jogoAconteceu.js).
+      if (!g?.id || !g.data || !jogoAconteceu(g, agora)) return false;
       const dia = diaDoJogo(g.data, corte.fuso);
       return !!dia && dia <= corte.ate;
     })
