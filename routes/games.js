@@ -6,6 +6,10 @@ const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRating
 const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // o padrão do time
 const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
+const { pedidoNaReguaDe10 } = require('../utils/notaDoVoto');
+// O número de cada jogador no sorteio (rating, rating_medio) é uma foto da nota naquele dia. Resultado com esta marca está na régua de
+// 0 a 10; o que foi gravado antes dela está em estrelas (0,5 a 5) e as telas leem × 2.
+const ESCALA_NOTA = 10;
 const { executarSorteio } = require('../utils/sorteio');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
@@ -627,6 +631,7 @@ router.post(
     const tr = {
       num_times: times.length,
       total_jogadores: ids.length + todos.filter((j) => !j.user_id).length,
+      escala_nota: ESCALA_NOTA,
       manual: true, // sem seed → sem cerimónia/replay (o frontend gateia por seed)
       times,
       reservas,
@@ -770,6 +775,7 @@ router.post(
       total_jogadores: confirmados.length + convidados.length,
       convidados_total: convidados.length,
       seed: sorteio.seed, // replay EXACTO da animação (SPEC-SORTEIO §10)
+      escala_nota: ESCALA_NOTA,
       avisos,
       times,
       reservas: sorteio.reservas,
@@ -856,6 +862,8 @@ router.patch(
     // um app que mandasse o resultado sem ele apagaria a marca do ajuste.
     const novo = resultadoAjustado(game.times_resultado, { times: tr.times, reservas }, await quemFez(req.user.id), new Date().toISOString());
     novo.total_jogadores = tr.times.reduce((s, t) => s + (t.jogadores || []).length, 0);
+    // As telas novas mandam o número de cada jogador já na régua de 10 (o sorteio antigo, em estrelas, elas leem × 2 antes de editar).
+    if (pedidoNaReguaDe10(req)) novo.escala_nota = ESCALA_NOTA;
 
     const { data: updated, error } = await supabase
       .from('games')

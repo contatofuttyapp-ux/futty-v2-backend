@@ -1,21 +1,11 @@
 // Futty v2.0 — Funções puras reutilizáveis (sem acesso à base de dados).
 
-// Rating por defeito de quem ainda não tem votos (meio da escala 1-5).
-const RATING_DEFAULT = 3;
+// Nota de quem ainda não tem voto, na régua de 0 a 10: o 3 das antigas estrelas × 2. No sorteio é o que separa quem ainda não
+// recebeu voto (e o convidado sem app) dos outros — com o mesmo lugar relativo de antes, o sorteio continua o mesmo.
+const RATING_DEFAULT = 6;
 
 /** Arredonda a 2 casas decimais. */
 const round2 = (n) => Math.round(n * 100) / 100;
-
-/**
- * Converte a média interna dos votos (0.5-5) para a nota exibida (1-10) com
- * boost de 15% e tecto de 10.0. Devolve null se não houver média.
- */
-function notaParaExibir(mediaInterna) {
-  if (mediaInterna == null) return null;
-  const raw = mediaInterna * 2 * 1.15;
-  const capped = Math.min(raw, 10);
-  return Math.round(capped * 10) / 10;
-}
 
 /**
  * Gera um slug a partir de um nome (sem acentos, minúsculas, sufixo aleatório).
@@ -49,7 +39,6 @@ function periodoCutoffISO(periodo) {
 module.exports = {
   RATING_DEFAULT,
   round2,
-  notaParaExibir,
   slugify,
   periodoCutoffISO,
 };

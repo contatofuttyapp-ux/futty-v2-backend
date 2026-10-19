@@ -14,7 +14,8 @@ const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
 const { verificarImagemReal } = require('../utils/imagemReal');
 const { nomePublico } = require('../utils/nomePublico');
 const { resolverCidade, lerEscolhaDaLista, normalizarCidade, condicaoPorCidade, lerBairro, resolverBairro } = require('../utils/cidade');
-const { slugify, notaParaExibir } = require('../utils/helpers');
+const { slugify } = require('../utils/helpers');
+const { colunaDaNota, notaDoVoto, mediaDasNotas } = require('../utils/notaDoVoto');
 const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
@@ -769,9 +770,9 @@ router.get(
         .from('team_members')
         .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
         .eq('team_id', team.id),
-      // Nota média exibida (1-10): média dos votos recebidos na equipa, com o
+      // Nota média exibida (0 a 10): média dos votos recebidos na equipa, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
-      supabase.from('votes').select('para_user_id, nota').eq('team_id', team.id),
+      supabase.from('votes').select(`para_user_id, ${await colunaDaNota()}`).eq('team_id', team.id),
       // Últimos 5 jogos que já começaram (mais recente → mais antigo) para o histórico de presenças. Um jogador esteve presente se tem
       // game_players.confirmado; jogo que ainda não aconteceu fica fora (confirmar é "vou", não "fui").
       supabase.from('games').select('id, data, created_at').eq('team_id', team.id).lte('data', new Date().toISOString()).order('data', { ascending: false }).limit(5),
@@ -802,7 +803,7 @@ router.get(
     const votosAgg = {}; // user_id -> { sum, count }
     for (const v of votos || []) {
       const a = (votosAgg[v.para_user_id] = votosAgg[v.para_user_id] || { sum: 0, count: 0 });
-      a.sum += Number(v.nota);
+      a.sum += notaDoVoto(v) ?? 0;
       a.count += 1;
     }
 
@@ -829,7 +830,7 @@ router.get(
       }));
       const presentes = presencas.filter((p) => p.presente).length;
       const va = votosAgg[uid];
-      const notaMedia = va && va.count >= MIN_VOTOS ? notaParaExibir(va.sum / va.count) : null;
+      const notaMedia = va && va.count >= MIN_VOTOS ? mediaDasNotas(va.sum, va.count) : null;
       return {
         id: m.id,
         user_id: uid,

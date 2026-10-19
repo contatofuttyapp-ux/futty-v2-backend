@@ -1,6 +1,6 @@
 // Futty v2.0 — Ranking + perfil + votação (modelo definitivo).
-// 1 voto por (votante, votado, time), permanente/atualizável, meias estrelas.
-// Sem jogo de votação, sem períodos. Nota exibida em escala 6-10.
+// 1 voto por (votante, votado, time), permanente/atualizável, nota de 0 a 10 (utils/notaDoVoto.js).
+// Sem jogo de votação, sem períodos. A nota exibida é a média do que foi dado, na mesma régua.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { marcarFase, medir } = require('../middleware/tempo');
@@ -10,7 +10,8 @@ const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inic
 const { agregadosDaEquipa, COLUNAS_JOGOS } = require('../utils/agregados');
 const { avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
 const selosCache = require('../utils/selosCache');
-const { round2, notaParaExibir } = require('../utils/helpers');
+const { round2 } = require('../utils/helpers');
+const { colunaDaNota, notaDoVoto, camposDaNota, notaDoPedido, notaParaOPedido, mediaDasNotas } = require('../utils/notaDoVoto');
 const { enviarNotificacao } = require('./push');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { jogadoresDoCampeao, resultadoDoJogador } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
@@ -21,11 +22,6 @@ const router = express.Router();
 
 // Mínimo de votos para a nota aparecer.
 const MIN_VOTOS = 3;
-
-// nota válida: número entre 0.5 e 5 em incrementos de 0.5.
-function notaValida(n) {
-  return Number.isFinite(n) && n >= 0.5 && n <= 5 && Number.isInteger(n * 2);
-}
 
 /**
  * Constrói o ranking do time (score ponderado, separado por categoria).
@@ -38,6 +34,7 @@ function notaValida(n) {
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
 async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorPromessa } = {}) {
+  const colunaNota = await colunaDaNota();
   // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado dos outros, então saem
   // juntos em vez de awaits em série.
   const [{ data: membros }, { data: votos }, { data: jogos }, organizam, jogosFundador] = await Promise.all([
@@ -50,7 +47,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
       .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, avatar_generico, cor_frame )')
       .eq('team_id', teamId),
     // Votos do time (todos) — média + o meu voto por jogador.
-    supabase.from('votes').select('para_user_id, de_user_id, nota').eq('team_id', teamId),
+    supabase.from('votes').select(`para_user_id, de_user_id, ${colunaNota}`).eq('team_id', teamId),
     jogosPromessa || supabase.from('games').select(`${COLUNAS_JOGOS}, data, status, cancelado`).eq('team_id', teamId),
     idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
     jogosFundadorPromessa || jogosDeFundadorDoTime(teamId), // presença de fundador: todo membro presente nos jogos até a data de corte do time
@@ -79,10 +76,12 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
   const agg = {};
   const minhaNota = {};
   for (const v of votos || []) {
+    const nota = notaDoVoto(v);
+    if (nota == null) continue;
     if (!agg[v.para_user_id]) agg[v.para_user_id] = { sum: 0, count: 0 };
-    agg[v.para_user_id].sum += Number(v.nota);
+    agg[v.para_user_id].sum += nota;
     agg[v.para_user_id].count += 1;
-    if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = Number(v.nota);
+    if (meUserId && v.de_user_id === meUserId) minhaNota[v.para_user_id] = nota;
   }
 
   // ── RANKING v2 — TUDO por jogo. Cada eixo NORMALIZADO (0..1) antes de ponderar → os pesos são verdade.
@@ -93,7 +92,8 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
     const u = m.users;
     const a = agg[u.id];
     const total = a ? a.count : 0;
-    const notaInterna = total >= MIN_VOTOS ? a.sum / a.count : null;
+    // A média de 0 a 10, já com uma casa: é ela que aparece na tela e é ela que entra no eixo "nota" dos pontos.
+    const notaInterna = total >= MIN_VOTOS ? mediaDasNotas(a.sum, a.count) : null;
     const jogos = jogosMap[u.id] || 0;
     const vitorias = vitoriasMap[u.id] || 0;
     const empates = empatesMap[u.id] || 0;
@@ -138,7 +138,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
       avatar_generico: u.avatar_generico || null,
       cor_frame: u.cor_frame || 'dourado',
       categoria: p.ehGR ? 'GR' : 'linha',
-      nota: notaParaExibir(p.notaInterna),
+      nota: p.notaInterna,
       nota_interna: p.notaInterna,
       total_votos: p.total,
       minha_nota: minhaNota[u.id] ?? null,
@@ -189,8 +189,8 @@ async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosR
   ]);
   const gameById = Object.fromEntries(games.map((g) => [g.id, g]));
   const presenca = (parts || []).filter((p) => p.confirmado && jogoAconteceu(gameById[p.game_id])).length;
-  const notas = (votosRecebidos || []).map((v) => Number(v.nota)).filter(Number.isFinite);
-  const notaInterna = notas.length >= MIN_VOTOS ? notas.reduce((a, b) => a + b, 0) / notas.length : null;
+  const notas = (votosRecebidos || []).map(notaDoVoto).filter((n) => n != null);
+  const notaInterna = notas.length >= MIN_VOTOS ? mediaDasNotas(notas.reduce((a, b) => a + b, 0), notas.length) : null;
   return {
     user_id: userId,
     sou_eu: true,
@@ -201,7 +201,7 @@ async function montarJogadorForaDoRanking({ teamId, userId, games, parts, votosR
     avatar_generico: u?.avatar_generico || null,
     cor_frame: u?.cor_frame || 'dourado',
     categoria: m?.categoria === 'GR' ? 'GR' : 'linha',
-    nota: notaParaExibir(notaInterna),
+    nota: notaInterna,
     nota_interna: notaInterna,
     total_votos: notas.length,
     minha_nota: null,
@@ -226,7 +226,8 @@ router.get(
     marcarFase(res, 'time');
     const ranking = await buildRanking(team.id, req.user.id);
     marcarFase(res, 'ranking');
-    res.json({ team: { ...team, role }, ranking });
+    // O voto que a pessoa deu volta na régua do app dela (estrelas para as telas antigas); a média é a mesma para todos.
+    res.json({ team: { ...team, role }, ranking: ranking.map((r) => ({ ...r, minha_nota: notaParaOPedido(req, r.minha_nota) })) });
   })
 );
 
@@ -276,11 +277,11 @@ router.get(
         .eq('team_id', team.id)
         .eq('user_id', userId)
         .order('created_at', { ascending: false }),
-      // Evolução: média progressiva dos votos recebidos (escala exibida via notaParaExibir).
+      // Evolução: média progressiva dos votos recebidos (0 a 10).
       // Estes votos também estão nos votos do time que o buildRanking lê, mas aproveitar
       // aqueles mudaria a ORDEM dos empates de data (a ordenação é estável) e com ela a
       // curva — os votos semeados de uma vez partilham o mesmo instante. Fica consulta própria.
-      supabase.from('votes').select('nota, updated_at, created_at').eq('team_id', team.id).eq('para_user_id', userId),
+      supabase.from('votes').select(`${await colunaDaNota()}, updated_at, created_at`).eq('team_id', team.id).eq('para_user_id', userId),
       // Escudos: times em comum entre o visitante e o jogador (viewer ∩ jogador).
       // O acesso a este perfil já exige ser membro de :slug, por isso a atividade
       // mostrada é a deste time — quem não partilha time nem chega aqui. Duas
@@ -345,7 +346,7 @@ router.get(
       gols: pct(jogador.gols, maxReal('gols')),
       artilharia: pct(jogador.artilharia, maxReal('artilharia')),
       vitorias: pct(jogador.vitorias, maxReal('vitorias')),
-      notas: Math.round(((jogador.nota_interna || 0) / 5) * 100),
+      notas: Math.round(((jogador.nota_interna || 0) / 10) * 100),
     };
 
     const jogos_campeao = (fotos || []).map((f) => ({ foto: f.url, tipo: f.tipo || 'vitoria' }));
@@ -398,13 +399,13 @@ router.get(
       }));
 
     const ordenados = (votosRecebidos || [])
-      .map((v) => ({ ts: v.updated_at || v.created_at, nota: Number(v.nota) }))
-      .filter((v) => v.ts && Number.isFinite(v.nota))
+      .map((v) => ({ ts: v.updated_at || v.created_at, nota: notaDoVoto(v) }))
+      .filter((v) => v.ts && v.nota != null)
       .sort((a, b) => new Date(a.ts) - new Date(b.ts));
     let soma = 0;
     const evolucao = ordenados.map((v, i) => {
       soma += v.nota;
-      return { data: v.ts, nota: notaParaExibir(soma / (i + 1)) };
+      return { data: v.ts, nota: mediaDasNotas(soma, i + 1) };
     });
 
     const equipas_partilhadas = partilhadasIds.length ? (eqs || []) : [];
@@ -440,7 +441,7 @@ router.get(
       team: { ...team, role },
       // figurinha_ativa: mesma regra única de services/inicio.js —
       // o card mostra AGORA uma figurinha nossa? As telas não devem voltar a comparar foto_url/avatar_url.
-      jogador: { ...jogador, posicao, total_com_nota: comNota.length, figurinha_ativa: avatarEhFigurinhaNossa(jogador.avatar_url) },
+      jogador: { ...jogador, minha_nota: notaParaOPedido(req, jogador.minha_nota), posicao, total_com_nota: comNota.length, figurinha_ativa: avatarEhFigurinhaNossa(jogador.avatar_url) },
       radar,
       jogos_campeao,
       conquistas,
@@ -490,10 +491,11 @@ router.post(
     const { team } = await requireTeamMember(req.params.slug, req.user.id);
 
     const paraUserId = req.body?.para_user_id;
-    const nota = Number(req.body?.nota);
+    // Telas novas: 0 a 10, inteiro. Telas antigas (sem o cabeçalho X-Futty-Nota): estrelas, que viram × 2.
+    const nota = notaDoPedido(req, req.body?.nota);
     if (!paraUserId) throw new HttpError(400, 'Voto inválido.');
     if (paraUserId === req.user.id) throw new HttpError(400, 'Não pode votar em você mesmo.');
-    if (!notaValida(nota)) throw new HttpError(400, 'A nota deve ser entre 0,5 e 5 (de 0,5 em 0,5).');
+    if (nota == null) throw new HttpError(400, 'A nota vai de 0 a 10.');
 
     // O votado tem de ser membro do time (visível no ranking).
     const { data: alvo } = await supabase
@@ -506,18 +508,21 @@ router.post(
 
     await ensureUserRow(req.user);
 
+    const campos = await camposDaNota(nota);
     const { data, error } = await supabase
       .from('votes')
       .upsert(
-        { de_user_id: req.user.id, para_user_id: paraUserId, team_id: team.id, nota, game_id: null, updated_at: new Date().toISOString() },
+        { de_user_id: req.user.id, para_user_id: paraUserId, team_id: team.id, ...campos, game_id: null, updated_at: new Date().toISOString() },
         { onConflict: 'de_user_id,para_user_id,team_id' }
       )
-      .select('para_user_id, nota, updated_at')
+      .select(`para_user_id, ${Object.keys(campos)[0]}, updated_at`)
       .single();
+    // Só o 0 não cabe num banco ainda sem a migração 086 (a coluna antiga, em estrelas, começa em 0,5).
+    if (error && nota === 0 && error.code === '23514') throw new HttpError(503, 'A nota 0 ainda não pode ser salva. Tente de novo em alguns minutos.');
     if (error) throw new HttpError(500, error.message);
     selosCache.invalidarEquipa(team.id); // a nota mexe no ranking → selo "RANKING 1º"
 
-    res.json({ voto: data });
+    res.json({ voto: { para_user_id: data.para_user_id, nota: notaParaOPedido(req, notaDoVoto(data)), updated_at: data.updated_at } });
   })
 );
 

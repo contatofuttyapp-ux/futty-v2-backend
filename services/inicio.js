@@ -8,7 +8,7 @@
 const { supabase, getTeamBySlug, getRole, getUserById, ensureUserRow, requireTeamMember, loadGame } = require('../utils/db');
 const { HttpError } = require('../utils/http');
 const { golosDoJogador } = require('../utils/agregados');
-const { notaParaExibir } = require('../utils/helpers');
+const { colunaDaNota, notaDoVoto, mediaDasNotas } = require('../utils/notaDoVoto');
 const { ehAdulto } = require('../utils/rostoPublico');
 const { temMaioridade } = require('../utils/idade');
 const { temFigurinhaIA, avatarEhFigurinhaNossa } = require('../utils/figurinhaRegra');
@@ -105,6 +105,7 @@ async function obterMe(user, { base = null } = {}) {
   const userId = user.id;
   await ensureUserRow(user);
 
+  const colunaNota = await colunaDaNota();
   const [perfil, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows, jogosFundador] = await Promise.all([
     obterPerfilResiliente(userId),
     supabase
@@ -114,7 +115,7 @@ async function obterMe(user, { base = null } = {}) {
       .eq('confirmado', true)
       .then((r) => r.data),
     golosDoJogador(userId),
-    supabase.from('votes').select('nota').eq('para_user_id', userId).then((r) => r.data),
+    supabase.from('votes').select(colunaNota).eq('para_user_id', userId).then((r) => r.data),
     supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
     // tem_figurinha (abaixo): existência basta, .limit(1). r.data
     // vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
@@ -131,9 +132,8 @@ async function obterMe(user, { base = null } = {}) {
   // Jogos diferentes: a presença confirmada e a de fundador do mesmo jogo contam uma vez.
   const jogos = new Set([...jogados, ...jogosFundador]).size;
 
-  const totalVotos = voteRows ? voteRows.length : 0;
-  const mediaInterna = totalVotos ? voteRows.reduce((sum, v) => sum + Number(v.nota), 0) / totalVotos : null;
-  const nota = totalVotos >= 3 ? notaParaExibir(mediaInterna) : null;
+  const notas = (voteRows || []).map(notaDoVoto).filter((n) => n != null);
+  const nota = notas.length >= 3 ? mediaDasNotas(notas.reduce((s, n) => s + n, 0), notas.length) : null;
 
   const slots = (slotRows || []).map((r) => r.kit_id);
 

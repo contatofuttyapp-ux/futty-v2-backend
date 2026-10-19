@@ -40,9 +40,9 @@ function ordenarPorRating(jogadores, rng = Math.random) {
   return arr;
 }
 
-// DOSE do ruído de variedade (modo B): perturbação máxima ±DOSE na escala de rating
-// (~0.5–5). Calibrada para os 2 melhores calharem juntos "às vezes", não sempre nem nunca.
-const RUIDO_DOSE = 0.9;
+// DOSE do ruído de variedade (modo B): perturbação máxima ±DOSE na régua da nota (0–10). Calibrada para os 2 melhores
+// calharem juntos "às vezes", não sempre nem nunca — era 0,9 na régua das estrelas; a régua dobrou, a dose também.
+const RUIDO_DOSE = 1.8;
 
 /** Separa os confirmados em goleiros, cabeças de chave e jogadores de linha. */
 function separarPorCategoria(jogadores) {

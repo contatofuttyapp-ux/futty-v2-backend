@@ -149,7 +149,7 @@ async function currentVotingGame(teamId) {
 }
 
 /**
- * Calcula o rating (média das notas recebidas) de cada user_id na equipa.
+ * Calcula o rating (média das notas recebidas, de 0 a 10) de cada user_id na equipa.
  * Quem não tem votos fica com RATING_DEFAULT.
  * @returns {Promise<Record<string, number>>} mapa user_id -> rating
  */
@@ -160,14 +160,18 @@ async function computeRatings(teamId, userIds) {
   });
 
   if (userIds.length) {
+    // require aqui dentro: utils/notaDoVoto.js usa o supabase deste módulo, e no topo os dois se pediriam um ao outro.
+    // eslint-disable-next-line global-require
+    const { colunaDaNota, notaDoVoto } = require('./notaDoVoto');
     const { data } = await supabase
       .from('votes')
-      .select('para_user_id, nota')
+      .select(`para_user_id, ${await colunaDaNota()}`)
       .eq('team_id', teamId)
       .in('para_user_id', userIds);
     for (const v of data || []) {
-      if (acc[v.para_user_id]) {
-        acc[v.para_user_id].sum += v.nota;
+      const nota = notaDoVoto(v);
+      if (acc[v.para_user_id] && nota != null) {
+        acc[v.para_user_id].sum += nota;
         acc[v.para_user_id].count += 1;
       }
     }
