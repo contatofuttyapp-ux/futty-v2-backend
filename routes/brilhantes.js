@@ -13,7 +13,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
 const { supabase } = require('../utils/db');
 const { temDireito, ehMigracaoEmFalta } = require('../utils/direitoBrilhante');
-const { lojaProntaDoPedido, ehTestador } = require('../utils/lojaPronta');
+const { lojaProntaDoPedido } = require('../utils/lojaPronta');
 
 const router = express.Router();
 
@@ -94,11 +94,9 @@ router.get(
       times,
       pedidos,
       compras_ativas: comprasAtivas,
-      // A loja aparece no app quando o MOTOR diz — ligar sem build novo (P2 lê daqui). Aberta a todos (PAGAMENTOS_ATIVOS) ou só a esta conta,
-      // se a plataforma do pedido (X-Futty-Plataforma) está em PAGAMENTOS_PLATAFORMAS, ou se o e-mail autenticado dela está em PAGAMENTOS_TESTERS (utils/lojaPronta.js).
+      // A loja aparece no app quando o MOTOR diz — ligar sem build novo (P2 lê daqui). Aberta a todos (PAGAMENTOS_ATIVOS) ou
+      // na plataforma do pedido (X-Futty-Plataforma) que está em PAGAMENTOS_PLATAFORMAS (utils/lojaPronta.js).
       loja_pronta: lojaProntaDoPedido(req),
-      // Esta conta é de testador da loja (PAGAMENTOS_TESTERS)? A tela só usa para mostrar o detalhe técnico de uma compra que falhou.
-      testador_loja: ehTestador(req.user),
     });
   }),
 );

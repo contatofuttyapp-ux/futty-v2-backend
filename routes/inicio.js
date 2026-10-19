@@ -126,7 +126,7 @@ router.get(
       // os slots de todas as páginas, para o app não voltar a pedir por tela.
       ad: { ad: ads?.paginas?.inicio ?? null },
       ads: ads || null,
-      // `loja_pronta` (PAGAMENTOS_ATIVOS, PAGAMENTOS_PLATAFORMAS ou PAGAMENTOS_TESTERS no motor) vai junto — a Figurinha abre a partir
+      // `loja_pronta` (PAGAMENTOS_ATIVOS ou PAGAMENTOS_PLATAFORMAS no motor) vai junto — a Figurinha abre a partir
       // deste payload e decide aqui se o convite é "Comprar" ou "Pedir ativação", sem pedir o /estado.
       brilhante: {
         ...(brilhante

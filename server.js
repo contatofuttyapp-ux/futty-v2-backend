@@ -313,6 +313,8 @@ if (require.main === module) {
       // pelo log da revisão nova que se confere a troca para a chave secreta sb_secret_….
       const chaves = require('./utils/chavesSupabase').origemDasChaves();
       console.log(`[Futty] Supabase: chave secreta de ${chaves.secreta} (formato ${chaves.secretaFormato})`);
+      // Onde a loja está aberta (PAGAMENTOS_PLATAFORMAS / PAGAMENTOS_ATIVOS): é pelo log da revisão nova que se confere depois de um deploy.
+      console.log(require('./utils/lojaPronta').linhaDaLoja());
       // VELOCIDADE 7A (15-set): aquece os caches que a primeira pessoa depois de um
       // deploy (ou de uma instância nova do Cloud Run) pagaria dentro do tempo dela —
       // as suspensões, lidas por TODO pedido autenticado, e o gabinete, lido pelo

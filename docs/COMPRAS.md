@@ -54,7 +54,7 @@ E a chave secreta: Project settings → API keys → **Secret API key** (`sk_…
 
 ## O app (P2)
 
-A loja só aparece com as três coisas: `PAGAMENTOS_ATIVOS=true` no motor (vira `loja_pronta` no `/api/brilhantes/estado` e no `/api/inicio` — liga e desliga sem build novo) — ou só para uma plataforma (`PAGAMENTOS_PLATAFORMAS=android`, pelo cabeçalho `X-Futty-Plataforma` que o app manda) ou só para os testadores (`PAGAMENTOS_TESTERS`), o app nativo, e a chave PÚBLICA do SDK no build. Faltando uma, a tela fica no "Pedir ativação" (o Gabinete ativa à mão). A web nunca vende.
+A loja só aparece com as três coisas: `PAGAMENTOS_ATIVOS=true` no motor (vira `loja_pronta` no `/api/brilhantes/estado` e no `/api/inicio` — liga e desliga sem build novo) — ou só para as plataformas de `PAGAMENTOS_PLATAFORMAS` (pelo cabeçalho `X-Futty-Plataforma` que o app manda; sem a variável valem `android` e `ios`), o app nativo, e a chave PÚBLICA do SDK no build. Faltando uma, a tela fica no "Pedir ativação" (o Gabinete ativa à mão). A web nunca vende.
 
 | variável (frontend) | onde |
 |---|---|
@@ -73,8 +73,7 @@ No painel do RevenueCat: os 3 produtos criados como **consumíveis** na App Stor
 | `RC_API_KEY` | chave `sk_…` do RevenueCat; sem ela o "Restaurar compras" responde 503 |
 | `RC_ACEITAR_SANDBOX` | `false` transforma compras de sandbox em `ignorada` (padrão `true` até a 1.0.1 sair) |
 | `PAGAMENTOS_ATIVOS` | `true` faz o app mostrar a loja (`loja_pronta` em `/api/brilhantes/estado`) |
-| `PAGAMENTOS_PLATAFORMAS` | plataformas com a loja ligada, separadas por vírgula (`ios`, `android`, `web`), ex.: `android`. Só decide a vitrine; o crédito sai só do webhook. Sem a variável, ninguém é ligado por plataforma |
-| `PAGAMENTOS_TESTERS` | e-mails (confirmados) que veem a loja em qualquer plataforma, separados por vírgula |
+| `PAGAMENTOS_PLATAFORMAS` | plataformas com a loja ligada, separadas por vírgula (`ios`, `android`, `web`), ex.: `android`. Só decide a vitrine; o crédito sai só do webhook. Sem a variável valem `android,ios`; definida e vazia, nenhuma. O motor escreve na subida `[Futty] loja: plataformas=…, ativos=…` — é por ela que se confere no log depois de um deploy |
 
 ## Testar em sandbox
 
