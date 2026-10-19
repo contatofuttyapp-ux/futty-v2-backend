@@ -107,7 +107,8 @@ async function montar({ teams, atrasoMs = 0, convites = null, games = null, memb
   };
   // Os módulos que guardam o `supabase` na hora do require (soOrganiza, o serviço do Início) têm de nascer de novo com o
   // falso DESTE cenário — senão o primeiro teste do processo prende o banco dele nos seguintes.
-  const presos = ['../utils/soOrganiza', '../services/inicio'].map((m) => require.resolve(m));
+  // As rotas do time vivem também nos sub-roteadores que routes/teams.js monta: nascem de novo junto com ele.
+  const presos = ['../utils/soOrganiza', '../services/inicio', '../routes/explorarTimes', '../routes/membrosDoTime', '../routes/convitesDoTime'].map((m) => require.resolve(m));
   for (const p of presos) delete require.cache[p];
   delete require.cache[caminhoAlvo];
   // eslint-disable-next-line global-require

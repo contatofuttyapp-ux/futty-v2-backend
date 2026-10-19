@@ -70,11 +70,15 @@ async function montar({ teams = [], respostasNominatim = {}, falhar = null } = {
     injetar(caminhoNsfw, { filtroNSFWFailClosed: passaAdiante, filtroNSFW: passaAdiante }),
     injetar(caminhoAuth, { requireAuth: exigirLogin, optionalAuth: passaAdiante }),
   ];
+  // As rotas do time vivem também nos sub-roteadores que routes/teams.js monta: nascem de novo junto com ele.
+  const subRoteadores = ['../routes/explorarTimes', '../routes/membrosDoTime', '../routes/convitesDoTime'].map((m) => require.resolve(m));
   delete require.cache[caminhoCidade];
   delete require.cache[caminhoAlvo];
+  for (const s of subRoteadores) delete require.cache[s];
   // eslint-disable-next-line global-require
   const router = require('../routes/teams');
   delete require.cache[caminhoAlvo];
+  for (const s of subRoteadores) delete require.cache[s];
   delete require.cache[caminhoCidade];
   for (const r of restaurar) r();
 
