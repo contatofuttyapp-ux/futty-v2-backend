@@ -131,6 +131,7 @@ const LINHAS = [
 const PUBLICAS_DE_PROPOSITO = [
   'POST /api/ads/evento', 'POST /api/ads/eventos', 'POST /api/telemetria', 'POST /api/avise-me', 'POST /api/compras/webhook/revenuecat',
   'POST /api/interno/pintar/:jobId', // segredo + token do Cloud Tasks
+  'POST /api/csp', // os avisos da CSP do site: o navegador manda sem sessão; limite por IP, nada vai para o banco (tests/csp.test.js)
   'POST /api/convite/:token/pendente', // sem sessão de propósito (a página do convite ainda não tem conta); limite por IP, convite válido, nada volta na resposta
 ];
 // Rotas com login, mas cuja autorização é o próprio token/id da URL (provadas à parte).

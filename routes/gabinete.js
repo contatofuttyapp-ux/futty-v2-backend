@@ -31,16 +31,16 @@ const inicioDiaUTC = (d) => { const x = new Date(d); x.setUTCHours(0, 0, 0, 0); 
 const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 
 // Rate limiters ativos — manifesto estático (não há API pública do
-// express-rate-limit para ler a config de volta de uma instância já criada). Os
-// quatro primeiros leem os tetos de middleware/limiters.js (LIMITES), os mesmos que
-// os limiters usam; os por usuário abaixo seguem sincronizados à mão com aquele
-// arquivo.
+// express-rate-limit para ler a config de volta de uma instância já criada). As
+// linhas com LIMITES leem os tetos de middleware/limiters.js, os mesmos que os
+// limiters usam; as outras seguem sincronizadas à mão com aquele arquivo.
 const EM_DEV = process.env.NODE_ENV === 'production' ? '' : ' (dev)';
 const RATE_LIMITS_ATIVOS = [
-  { rota: 'global · toda /api (exceto /api/media, /api/telemetria e o webhook de compras), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
-  { rota: 'global · toda /api (exceto /api/media, /api/telemetria e o webhook de compras), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media, /api/telemetria, /api/csp e o webhook de compras), pedidos sem sessão conhecida', limite: `${LIMITES.apiPorIp}/15min por IP${EM_DEV}` },
+  { rota: 'global · toda /api (exceto /api/media, /api/telemetria, /api/csp e o webhook de compras), pedidos de sessão conhecida', limite: `${LIMITES.apiPorSessao}/15min por sessão${EM_DEV}` },
   { rota: 'GET /api/media/:token', limite: `${LIMITES.midia}/15min por IP` },
   { rota: 'POST /api/telemetria (anônima, sem sessão)', limite: `${LIMITES.telemetria}/15min por IP (o IP não é gravado)` },
+  { rota: 'POST /api/csp (avisos da CSP do site, sem sessão)', limite: `${LIMITES.csp}/15min por IP (o IP não é gravado)` },
   { rota: 'POST /api/compras/webhook/revenuecat (segredo no header, sem sessão)', limite: `${LIMITES.webhookCompras}/min por IP` },
   { rota: 'POST /api/me/avatar[/ai]', limite: `${LIMITES.avatar}/15min por sessão (sem sessão: por IP)` },
   { rota: 'POST /api/teams/:slug/convite', limite: '10/hora por pessoa' },

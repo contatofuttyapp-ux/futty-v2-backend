@@ -104,6 +104,9 @@ function limitesPara(emProducao) {
     // A telemetria anônima manda no máximo 1 aviso por tela por sessão (~15 numa sessão
     // longa). 300 por IP cabe um time inteiro no mesmo Wi-Fi da quadra; o resto é enchimento.
     telemetria: 300, // por IP
+    // Os avisos da CSP do site: o navegador manda um por coisa que a política barraria. A rota já não repete a mesma linha no
+    // log; 120 por IP só segura quem martela a porta.
+    csp: 120, // por IP
     // O webhook do RevenueCat. Chega de poucos IPs deles, em rajada quando
     // reenviam uma fila; 120/min folga o real e barra quem martela a porta sem o segredo.
     webhookCompras: 120, // por IP, por MINUTO
@@ -138,8 +141,8 @@ function chaveDaSessao(token) {
  * validou; o resto, forjado ou o 1º pedido de uma sessão, conta nele.
  * `tokenDoPedido(req)` devolve o token Bearer (ou null) e `sessaoConhecida(token)`
  * diz se o motor já o validou (middleware/auth.js).
- * /media, /telemetria e /compras/webhook têm limiter próprio (routes/media.js,
- * routes/telemetria.js, routes/compras.js).
+ * /media, /telemetria, /csp e /compras/webhook têm limiter próprio (routes/media.js,
+ * routes/telemetria.js, routes/csp.js, routes/compras.js).
  * O preflight já morre no cors() lá em cima; ignorar OPTIONS aqui é a rede de
  * segurança para o dia em que alguém trocar a ordem, e evita contar duas vezes
  * cada chamada. NB: dentro de app.use('/api', ...) o Express já tira o prefixo
@@ -150,7 +153,7 @@ function criarLimitesDaApi({ tokenDoPedido, sessaoConhecida, limites = LIMITES }
     const token = tokenDoPedido(req);
     return !!token && sessaoConhecida(token);
   };
-  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media') || req.path === '/telemetria' || req.path.startsWith('/compras/webhook');
+  const ignorado = (req) => req.method === 'OPTIONS' || req.path.startsWith('/media') || req.path === '/telemetria' || req.path === '/csp' || req.path.startsWith('/compras/webhook');
   const comum = {
     windowMs: limites.janelaMs,
     standardHeaders: true,
@@ -227,6 +230,20 @@ function criarLimiteDeTelemetria({ limites = LIMITES } = {}) {
 }
 
 /**
+ * POST /api/csp: os avisos da CSP do site, mandados pelo navegador sem sessão — conta pelo IP real, como a telemetria.
+ */
+function criarLimiteDeCsp({ limites = LIMITES } = {}) {
+  return rateLimit({
+    windowMs: limites.janelaMs,
+    max: limites.csp,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: chaveDoPedido,
+    message: { error: 'Muitos avisos. Tente de novo mais tarde.' },
+  });
+}
+
+/**
  * POST /api/avise-me: a lista de quem quer ser avisado do lançamento. Pública, sem sessão: conta pelo
  * IP real (o mesmo da telemetria — pela Cloudflare vem em CF-Connecting-IP), 10 por HORA. Uma pessoa não precisa de mais
  * que isso; e o IP só vive na memória do limiter, não vai para a tabela.
@@ -275,6 +292,7 @@ function criarLimiteDeWebhook({ limites = LIMITES } = {}) {
 module.exports = {
   criarLimiter,
   criarLimiteDeTelemetria,
+  criarLimiteDeCsp,
   criarLimiteDeAviseMe,
   criarLimiteDeWebhook,
   criarLimiteDeConvitePendente,

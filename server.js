@@ -80,6 +80,7 @@ const inicioRoutes = require('./routes/inicio');
 const brilhantesRoutes = require('./routes/brilhantes');
 const diagnosticoRoutes = require('./routes/diagnostico');
 const telemetriaRoutes = require('./routes/telemetria');
+const cspRoutes = require('./routes/csp');
 const comprasRoutes = require('./routes/compras');
 const aviseMeRoutes = require('./routes/aviseMe');
 const figurinhaJobRoutes = require('./routes/figurinhaJob');
@@ -247,6 +248,7 @@ app.use(inicioRoutes); // GET /api/inicio — agregado da tela Início (1 pedido
 app.use(brilhantesRoutes); // /api/brilhantes — direito, créditos e pedidos (SPEC-FIGURINHA-3)
 app.use(diagnosticoRoutes); // /api/diagnostico — caixa-preta do app
 app.use(telemetriaRoutes); // POST /api/telemetria — velocidade anônima, sem sessão
+app.use(cspRoutes); // POST /api/csp — os avisos da CSP do site viram uma linha no log, sem sessão
 app.use(aviseMeRoutes); // POST /api/avise-me — lista de quem quer ser avisado do lançamento (pública, limiter por IP)
 app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano
 app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
