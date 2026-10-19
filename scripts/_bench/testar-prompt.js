@@ -42,7 +42,6 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
 const sharp = require('sharp');
 const { supabase } = require('../../utils/db');
 // A bancada usa os MESMOS módulos que a produção — se divergirem, o que se mede
@@ -87,16 +86,9 @@ const arg = (n, omissao = null) => {
 // — a bancada não tem texto de prompt próprio. O prompt ANTIGO (P1) está arquivado
 // em `prompt-antigo-reprovado.js` só para estas variantes poderem ser repetidas.
 
-/** O catálogo de kits REAL, lido de routes/auth.js (url do asset + planos). */
+/** O catálogo de kits REAL: o mesmo módulo que a produção usa (utils/kitsIa.js). */
 function lerKits(kitId) {
-  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'auth.js'), 'utf8');
-  const iK = src.indexOf('const KITS_IA = {');
-  const fim = src.indexOf('\n};', iK);
-  if (iK < 0 || fim < 0) throw new Error('Não consegui ler KITS_IA de routes/auth.js — aborta antes de gastar.');
-  const ctx = {};
-  vm.createContext(ctx);
-  vm.runInContext(`${src.slice(iK, fim + 3)}\nout={KITS_IA};`, ctx);
-  const kit = ctx.out.KITS_IA[kitId];
+  const kit = require('../../utils/kitsIa').KITS_IA[kitId]; // eslint-disable-line global-require
   if (!kit?.ativo || !kit?.url) throw new Error(`kit "${kitId}" indisponível.`);
   return kit;
 }

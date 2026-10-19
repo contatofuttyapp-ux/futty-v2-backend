@@ -10,9 +10,6 @@
 // módulos de PRODUÇÃO, e as bancadas importam-nos de lá — é isso que garante
 // que o que se mede é o que está no ar.
 // ═══════════════════════════════════════════════════════════════════════════════
-const fs = require('fs');
-const path = require('path');
-const vm = require('vm');
 const sharp = require('sharp');
 const { chamarFal } = require('../../utils/falFila');
 
@@ -144,20 +141,11 @@ const paraCsv = (linhas) => linhas
 
 
 /**
- * O catálogo de kits REAL, lido de routes/auth.js. Lê desde KIT_URL (as
- * constantes dos assets) até ao fim de KITS_IA — ler só o KITS_IA rebenta com
- * "KIT_URL is not defined", que é o que acontecia antes de isto vir para aqui.
+ * O catálogo de kits REAL: o mesmo módulo que a produção usa (utils/kitsIa.js, só dados — importar não liga banco nem rede).
  */
 function lerKit(kitId) {
-  const src = fs.readFileSync(path.join(__dirname, '..', '..', 'routes', 'auth.js'), 'utf8');
-  const ini = src.indexOf('const KIT_URL');
-  const iK = src.indexOf('const KITS_IA = {');
-  const fim = src.indexOf('\n};', iK);
-  if (ini < 0 || iK < 0 || fim < 0) throw new Error('não consegui ler KITS_IA de routes/auth.js — aborta antes de gastar');
-  const ctx = {};
-  vm.createContext(ctx);
-  vm.runInContext(`${src.slice(ini, fim + 3)}\nout={KITS_IA};`, ctx);
-  const kit = ctx.out.KITS_IA[kitId];
+  const { KITS_IA } = require('../../utils/kitsIa'); // eslint-disable-line global-require
+  const kit = KITS_IA[kitId];
   if (!kit?.ativo || !kit?.url) throw new Error(`kit "${kitId}" indisponível`);
   return kit;
 }
