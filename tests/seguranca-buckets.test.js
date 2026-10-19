@@ -92,9 +92,9 @@ test('o código do motor (fora dos scripts) não cria bucket público; o `ads` p
 test('as funções que montam endereço de mídia: getPublicUrl só aparece onde o endereço é cru de propósito (e depois vira proxy na saída)', () => {
   const doMotor = ['routes', 'utils', 'services', 'middleware'].flatMap((d) => arquivosJs(path.join(RAIZ, d)));
   const usos = doMotor.filter((a) => /getPublicUrl\(/.test(fs.readFileSync(a, 'utf8'))).map((a) => path.relative(RAIZ, a).split(path.sep).join('/'));
-  // quem grava o endereço cru no banco: o upload da foto (routes/avatar.js), do logo, da Resenha e a figurinha (services/pinturaFigurinha.js)
-  // — todos buckets privados, lidos só pelo proxy
-  assert.deepEqual(usos.sort(), ['routes/avatar.js', 'routes/feed.js', 'routes/teams.js', 'services/pinturaFigurinha.js']);
+  // quem grava o endereço cru no banco: o upload da foto (routes/avatar.js), do logo (routes/teams.js), da Resenha
+  // (routes/uploadDaResenha.js) e a figurinha (services/pinturaFigurinha.js) — todos buckets privados, lidos só pelo proxy
+  assert.deepEqual(usos.sort(), ['routes/avatar.js', 'routes/teams.js', 'routes/uploadDaResenha.js', 'services/pinturaFigurinha.js']);
 });
 
 // ─── 3. Sair ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────

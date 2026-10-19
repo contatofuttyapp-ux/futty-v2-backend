@@ -14,7 +14,7 @@ const { tratadorDeErros } = require('../middleware/erros');
 const RECARREGAR = [
   'utils/soOrganiza', 'utils/agregados', 'utils/direitoBrilhante', 'services/inicio', 'utils/cidade',
   'routes/rsvp', 'routes/games', 'routes/jogoPublico', 'routes/sorteioDoJogo', 'routes/associarJogador', 'utils/ajudaDoJogo', 'routes/ranking', 'routes/teams', 'routes/explorarTimes', 'routes/membrosDoTime', 'routes/convitesDoTime', 'routes/brilhantes',
-  'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth', 'routes/avatar', 'services/fotoDoAvatar', 'services/pinturaFigurinha', 'routes/inicio', 'routes/feed', 'utils/blocksStore',
+  'utils/geracaoJobs', 'routes/figurinhaJob', 'routes/auth', 'routes/avatar', 'services/fotoDoAvatar', 'services/pinturaFigurinha', 'routes/inicio', 'routes/feed', 'routes/uploadDaResenha', 'routes/conversaDaResenha', 'routes/denunciasDaResenha', 'utils/ajudaDaResenha', 'utils/blocksStore',
   'routes/superadmin', 'utils/resenhaCota', 'utils/plataformaStore', // Rodada 29Y: guardam o supabase no require, como os de cima
   'routes/campeonatos', 'utils/campeonatoStore', 'utils/selosCache', // campeonatos no Storage: guardam o supabase no require
   'utils/presencaDeFundador', // a presença de fundador lê o time e os jogos com o supabase do require
