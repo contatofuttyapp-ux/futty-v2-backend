@@ -1,5 +1,5 @@
 // Futty v2.0 — Campeonato / torneio: 2 times fixos que acumulam pontos ao longo
-// de várias jornadas. Cada jornada regista um resultado (vitória/empate).
+// de várias jornadas. Cada jornada registra um resultado (vitória/empate).
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError } = require('../utils/http');
@@ -15,7 +15,7 @@ function campeaoPorPontos(pontosA, pontosB) {
   return 'empate';
 }
 
-// Carrega um campeonato pelo id e garante que o utilizador é admin da equipa.
+// Carrega um campeonato pelo id e garante que o usuário é admin do time.
 async function campeonatoComoAdmin(req) {
   const { data: camp } = await supabase.from('campeonatos').select('*').eq('id', req.params.id).maybeSingle();
   if (!camp) throw new HttpError(404, 'Campeonato não encontrado.');
@@ -34,7 +34,7 @@ router.post(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem criar campeonatos.');
 
-    // Só 1 activo por equipa.
+    // Só 1 ativo por time.
     const { data: existente } = await supabase
       .from('campeonatos')
       .select('id')
@@ -64,7 +64,7 @@ router.post(
 );
 
 /**
- * GET /api/equipas/:slug/campeonato — campeonato activo da equipa + jornadas.
+ * GET /api/equipas/:slug/campeonato — campeonato ativo do time + jornadas.
  * Lógica em services/inicio.js#obterCampeonato — a MESMA função que GET
  * /api/inicio usa, para o JSON nunca divergir entre as duas rotas.
  */
@@ -76,7 +76,7 @@ router.get(
   })
 );
 
-/** POST /api/campeonato/:id/jornada — regista o resultado de uma jornada (só admin). */
+/** POST /api/campeonato/:id/jornada — registra o resultado de uma jornada (só admin). */
 router.post(
   '/api/campeonato/:id/jornada',
   requireAuth,

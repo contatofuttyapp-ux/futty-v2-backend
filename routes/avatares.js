@@ -6,7 +6,7 @@ const { asyncHandler } = require('../utils/http');
 
 const router = express.Router();
 
-// Fallback caso a pasta não exista (19 ficheiros conhecidos, inclui os novos).
+// Fallback caso a pasta não exista (19 arquivos conhecidos, inclui os novos).
 const HARDCODED = [
   'Astronauta.png', 'ET.png', 'Gladiador.png', 'Jacaré.png',
   'Leão.png', 'Lesma.png', 'Ninja.png', 'Onça.png',
@@ -16,7 +16,7 @@ const HARDCODED = [
   'bola.png', 'carta_fut.png', 'chuteira.png',
 ];
 
-// Lê os ficheiros de imagem de uma pasta (ou null se não existir).
+// Lê os arquivos de imagem de uma pasta (ou null se não existir).
 function lerPasta(dir) {
   try {
     return fs

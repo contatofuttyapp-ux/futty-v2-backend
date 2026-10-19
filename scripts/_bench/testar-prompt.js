@@ -260,7 +260,7 @@ const { baixar, achatamento, montarFigurinha, folhaDeContato, mulberry32, paraCs
         try {
           ger = await chamarFal(MODELO, input);
         } catch (e) {
-          // A fal recusou input_fidelity? Regista e repete SEM ele — nunca salta em silêncio.
+          // A fal recusou input_fidelity? Registra e repete SEM ele — nunca salta em silêncio.
           if (v.fidelity && /input_fidelity/i.test(e.message)) {
             fidelityRecusado = true;
             console.warn(`   ${v.n} AVISO: a fal recusou input_fidelity (${e.message}) — repito sem ele.`);

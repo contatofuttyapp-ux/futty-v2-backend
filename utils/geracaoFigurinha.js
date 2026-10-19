@@ -82,7 +82,7 @@ const baixar = async (url) => Buffer.from(await (await fetch(url)).arrayBuffer()
  *        sobe um buffer e devolve um URL que a fal consiga buscar. A fal só lê
  *        URLs públicos; quem chama decide onde põe (bucket da app, bucket da
  *        bancada) e trata de apagar depois.
- * @param {string} [opcoes.etiqueta] prefixo dos ficheiros temporários
+ * @param {string} [opcoes.etiqueta] prefixo dos arquivos temporários
  *
  * @returns {Promise<{ recorteBuffer: Buffer, custo: object, tempos: object, urls: object }>}
  *   `recorteBuffer` é o PNG recortado (com alpha), pronto para o auditor de

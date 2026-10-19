@@ -3732,3 +3732,26 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
   O motor funciona igual com ou sem a 060 (utils/figurinhaRegra.js); ela limpa a causa.
 
   Uso: node scripts/verificar-060.js   (a partir de backend/; sai com 0 se tudo em ordem)
+
+# Arrumação grande (Rodada 31X, 19-out-2026)
+
+## services/inicio.js
+- (linha ~493, `GET /api/denuncias/meus-desfechos`) VELOCIDADE 6A (15-set): isto corria em TODO /api/inicio e fazia, por equipa, um `list` no Storage MAIS um download por ficheiro de caso. Num time com 20 denúncias eram 21 idas ao Storage. Cache de 5 minutos. Velocidade 7A: pedidos simultâneos do mesmo time esperam a MESMA listagem, e depois dos 5 min sai a conhecida enquanto a nova é buscada por trás.
+
+## utils/db.js
+- (linha ~65, memo do ensureUserRow) Memo em memória criado em 13-set ("Velocidade 3").
+
+## utils/falFila.js
+- (linha ~55, x-fal-billable-units) A regra "x-fal-billable-units NÃO É DINHEIRO EM TODO O LADO" saiu da bancada de 17-set.
+
+## utils/gabineteStore.js
+- (linha ~93, Acessos & contas) Regra "NUNCA existe campo de senha" de 12-set.
+
+## utils/mediaToken.js
+- (linha ~55, decodificar sem expiração) Rodada 15: sem isto, removerFicheirosPorUrl/apagarUsuario nunca resolviam a URL salva em feed_post_media/comentario_anexos, que é sempre a do proxy desde o Tijolo 2.
+
+## routes/gabinete.js
+- (linha ~4, cabeçalho) Antes: "Publicidade (medição de ads) ainda não tem fonte real → 'em breve' digno, SEM inventar números." (linha ~165) "medição de ads (impressão/clique) ainda não existe". (linha ~355) "Enquanto a compra na loja não existe, é AQUI que o pedido vira produto". Corrigidos na 31X: a medição existe (utils/adsStore.js) e a compra está ligada nas duas lojas.
+
+## (todo o motor)
+- Rodada 31X (19-out): ~255 comentários passaram de PT-PT para PT-BR (equipa→time, ficheiro→arquivo, utilizador→usuário, registo→registro, golo→gol, actual→atual, activo→ativo, detetar→detectar…). Só comentários: o minificado de cada arquivo ficou igual. Exemplos de código dentro de comentário e texto entre aspas ou crases ficaram como estavam.

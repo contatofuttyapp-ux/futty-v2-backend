@@ -1,5 +1,5 @@
 // Futty v2.0 — GET /api/inicio: agrega TUDO que a tela Início precisa num
-// round-trip só. Motivo: motor em São Paulo, utilizador em Lisboa
+// round-trip só. Motivo: motor em São Paulo, usuário em Lisboa
 // (~240ms/pedido) — os ~13 pedidos que o Início disparava ao abrir davam 3-4s
 // só de latência de rede, antes de qualquer dado chegar. Cada peça usa a MESMA
 // função de services/inicio.js que a rota antiga (nunca diverge do JSON que
@@ -92,7 +92,7 @@ router.get(
       medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos })))),
       medir(res, 'denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
       // Vêm os slots de TODAS as páginas, não só o do Início. A
-      // conta de servidor é a mesma (uma leitura do store, uma do utilizador) e
+      // conta de servidor é a mesma (uma leitura do store, uma do usuário) e
       // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do
       // percurso que o dono mediu, ~500 ms cada, de Lisboa.
       medir(res, 'ad', seguro(inicioService.obterAdsSessao(userId))),

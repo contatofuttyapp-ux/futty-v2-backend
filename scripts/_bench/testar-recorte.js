@@ -8,7 +8,7 @@
 //
 // ETAPAS POR FOTO
 //   0  recorte: birefnet da fal sobre a foto auto-orientada (custo e tempo
-//      registados). Enquadramento de BUSTO: da coroa (1ª linha opaca) até meio
+//      registrados). Enquadramento de BUSTO: da coroa (1ª linha opaca) até meio
 //      do peito, centrado, 8% de folga em cima, no canvas 1024×1536 — a coroa
 //      nunca é cortada, por construção.
 //   1  "crua"       só o recorte na moldura da casa, fundo Estádio, placa+nome
@@ -36,7 +36,7 @@
 // abaixo. Com o detector de rosto (@vladmandic/face-api em WASM, instalado como
 // devDependency — nunca vai para a imagem de produção) a linha do pescoço vem
 // da caixa do rosto (queixo + ~22% da altura), que é mais estável quando há
-// braços levantados ou cabelo volumoso. Os dois são medidos e registados; o do
+// braços levantados ou cabelo volumoso. Os dois são medidos e registrados; o do
 // rosto manda quando existe.
 //
 // CORRER (a partir de FUTTY-V2/backend):
@@ -88,7 +88,7 @@ const CANVAS = { w: 1024, h: 1536 };
 const CARD = { w: 512, h: 768 };
 const FOLGA_TOPO = 0.08;
 
-// Os parâmetros finais dos acabamentos — afinados olhando o Gui, registados no
+// Os parâmetros finais dos acabamentos — afinados olhando o Gui, registrados no
 // CSV e no relatório. Mudar aqui muda em todas as fotos.
 // Afinação (Gui, 3ª corrida): posterizar RGB a 8-10 níveis deslocava a pele
 // para rosa/salmão e lavava a pintura — 12 níveis segura a cor; a "pintura"
@@ -281,7 +281,7 @@ const ehPeleEstrita = (r, g, b) => {
  * O busto de um kit, sem cabeça, com a máscara de pele (braços + V) e as
  * medidas guardadas ao lado: assets/busto-<kit>.png, -pele.png, .json. Só se
  * gera quando falta ou com --refazer-busto; `obterFonte()` devolve a figurinha
- * COM cabeça (PNG com alpha) — do ficheiro BUSTO_FONTE_GOLD no dark-gold, de uma
+ * COM cabeça (PNG com alpha) — do arquivo BUSTO_FONTE_GOLD no dark-gold, de uma
  * geração real no resto. Todas as fontes são trimadas e postas a 680 px de
  * altura, a escala em que as medidas foram afinadas.
  */

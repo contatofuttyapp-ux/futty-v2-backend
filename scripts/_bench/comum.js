@@ -137,7 +137,7 @@ function mulberry32(a) {
   };
 }
 
-/** CSV com aspas onde é preciso — as linhas levam nomes de ficheiro e parâmetros. */
+/** CSV com aspas onde é preciso — as linhas levam nomes de arquivo e parâmetros. */
 const paraCsv = (linhas) => linhas
   .map((l) => l.map((c) => (/[",;\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(','))
   .join('\n');

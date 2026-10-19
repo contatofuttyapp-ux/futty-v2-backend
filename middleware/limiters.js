@@ -3,7 +3,7 @@
 // Os gerais, montados em server.js e routes/media.js, estão no fim deste arquivo
 // (criarLimitesDaApi, criarLimiteDeAvatar, criarLimiteDeMidia).
 //
-// Os por rota, logo abaixo, são mais apertados e contam por UTILIZADOR (não por
+// Os por rota, logo abaixo, são mais apertados e contam por USUÁRIO (não por
 // IP) nas rotas que um único membro pode abusar sem sair do próprio limite de IP:
 // gerar convites sem fim, mandar push em massa, ou spammar denúncias. Correm
 // DEPOIS de requireAuth (precisam de req.user.id já resolvido).
@@ -11,7 +11,7 @@ const crypto = require('node:crypto');
 const { rateLimit, ipKeyGenerator } = require('express-rate-limit');
 const { ipRealDoPedido } = require('../utils/cloudflareIps');
 
-// Chave por utilizador autenticado; IP como fallback (rotas nunca deviam
+// Chave por usuário autenticado; IP como fallback (rotas nunca deviam
 // chegar aqui sem req.user, mas o fallback evita um TypeError se a ordem dos
 // middlewares mudar um dia). ipKeyGenerator normaliza IPv6 (evita bypass).
 function porUsuario(req) {
@@ -31,7 +31,7 @@ function criarLimiter({ windowMs, max, mensagem }) {
 
 const HORA = 60 * 60 * 1000;
 
-// POST /api/teams/:slug/convite — 10/hora por utilizador.
+// POST /api/teams/:slug/convite — 10/hora por usuário.
 const conviteLimiter = criarLimiter({
   windowMs: HORA,
   max: 10,
@@ -39,7 +39,7 @@ const conviteLimiter = criarLimiter({
 });
 
 // POST /api/push/equipas/:slug/broadcast e .../membros/:userId/mensagem —
-// 20/hora por admin, quota partilhada entre as duas rotas (mesma família de
+// 20/hora por admin, quota compartilhada entre as duas rotas (mesma família de
 // abuso: mandar push em massa).
 const pushAdminLimiter = criarLimiter({
   windowMs: HORA,
@@ -47,15 +47,15 @@ const pushAdminLimiter = criarLimiter({
   mensagem: 'Muitas notificações enviadas. Tente de novo daqui a uma hora.',
 });
 
-// POST /api/denuncias e /api/feed/denuncias — 20/hora por utilizador, quota
-// partilhada entre as duas rotas (mesma família: denunciar conteúdo).
+// POST /api/denuncias e /api/feed/denuncias — 20/hora por usuário, quota
+// compartilhada entre as duas rotas (mesma família: denunciar conteúdo).
 const denunciaLimiter = criarLimiter({
   windowMs: HORA,
   max: 20,
   mensagem: 'Muitas denúncias. Tente de novo daqui a uma hora.',
 });
 
-// POST /api/feed/upload — 60/hora por utilizador. Cada envio gasta CPU (compressão) e Storage (até 12 MB), e a cota de 500 MB do time só
+// POST /api/feed/upload — 60/hora por usuário. Cada envio gasta CPU (compressão) e Storage (até 12 MB), e a cota de 500 MB do time só
 // conta o que vira post: sem teto por pessoa, uma conta nova enchia o bucket sem anexar nada. Quatro anexos por post cabem 15 posts por hora.
 const uploadResenhaLimiter = criarLimiter({
   windowMs: HORA,
@@ -72,7 +72,7 @@ const excluirContaLimiter = criarLimiter({
   mensagem: 'Muitas tentativas de excluir a conta. Tente de novo daqui a 1 hora.',
 });
 
-// POST /api/diagnostico — 10/hora por utilizador. É um botão que se toca de propósito na tela de
+// POST /api/diagnostico — 10/hora por usuário. É um botão que se toca de propósito na tela de
 // Diagnóstico, não um fluxo automático; o tecto existe para um relatório enviado em loop não encher
 // o Storage.
 const diagnosticoLimiter = criarLimiter({

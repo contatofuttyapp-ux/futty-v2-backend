@@ -26,7 +26,7 @@ const NOSSAS = [
 ];
 
 async function toTensor(input) {
-  // input: caminho de ficheiro OU Buffer. RGB 224x224 int32.
+  // input: caminho de arquivo OU Buffer. RGB 224x224 int32.
   const { data } = await sharp(input)
     .flatten({ background: '#ffffff' }) // remove alfa
     .resize(224, 224, { fit: 'fill' })

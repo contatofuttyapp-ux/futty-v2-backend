@@ -14,7 +14,7 @@
 //      pelo dono.
 //
 // Depende da migração 054. SEM ela aplicada tudo aqui falha SEGURO: devolve
-// `{ fonte: null }` e regista um aviso — ninguém gera, ninguém gasta dinheiro.
+// `{ fonte: null }` e registra um aviso — ninguém gera, ninguém gasta dinheiro.
 // É o contrário do fail-open da cota da Resenha (utils/resenhaCota.js): lá o
 // pior caso é um time passar da cota; aqui seria a casa pagar US$0,11 por
 // cadastro, que é exatamente o que esta spec veio acabar.

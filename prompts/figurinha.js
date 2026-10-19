@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // O PROMPT DA FIGURINHA — fonte única.
 //
-// Este ficheiro é o prompt. `routes/auth.js` e a bancada
+// Este arquivo é o prompt. `routes/auth.js` e a bancada
 // (`scripts/_bench/testar-prompt.js`) importam daqui — nunca copiam.
 //
 // O prompt é a alavanca principal: mesmo modelo, mesma qualidade, mesma conta.

@@ -11,7 +11,7 @@ const { supabase } = require('../../utils/db');
 const BUCKETS = ['avatars', 'resenha', 'denuncias'];
 const LIMITE = 1000;
 
-/** Lista um bucket inteiro, recursivamente. Pastas (id === null) descem; ficheiros entram no total. */
+/** Lista um bucket inteiro, recursivamente. Pastas (id === null) descem; arquivos entram no total. */
 async function listarRecursivo(bucket, prefixo = '') {
   const objetos = [];
   let offset = 0;

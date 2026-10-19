@@ -1,11 +1,11 @@
-// Futty v2.0 — Painel super-admin (gestão global de utilizadores e equipas).
+// Futty v2.0 — Painel super-admin (gestão global de usuários e times).
 // Todas as rotas exigem requireSuperAdmin. Montado sem prefixo em server.js
 // (os paths /api/super/... são definidos aqui).
 //
 // ══ LEI DO DONO ══════════════════════════════════════════════════════════════
 // A Super age sobre a PLATAFORMA (contas, times, suspensão), NUNCA sobre o
 // CONTEÚDO (notas, votos, fotos). Moderação de conteúdo = SÓ pelo caminho
-// registado (denúncias → triagem → decisão em log append-only). Aqui não se vê
+// registrado (denúncias → triagem → decisão em log append-only). Aqui não se vê
 // nem se edita conteúdo de ninguém: só se suspende/reativa. Créditos e pacote
 // de Brilhante têm rota própria (routes/gabinete.js, aba "Brilhantes") — não
 // se mexe neles por aqui.
@@ -60,7 +60,7 @@ const alvoDoLog = (conta, id) => ({ id: conta?.id || id, apelido: conta ? nomePu
 const router = express.Router();
 
 /**
- * GET /api/super/users?page=1&limit=50 — lista paginada de utilizadores.
+ * GET /api/super/users?page=1&limit=50 — lista paginada de usuários.
  * Devolve { users, page, limit, total }.
  */
 router.get(
@@ -108,7 +108,7 @@ router.get(
 /**
  * PATCH /api/super/users/:id/suspender — suspende/reativa uma conta via FLAG de
  * plataforma. Body: { suspenso: true|false }. NÃO apaga nada, NÃO vê o conteúdo do
- * utilizador. Conta suspensa deixa de entrar (gate em requireAuth → 403 digno).
+ * usuário. Conta suspensa deixa de entrar (gate em requireAuth → 403 digno).
  */
 router.patch(
   '/api/super/users/:id/suspender',
@@ -209,7 +209,7 @@ router.patch(
 );
 
 // O Supabase devolve no máximo 1.000 linhas por resposta (o teto do PostgREST). Uma consulta sem paginação
-// corta a lista de equipas e a contagem de membros calado. Lê em páginas de 1.000 com .range até uma página vir menor.
+// corta a lista de times e a contagem de membros calado. Lê em páginas de 1.000 com .range até uma página vir menor.
 // A ordem tem de ser TOTAL para as páginas não se repetirem nem pularem linhas: quem chama termina o .order() com 'id'.
 const PAGINA_SUPABASE = 1000;
 async function lerTudo(consulta) {
@@ -223,7 +223,7 @@ async function lerTudo(consulta) {
 }
 
 /**
- * GET /api/super/teams — lista todas as equipas com nr. de membros e uso de
+ * GET /api/super/teams — lista todos os times com nr. de membros e uso de
  * mídia da Resenha (cota de 500 MB por time). Lê tudo, sem teto de 1.000.
  */
 router.get(
@@ -263,8 +263,8 @@ router.get(
 );
 
 /**
- * PATCH /api/super/teams/:id/suspender — suspende/reativa uma equipa via FLAG de
- * plataforma. Body: { suspensa: true|false }. NÃO edita o interior da equipa. Equipa
+ * PATCH /api/super/teams/:id/suspender — suspende/reativa um time via FLAG de
+ * plataforma. Body: { suspensa: true|false }. NÃO edita o interior do time. Time
  * suspensa fica invisível na descoberta e inacessível (getTeamBySlug devolve 404).
  */
 router.patch(
@@ -278,7 +278,7 @@ router.patch(
 );
 
 /**
- * DELETE /api/super/teams/:id — apaga uma equipa (cascade nas FKs).
+ * DELETE /api/super/teams/:id — apaga um time (cascade nas FKs).
  * Exige confirmação explícita no body: { confirmar: 'APAGAR' }.
  */
 router.delete(

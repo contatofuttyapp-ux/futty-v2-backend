@@ -56,13 +56,13 @@ const statusEfetivoJogo = (game) => estadoDoJogo(game);
 // Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do
 // time), não no do servidor (o Cloud Run roda em UTC: "20:30" de São Paulo saía como "23:30").
 
-/** IDs dos membros de uma equipa (para notificações). */
+/** IDs dos membros de um time (para notificações). */
 async function membrosDaEquipa(teamId) {
   const { data } = await supabase.from('team_members').select('user_id').eq('team_id', teamId);
   return (data || []).map((m) => m.user_id);
 }
 
-/** POST /api/games — cria um jogo (só admin da equipa). */
+/** POST /api/games — cria um jogo (só admin do time). */
 router.post(
   '/api/games',
   requireAuth,
@@ -122,7 +122,7 @@ router.post(
   })
 );
 
-/** GET /api/teams/:slug/games — lista os jogos da equipa (com nº de confirmados). */
+/** GET /api/teams/:slug/games — lista os jogos do time (com nº de confirmados). */
 router.get(
   '/api/teams/:slug/games',
   requireAuth,
@@ -174,8 +174,8 @@ router.get(
 );
 
 /**
- * GET /api/games/my-invites — todos os jogos das equipas do utilizador.
- * Registado ANTES de /api/games/:id para não colidir com o param :id.
+ * GET /api/games/my-invites — todos os jogos dos times do usuário.
+ * Registrado ANTES de /api/games/:id para não colidir com o param :id.
  */
 // Lógica em services/inicio.js#obterConvites — a MESMA função que GET /api/inicio
 // usa, para o JSON nunca divergir entre as duas rotas.
@@ -206,7 +206,7 @@ router.get(
         .from('game_players')
         .select('confirmado, goleiro, cabeca_chave, users ( id, nome, nome_jogador, email, avatar_url, avatar_generico )')
         .eq('game_id', game.id),
-      // Inactivos da equipa: preservados no histórico mas fora do sorteio.
+      // Inativos do time: preservados no histórico mas fora do sorteio.
       supabase.from('team_members').select('user_id').eq('team_id', game.teams.id).eq('ativo', false),
       // Gols por jogador (só relevante no nível 3 do resultado).
       game.resultado_nivel === 3
@@ -321,7 +321,7 @@ router.get(
 
 /**
  * GET /api/p/:gameId — vista pública do sorteio (sem auth, para partilha/telão).
- * Devolve só o essencial: nome da equipa, times do sorteio e o resultado.
+ * Devolve só o essencial: nome do time, times do sorteio e o resultado.
  */
 router.get(
   '/api/p/:gameId',
@@ -396,7 +396,7 @@ router.get(
 
 /**
  * POST /api/games/:id/partilha-declarada — TERMO de quem partilha (1-clique).
- * Registo de auditoria: quem copiou/partilhou o link declarou ter o direito de o
+ * Registro de auditoria: quem copiou/partilhou o link declarou ter o direito de o
  * fazer. NÃO altera a privacidade (a regra de rosto é independente e sempre ligada);
  * é só a cobertura legal. Idempotente (upsert por game+user).
  */
@@ -406,7 +406,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const game = await loadGame(req.params.id);
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
-    // só quem tem papel na equipa (membro/admin) pode declarar a partilha
+    // só quem tem papel no time (membro/admin) pode declarar o compartilhamento
     const role = await getRole(game.teams.id, req.user.id);
     if (!role) throw new HttpError(403, 'Sem permissão para compartilhar este sorteio.');
     const { error } = await supabase
@@ -558,10 +558,10 @@ router.post(
 
 /**
  * POST /api/games/:id/presencas — ADMIN marca quem jogou (jogo manual/retroativo).
- * Distinto do self-confirm: aqui o ADMIN da equipa marca a presença de TERCEIROS a
+ * Distinto do self-confirm: aqui o ADMIN do time marca a presença de TERCEIROS a
  * partir de uma checklist. Autoritativo: os user_id enviados ficam confirmados; os
  * membros confirmados que NÃO vierem na lista são desmarcados (a lista é a verdade).
- * Body: { jogadores: [{ user_id, goleiro? }] }. Só membros da equipa entram.
+ * Body: { jogadores: [{ user_id, goleiro? }] }. Só membros do time entram.
  */
 router.post(
   '/api/games/:id/presencas',
@@ -573,7 +573,7 @@ router.post(
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem marcar presenças por outros.');
 
     const lista = Array.isArray(req.body?.jogadores) ? req.body.jogadores : [];
-    // valida que cada user_id é membro da equipa
+    // valida que cada user_id é membro do time
     const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', game.teams.id);
     const membroIds = new Set((membros || []).map((m) => m.user_id));
     // Quem só organiza o time não joga — não entra no elenco nem pela checklist do admin.
@@ -676,7 +676,7 @@ router.post(
 
     const usarSubset = Array.isArray(jogadoresIds) && jogadoresIds.length > 0;
     if (usarSubset) {
-      // Valida que todos os IDs pertencem à equipa do jogo.
+      // Valida que todos os IDs pertencem ao time do jogo.
       const { data: membros } = await supabase
         .from('team_members')
         .select('user_id')
@@ -696,7 +696,7 @@ router.post(
     if (usarSubset) gpQuery = gpQuery.in('user_id', jogadoresIds);
     const { data: gp } = await gpQuery;
 
-    // Exclui jogadores inactivos do sorteio (ficam no histórico, não jogam).
+    // Exclui jogadores inativos do sorteio (ficam no histórico, não jogam).
     const { data: inativosRows } = await supabase
       .from('team_members')
       .select('user_id')
@@ -878,7 +878,7 @@ router.patch(
 );
 
 // NOTA: a votação por jogo (POST /api/games/:id/votar) foi removida — o novo
-// modelo é 1 voto por (votante, votado, equipa), gerido em routes/ranking.js.
+// modelo é 1 voto por (votante, votado, time), gerido em routes/ranking.js.
 
 /**
  * PATCH /api/games/:id — edita um jogo não sorteado (só admin).
@@ -991,7 +991,7 @@ router.post(
 
     res.json({ ok: true, game: { ...updated, fuso: fusoDoTime(game.teams) } });
 
-    // Notifica todos os membros da equipa (fire-and-forget, após responder).
+    // Notifica todos os membros do time (fire-and-forget, após responder).
     const membros = await membrosDaEquipa(game.teams.id);
     const corpo = `O jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))} foi cancelado.` + (motivo ? ` Motivo: ${motivo}` : '');
     enviarNotificacao(membros, {
@@ -1077,7 +1077,7 @@ router.post(
       datas.push(instanteNoFuso(diaDoCalendario(deslocamento + 7 * i), horaTexto, fuso));
     }
 
-    // Jogos já existentes da equipa (para detetar colisões ± 1 hora).
+    // Jogos já existentes do time (para detectar colisões ± 1 hora).
     const primeira = datas[0];
     const ultima = datas[datas.length - 1];
     const { data: existentes } = await supabase

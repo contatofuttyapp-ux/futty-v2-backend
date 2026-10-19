@@ -2,14 +2,14 @@
 //
 // O app mede-se a si próprio (frontend/src/lib/diagnostico.js) e a pessoa pode
 // enviar o que mediu. Isto guarda esse JSON. À boleia do padrão do
-// denunciaStore/gabineteStore: sem DDL, cada relatório é um ficheiro no bucket
+// denunciaStore/gabineteStore: sem DDL, cada relatório é um arquivo no bucket
 // privado "denuncias", debaixo do prefixo "_diagnostico/" — o mesmo sítio onde
 // já vive o "_gabinete/operacao.json".
 //
-// Um ficheiro por envio, nomeado pelo instante: ordenar por nome é ordenar por
+// Um arquivo por envio, nomeado pelo instante: ordenar por nome é ordenar por
 // tempo, e não é preciso índice nenhum para saber quais são os últimos.
 //
-// O que aqui entra não tem corpo de pedido, token nem conteúdo de utilizador —
+// O que aqui entra não tem corpo de pedido, token nem conteúdo de usuário —
 // só rotas, estados e tempos (ver o que o frontend recolhe).
 const { supabase } = require('./db');
 
@@ -29,7 +29,7 @@ function caminho(userId, ficheiro) {
   return `${PREFIXO}/${userId}/${ficheiro}`;
 }
 
-/** Guarda um relatório. Devolve o nome do ficheiro criado. */
+/** Guarda um relatório. Devolve o nome do arquivo criado. */
 async function guardarRelatorio(userId, relatorio) {
   if (!ID_SEGURO.test(String(userId))) throw new Error('userId inválido');
 
@@ -62,14 +62,14 @@ async function obterRelatorio(userId, ficheiro) {
 }
 
 /**
- * Os `limite` relatórios mais recentes, de todos os utilizadores. O nome do
- * ficheiro é o instante ISO, por isso ordenar por nome é ordenar por tempo.
+ * Os `limite` relatórios mais recentes, de todos os usuários. O nome do
+ * arquivo é o instante ISO, por isso ordenar por nome é ordenar por tempo.
  * Traz um resumo de cada um (plataforma, médias) — o JSON inteiro só é buscado
  * quando o dono abre um.
  */
 async function listarUltimos(limite = 20) {
   const { data: pastas } = await supabase.storage.from(BUCKET).list(PREFIXO, { limit: 200 });
-  // Pastas não têm id no Storage do Supabase; ficheiros soltos aqui, se
+  // Pastas não têm id no Storage do Supabase; arquivos soltos aqui, se
   // existissem, não interessam.
   const utilizadores = (pastas || []).filter((p) => !p.id).map((p) => p.name);
 

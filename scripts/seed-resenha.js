@@ -6,7 +6,7 @@
 //   node backend/scripts/seed-resenha.js             (aplica na BD)
 //
 // Idempotente: verifica antes de inserir (não duplica). Busca todos os IDs em
-// runtime a partir da equipa "domingueira" e dos membros migrados.
+// runtime a partir do time "domingueira" e dos membros migrados.
 
 const { supabase } = require('../utils/db');
 
@@ -52,7 +52,7 @@ function montarTimes(jogadores) {
 (async () => {
   console.log(`\n=== Seed Resenha ${DRY ? '(DRY-RUN — sem escrever)' : '(A ESCREVER NA BD)'} ===`);
 
-  // 1) Equipa
+  // 1) Time
   const { data: team } = await supabase.from('teams').select('id, nome, slug').eq('slug', TEAM_SLUG).maybeSingle();
   if (!team) {
     err(`Equipa "${TEAM_SLUG}" não encontrada. Corre primeiro a migração de perfis.`);

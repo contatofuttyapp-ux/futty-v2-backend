@@ -40,7 +40,7 @@ async function agregadosDaEquipa(teamId, { jogos } = {}) {
   return { golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap, gameIds };
 }
 
-/** Total de golos de um jogador — todos os jogos, todas as times (para o /api/me). */
+/** Total de gols de um jogador — todos os jogos, todos os times (para o /api/me). */
 async function golosDoJogador(userId) {
   const { data } = await supabase.from('gols_jogadores').select('gols').eq('user_id', userId);
   return (data || []).reduce((s, r) => s + (r.gols || 0), 0);

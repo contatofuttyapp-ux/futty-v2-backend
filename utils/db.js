@@ -24,9 +24,9 @@ const supabase = createClient(SUPABASE_URL, CHAVE_SECRETA, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-/** Procura uma equipa pelo slug. Devolve null se não existir OU se estiver
+/** Procura um time pelo slug. Devolve null se não existir OU se estiver
  *  suspensa pela plataforma (equipa suspensa = invisível e inativa em TODAS as
- *  rotas de equipa; a Super mexe pelo team.id, por isso mantém o controlo).
+ *  rotas de time; a Super mexe pelo team.id, por isso mantém o controlo).
  *  Lazy-require do store para evitar dependência circular (plataformaStore → db). */
 async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, created_at') {
   const cols = /(^|,\s*)id(\s*,|$)/.test(columns) ? columns : `id, ${columns}`;
@@ -45,13 +45,13 @@ async function getTeamBySlug(slug, columns = 'id, nome, slug, cor, criado_por, c
   return data;
 }
 
-/** Procura um utilizador pelo id. Devolve null se não existir. */
+/** Procura um usuário pelo id. Devolve null se não existir. */
 async function getUserById(id, columns = 'id, nome, nome_jogador, email, avatar_url, avatar_generico') {
   const { data } = await supabase.from('users').select(columns).eq('id', id).maybeSingle();
   return data || null;
 }
 
-/** Role do utilizador na equipa ('admin' | 'member') ou null se não for membro. */
+/** Role do usuário no time ('admin' | 'member') ou null se não for membro. */
 async function getRole(teamId, userId) {
   const { data } = await supabase
     .from('team_members')
@@ -62,7 +62,7 @@ async function getRole(teamId, userId) {
   return data?.role || null;
 }
 
-// Memo em memória (13-set, "Velocidade 3"): ensureUserRow é chamado em TODO
+// Memo em memória: ensureUserRow é chamado em TODO
 // /api/me (obterMe) — um upsert por pedido, mesmo quando a linha já existe há
 // muito. Chave inclui email/birthdate: se algum mudar (troca de email,
 // birthdate preenchida tardiamente) o próximo pedido volta a fazer upsert
@@ -75,7 +75,7 @@ const ensureUserCache = new Map(); // `${id}:${email}:${birthdate}` -> expiraEm
 
 /** Garante que existe a linha em public.users (o trigger pode não ter corrido).
  * Persiste também a birthdate enviada no signUp (user_metadata) quando válida —
- * é a forma de capturar a data do registo, já que o registo é feito via Supabase
+ * é a forma de capturar a data do registro, já que o registro é feito via Supabase
  * Auth no frontend (não há POST /api/auth/register). */
 async function ensureUserRow(user) {
   const row = { id: user.id, email: user.email };
@@ -112,7 +112,7 @@ async function ensureAvatarsBucket() {
 }
 
 /**
- * Carrega a equipa pelo slug e valida que o utilizador é membro.
+ * Carrega o time pelo slug e valida que o usuário é membro.
  * Lança HttpError(404) se não existir, HttpError(403) se não for membro.
  * @returns {Promise<{team: object, role: string}>}
  */
@@ -124,7 +124,7 @@ async function requireTeamMember(slug, userId) {
   return { team, role };
 }
 
-/** Carrega um jogo com a equipa associada (game.teams, com o fuso, a cidade e o escudo dela). Null se não existir. */
+/** Carrega um jogo com o time associado (game.teams, com o fuso, a cidade e o escudo dele). Null se não existir. */
 async function loadGame(id) {
   const { data } = await lerComFuso((novas) => supabase
     .from('games')
@@ -149,7 +149,7 @@ async function currentVotingGame(teamId) {
 }
 
 /**
- * Calcula o rating (média das notas recebidas, de 0 a 10) de cada user_id na equipa.
+ * Calcula o rating (média das notas recebidas, de 0 a 10) de cada user_id no time.
  * Quem não tem votos fica com RATING_DEFAULT.
  * @returns {Promise<Record<string, number>>} mapa user_id -> rating
  */

@@ -1,8 +1,8 @@
 // Futty v2.0 — Gabinete do Dono (/gabinete). Rota super-admin exclusiva.
 // Camada de LEITURA agregada (série temporal, pulso, vida, marcos) + store editável
 // (Operação/Publicidade). Lei da casa: o dono é CEGO ao conteúdo — só números.
-// Receita: tabela compras (migração 064). Publicidade (medição de ads) ainda não tem fonte real →
-// "em breve" digno, SEM inventar números. Ver SPEC-GABINETE v3.
+// Receita: tabela compras (migração 064). Publicidade: as campanhas da casa, medidas em utils/adsStore.js (impressão/clique),
+// lidas na aba Publicidade; receita de rede de anúncios não existe — nada de inventar números. Ver SPEC-GABINETE v3.
 const express = require('express');
 const { requireSuperAdmin } = require('../middleware/auth');
 const { LIMITES } = require('../middleware/limiters');
@@ -33,7 +33,7 @@ const TETO_DIARIO_CENTS = Number(process.env.TETO_DIARIO_CENTS) || 5000;
 // Rate limiters ativos — manifesto estático (não há API pública do
 // express-rate-limit para ler a config de volta de uma instância já criada). Os
 // quatro primeiros leem os tetos de middleware/limiters.js (LIMITES), os mesmos que
-// os limiters usam; os por utilizador abaixo seguem sincronizados à mão com aquele
+// os limiters usam; os por usuário abaixo seguem sincronizados à mão com aquele
 // arquivo.
 const EM_DEV = process.env.NODE_ENV === 'production' ? '' : ' (dev)';
 const RATE_LIMITS_ATIVOS = [
@@ -133,7 +133,7 @@ router.get(
       jogos: vJogos.vals,
     };
 
-    // ── MARCOS (reais: campeões + equipas novas) ──
+    // ── MARCOS (reais: campeões + times novos) ──
     const marcos = [];
     camps.filter((c) => c.estado === 'terminado' && c.campeao)
       .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''))
@@ -162,7 +162,7 @@ router.get(
       vida,
       marcos,
       receita_disponivel: receitaDisponivel, // true depois da 1ª compra de loja
-      publicidade_disponivel: false, // medição de ads (impressão/clique) ainda não existe
+      publicidade_disponivel: false, // o resumo não traz publicidade; as métricas dos anúncios ficam na aba Publicidade (nenhuma tela lê este campo)
     });
   })
 );
@@ -352,9 +352,9 @@ router.get(
 // ═══════════════════════════════════════════════════════════════════════════
 // FIGURINHAS BRILHANTES (SPEC-FIGURINHA-3 §7)
 //
-// Enquanto a compra na loja não existe, é AQUI que o pedido vira produto: a
-// pessoa toca em "Pedir ativação" (Planos/Figurinha), o pedido cai em
-// `pedidos_ativacao`, e o dono ativa à mão nesta aba.
+// Onde a loja não está aberta (o site, ou uma plataforma fora de PAGAMENTOS_PLATAFORMAS — utils/lojaPronta.js), é AQUI
+// que o pedido vira produto: a pessoa toca em "Pedir ativação" (Planos/Figurinha), o pedido cai em
+// `pedidos_ativacao`, e o dono ativa à mão nesta aba. Nas lojas, a compra credita sozinha pelo webhook do RevenueCat.
 //
 // Ativar o pacote NÃO gera nada em lote (§5, geração preguiçosa): cada membro
 // gera quando abre o app. É o que impede um time de 25 custar US$2,80 na hora

@@ -1,4 +1,4 @@
-// Futty v2.0 — Seed de estatísticas e fotos de campeão para a equipa mock.
+// Futty v2.0 — Seed de estatísticas e fotos de campeão para o time mock.
 //
 // 1) Define vitórias/gols/artilharia/destaque aleatórios nos jogadores mock
 // 2) Copia algumas fotos da v1 para backend/public/uploads
@@ -52,7 +52,7 @@ function isMissingSchema(error) {
 }
 
 async function main() {
-  // Equipa
+  // Time
   const { data: team } = await supabase
     .from('teams')
     .select('id, nome')

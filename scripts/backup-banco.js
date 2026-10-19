@@ -20,7 +20,7 @@ const { supabase } = require('../utils/db'); // cliente service_role já configu
 
 // NB: campeonatos_v2/campeonato_times/campeonato_confrontos (migração 039, modelo de campeonato N-times)
 // ficam DE FORA — confirmado ao vivo que ainda não existem (PGRST205), a v1 do campeonato guarda tudo
-// como JSON no Storage. Junta-as aqui no dia em que a 039 for de facto aplicada.
+// como JSON no Storage. Junta-as aqui no dia em que a 039 for de fato aplicada.
 const TABELAS = [
   'users', 'teams', 'team_members', 'games', 'votes',
   'comentarios', 'comentario_anexos', 'feed_posts', 'feed_post_media', 'reacoes',
@@ -124,7 +124,7 @@ async function main() {
   if (falhas.length) {
     console.log(`[backup] falharam: ${falhas.join(', ')}`);
     process.exitCode = 1;
-    return; // corrida com falhas — não regista como "último backup" bem-sucedido
+    return; // corrida com falhas — não registra como "último backup" bem-sucedido
   }
 
   // O semáforo "último backup" da aba Segurança lê daqui.

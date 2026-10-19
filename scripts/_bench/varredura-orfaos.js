@@ -3,7 +3,7 @@
 // apagarUsuario() já limpa o Storage de CADA usuário apagado (avatar/foto,
 // slots, mídia da Resenha, varrimento por prefixo). O que sobra depois disso
 // são objetos cujo DONO já não existe mas cujo CAMINHO não bate com nenhum
-// prefixo de usuário conhecido (ficheiros antigos, de antes do nome-por-
+// prefixo de usuário conhecido (arquivos antigos, de antes do nome-por-
 // versão, ou de fluxos que nunca gravaram a URL numa linha da BD).
 //
 // Compara cada objeto do bucket contra as URLs REALMENTE referenciadas agora

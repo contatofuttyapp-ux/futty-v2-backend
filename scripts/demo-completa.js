@@ -94,7 +94,7 @@ const emailDe = (j) => `${PREFIXO}-${j.slug.normalize('NFD').replace(/[̀-ͯ]/g,
 const porApelido = (a) => JOGADORES.find((j) => j.apelido === a);
 
 // ─── Times ───────────────────────────────────────────────────────────────────
-// created_at ANTIGO de propósito: o Início usa a equipa MAIS ANTIGA do utilizador
+// created_at ANTIGO de propósito: o Início usa o time MAIS ANTIGO do usuário
 // como "time principal" (routes/inicio.js: teams[0], ordenado por created_at ASC).
 // Sem isto, o card de campeonato/votação/RSVP apontaria para outro time do dono.
 const TIME = {
@@ -192,7 +192,7 @@ const ANUNCIO = {
 // Não há nenhum .gif no repo e um GIF de terceiro (Giphy/Tenor) seria uma
 // dependência externa numa tela do app — contra a regra "tudo definitivo" do
 // CLAUDE.md. O sharp desta versão não escreve GIF animado (ignora pageHeight),
-// por isso monta-se o ficheiro à mão: paleta de 3 cores e LZW em modo literal
+// por isso monta-se o arquivo à mão: paleta de 3 cores e LZW em modo literal
 // (sem dicionário — pesa mais, mas são 45 KB e zero dependências).
 function lzwLiteral(indices, minCodeSize) {
   const clear = 1 << minCodeSize;

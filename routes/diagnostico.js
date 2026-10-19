@@ -5,7 +5,7 @@
 // posto pelo backend em todo pedido) do tempo de REDE, e mostra quanto demora
 // entre tocar numa aba e a tela aparecer.
 //
-// O que entra aqui não tem corpo de pedido, token, nem conteúdo de utilizador —
+// O que entra aqui não tem corpo de pedido, token, nem conteúdo de usuário —
 // só rotas, estados e tempos. Ver frontend/src/lib/diagnostico.js.
 const express = require('express');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
@@ -16,7 +16,7 @@ const { guardarRelatorio, obterRelatorio, listarUltimos } = require('../utils/di
 const router = express.Router();
 
 // Envio do relatório pela própria pessoa (botão na tela Perfil → Diagnóstico).
-// 10/hora por utilizador: é um botão que se toca de propósito, não um fluxo.
+// 10/hora por usuário: é um botão que se toca de propósito, não um fluxo.
 router.post(
   '/api/diagnostico',
   requireAuth,

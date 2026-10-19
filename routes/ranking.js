@@ -55,10 +55,10 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
   // A presença só conta em jogo que já aconteceu: confirmar num jogo de amanhã ainda não é ter jogado.
   const gameIds = idsDosJogosQueAconteceram(jogos);
 
-  // Os golos (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
+  // Os gols (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
   // vez de em série.
   const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap }, { data: gps }] = await Promise.all([
-    // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper partilhado; uma verdade). ──
+    // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper compartilhado; uma verdade). ──
     agregadosDaEquipa(teamId, { jogos: jogos || [] }),
     // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
     // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
@@ -67,7 +67,7 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
       : { data: [] },
   ]);
 
-  // Só membros visíveis (admin pode ocultar) e activos. Default visível/activo.
+  // Só membros visíveis (admin pode ocultar) e ativos. Default visível/ativo.
   const rows = (membros || []).filter((m) => m.users && m.visivel_ranking !== false && m.ativo !== false && !organizam.has(m.user_id));
   // Jogos por jogador = jogos DIFERENTES com presença: a confirmada e a de fundador (que não duplica quem também confirmou).
   const presencas = comPresencaDeFundador((gps || []).map((gp) => ({ ...gp, confirmado: true })), jogosFundador, rows.map((m) => m.user_id));
@@ -255,7 +255,7 @@ router.get(
 
     // ── ONDA 2 — tudo o que só depende do team.id (e de quem pede).
     // Os jogos do time servem o histórico DAQUI e os agregados do ranking: uma
-    // leitura só, partilhada. O construtor do PostgREST dispara uma consulta nova a
+    // leitura só, compartilhada. O construtor do PostgREST dispara uma consulta nova a
     // cada `.then`, por isso vira promessa de verdade antes de ser passada adiante.
     const jogosP = Promise.resolve(
       supabase
@@ -302,7 +302,7 @@ router.get(
     const partilhadasIds = [...new Set((equipasDele || []).map((m) => m.team_id).filter((id) => meusIds.has(id)))];
 
     // ── ONDA 3 — precisa dos gameIds e dos times partilhados (onda 2). O ranking
-    // acaba aqui: arrancou na onda 2 e ainda lhe faltava uma ida (golos + presenças).
+    // acaba aqui: arrancou na onda 2 e ainda lhe faltava uma ida (gols + presenças).
     const [ranking, { data: partsLidas }, { data: eqs }, { data: posts }, jogosFundador] = await Promise.all([
       rankingP,
       // Participações do jogador nos jogos do time.

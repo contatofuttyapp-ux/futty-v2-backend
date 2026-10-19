@@ -1,4 +1,4 @@
-// Futty v2.0 — Rotas de autenticação / utilizador.
+// Futty v2.0 — Rotas de autenticação / usuário.
 // (O login/registo é feito no frontend via Supabase Auth; aqui expomos o perfil.)
 const express = require('express');
 const multer = require('multer');
@@ -47,11 +47,11 @@ const { parseUrlPublico } = require('../utils/storage');
 
 const router = express.Router();
 
-// Upload do avatar: ficheiro em memória, só imagens, máximo 5MB.
+// Upload do avatar: arquivo em memória, só imagens, máximo 5MB.
 const MAX_AVATAR = 5 * 1024 * 1024;
 const AVATAR_MIME = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 const MIMES_DA_FOTO = Object.keys(AVATAR_MIME);
-// "Escolher outra foto" manda dois ficheiros no mesmo pedido: o
+// "Escolher outra foto" manda dois arquivos no mesmo pedido: o
 // recorte 2:3 (campo "avatar", como sempre) e, opcional, a foto ORIGINAL
 // antes do recorte (campo "original", para "Ajustar enquadramento" mais
 // tarde). .fields() em vez de .single(): quem só manda "avatar" (Onboarding,
@@ -112,7 +112,7 @@ function receberAvatar(req, res, next) {
   });
 }
 
-// PUT /api/me/avatar/recorte: um ficheiro só (campo "recorte"),
+// PUT /api/me/avatar/recorte: um arquivo só (campo "recorte"),
 // o resultado de reabrir o CropModal sobre a original (ou o fallback, sobre
 // o recorte atual). Mesmo teto/mesmos tipos do avatar normal.
 const uploadRecorteMw = multer({
@@ -162,7 +162,7 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 // LEI DA REGRA JUSTA (sem punição retroativa): o gate só corre AQUI, no PATCH
 // que TROCA fundo_figurinha — nunca em leitura (GET /api/me) nem no render.
 // Quem já tinha Aura equipado antes deste gate MANTÉM (a coluna já gravada
-// nunca é revalidada até o próprio utilizador mexer nela). Só ao tentar
+// nunca é revalidada até o próprio usuário mexer nela). Só ao tentar
 // EQUIPAR de novo (depois de trocar pra outro fundo) é que o direito volta a
 // ser exigido — ninguém perde o que já tinha, mas ninguém re-adquire de graça.
 // Ver Figurinha.jsx `escolherFundo` (o `if (k === fundo) return` early-return
@@ -175,7 +175,7 @@ const AVATARES_GENERICOS = ['m1', 'm2', 'm3', 'f1', 'f2', 'f3'];
 const FUNDOS_PREMIUM = ['golden', 'aura', 'royal'];
 // MORTO desde 22-set (SPEC-FIGURINHA-3): quem manda na geração é o DIREITO
 // (utils/direitoBrilhante.js), não o plano. Nada lê esta tabela — nem esta rota,
-// nem o Gabinete. Fica só como registo do modelo antigo (grátis 2 / Pro 10 /
+// nem o Gabinete. Fica só como registro do modelo antigo (grátis 2 / Pro 10 /
 // Elite 20 por mês) até a limpeza que também apaga users.avatar_ia_mes/_reset e
 // tira `plan` das telas. Não voltar a ligar sem decisão do dono.
 // eslint-disable-next-line no-unused-vars
@@ -205,7 +205,7 @@ async function recusarMenor(req) {
 }
 
 /**
- * GET /api/me — devolve o utilizador autenticado + stats agregadas.
+ * GET /api/me — devolve o usuário autenticado + stats agregadas.
  * Garante também a linha em public.users (caso o trigger não tenha corrido).
  * Lógica em services/inicio.js#obterMe — a MESMA função que GET /api/inicio usa,
  * para o JSON nunca divergir entre as duas rotas.
@@ -222,7 +222,7 @@ router.get(
 );
 
 /**
- * PATCH /api/me — atualiza o perfil do utilizador (só os campos enviados).
+ * PATCH /api/me — atualiza o perfil do usuário (só os campos enviados).
  * Body (todos opcionais): nome, nome_jogador, cor_preferida, fundo_figurinha, avatar_generico, birthdate… (avatar_url só aceita null, para limpar).
  */
 router.patch(
@@ -461,7 +461,7 @@ router.post(
     if (upOriginal?.error) console.error('[avatar] upload da original falhou (segue sem ela):', upOriginal.error.message);
 
     const { data: pub } = supabase.storage.from('avatars').getPublicUrl(caminho);
-    // O ?v= já não é o que garante a actualização (o caminho é novo a cada
+    // O ?v= já não é o que garante a atualização (o caminho é novo a cada
     // foto), mas fica: é o que distingue versões no proxy de mídia, que usa o
     // `v` na chave de cache dos derivados.
     const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
@@ -672,7 +672,7 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
   return data.signedUrl;
 }
 
-// ── Nomes de ficheiro POR VERSÃO ─────────────────────────────────────────────
+// ── Nomes de arquivo POR VERSÃO ─────────────────────────────────────────────
 //
 // O padrão antigo era `public/<userId>.<ext>` para a foto e
 // `public/<userId>-ai-<kit>.png` para a figurinha, com upsert por cima. Um caminho que muda de
@@ -681,7 +681,7 @@ async function assinarUrlAvatars(caminho, ttlSeg = 600) {
 // esquecerem. Com o carimbo de tempo no nome, cada versão é um OBJETO NOVO —
 // URL diferente, cache sem nada a dizer.
 //
-// Quem já tem ficheiro no nome antigo fica como está até trocar de foto: a
+// Quem já tem arquivo no nome antigo fica como está até trocar de foto: a
 // LEITURA sai sempre de `users.foto_url` / `avatar_url`, que guardam o caminho
 // completo, e por isso aceita os dois padrões sem saber a diferença.
 const caminhoFotoNovo = (userId, ext) => `public/${userId}-${Date.now()}.${ext}`;
@@ -693,8 +693,8 @@ const caminhoFigurinhaNova = (userId, kitId) => `public/${userId}-ai-${kitId}-${
 /**
  * Apaga um objeto do bucket `avatars` que deixou de ser usado.
  * Best-effort de propósito: falhar a limpeza nunca pode derrubar um upload ou
- * uma geração que já correram bem — o pior caso é um ficheiro órfão, e isso
- * conta-se no log em vez de se atirar para cima do utilizador.
+ * uma geração que já correram bem — o pior caso é um arquivo órfão, e isso
+ * conta-se no log em vez de se atirar para cima do usuário.
  */
 async function apagarAntigo(caminho, motivo) {
   if (!caminho) return;
@@ -1000,7 +1000,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   // A fal só lê URLs públicos. A imagem do meio (o jogador sobre o cinza,
   // entre as duas passadas) vai para o bucket privado `avatars` com URL
   // ASSINADO de vida curta — nunca para um bucket público, porque é a cara
-  // do utilizador. É apagada no fim, dê no que der.
+  // do usuário. É apagada no fim, dê no que der.
   const publicar = async (nomeFicheiro, buffer, tipo) => {
     const caminho = `tmp/${userId}-${Date.now()}-${nomeFicheiro}`;
     const { error } = await supabase.storage.from('avatars').upload(caminho, buffer, {
@@ -1027,7 +1027,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
       // inteira do fal (body/response, que pode incluir o inputUrl assinado
       // enviado no pedido) — fica só o código de erro e a mensagem curta.
       console.error('[avatar-ai] erro fal:', { status: err.status, message: err.message });
-      // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (ficheiro
+      // fal não conseguiu DESCARREGAR/DECODIFICAR a foto de entrada (arquivo
       // corrompido ou inacessível) — causa acionável (fotografia, não instabilidade
       // do serviço). Código próprio para o frontend distinguir sem depender do texto.
       let corpo = err.body;
@@ -1039,7 +1039,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
         throw new HttpError(422, 'Sua foto não pôde ser processada. Tente enviar uma foto nova.', 'FOTO_INVALIDA');
       }
       // Chave inválida, conta sem permissão ou sem crédito na fal — falha do
-      // MOTOR, não da foto do utilizador (não sugerir "tente outra foto").
+      // MOTOR, não da foto do usuário (não sugerir "tente outra foto").
       // ALERTA no log: precisa de ação humana (chave/plano fal), não é
       // instabilidade passageira.
       if ([401, 403, 402].includes(err.status)) {
@@ -1179,7 +1179,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   console.log('[avatar-ai] etapa 3 - resize OK');
 
   await ensureUserRow(req.user);
-  // Um ficheiro POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
+  // Um arquivo POR KIT E POR VERSÃO → os slots não se sobrepõem entre si, e
   // a figurinha nova não escreve por cima da velha. Sem upsert: o
   // carimbo de tempo torna colisão impossível, e se algum dia houvesse, o
   // certo é rebentar aqui em vez de apagar o trabalho de outra chamada.
@@ -1195,7 +1195,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
 
   // Guarda o SLOT deste kit (upsert por (user_id, kit_id)) → a próxima vez que o
-  // utilizador pedir este kit COM A MESMA FOTO é servido do slot, sem gerar
+  // usuário pedir este kit COM A MESMA FOTO é servido do slot, sem gerar
   // nem gastar quota. foto_fingerprint = foto_hash atual (migração 052) —
   // é o que a checagem de reuso acima compara na próxima chamada.
   const { error: slotErr } = await supabase
@@ -1226,7 +1226,7 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
 
   // Pacote anti-abuso: soma o gasto do dia, guarda o log de IP e
   // dispara alertas/auto-freeze se algum sinal bater. Fire-and-forget (nunca
-  // derruba a resposta — a figurinha já foi entregue ao utilizador).
+  // derruba a resposta — a figurinha já foi entregue ao usuário).
   // Vai o custo REAL em cêntimos, somado de todas as chamadas desta
   // geração (retry incluído). `null` só quando a fal não mandou header nenhum
   // — nesse caso quem decide o valor é o antiAbusoIA, não este sítio.
@@ -1252,9 +1252,9 @@ async function pintarFigurinha({ req, userId, perfil, origem, direitoUsado, kitI
   await debitar(direitoUsado, { userId, kitId, avatarUrl, custoCents });
 
   // A imagem do meio (o jogador sobre o cinza, entre as duas passadas) é a
-  // cara do utilizador num ficheiro temporário: sai daqui assim que a
+  // cara do usuário num arquivo temporário: sai daqui assim que a
   // figurinha está entregue. Fire-and-forget — falhar a limpeza não pode
-  // derrubar a resposta, e o pior caso é um ficheiro a mais no tmp/.
+  // derrubar a resposta, e o pior caso é um arquivo a mais no tmp/.
   if (temporarios.length) {
     supabase.storage.from('avatars').remove(temporarios)
       .catch((e) => console.error('[avatar-ai] limpeza do tmp falhou:', e.message));
@@ -1321,7 +1321,7 @@ router.post(
     // Origem: só para log. O 'cadastro' do Onboarding DEIXOU DE EXISTIR
     // (SPEC-FIGURINHA-3 §3: o cadastro não gera nada) — se ainda chegar aqui,
     // vindo de um app antigo que não atualizou, cai no gate do direito como
-    // qualquer outro e recebe 403 SEM_DIREITO. Fica registado para o Gabinete
+    // qualquer outro e recebe 403 SEM_DIREITO. Fica registrado para o Gabinete
     // ver quantos clientes velhos ainda tentam.
     const origem = req.body?.origem === 'cadastro' ? 'cadastro' : null;
 

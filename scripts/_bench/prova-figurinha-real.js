@@ -57,7 +57,7 @@ const lerGasto = async () => {
   const base = `http://localhost:${porta}`;
   if (!process.env.FAL_KEY) { console.error('FAL_KEY em falta.'); process.exit(1); }
   if (!fs.existsSync(ARQUIVO_SENHA)) { console.error(`Senha da conta demo não encontrada: ${ARQUIVO_SENHA}`); process.exit(1); }
-  // O ficheiro é 'e-mail: …' / 'senha: …' — a senha é o que vem depois dos dois
+  // O arquivo é 'e-mail: …' / 'senha: …' — a senha é o que vem depois dos dois
   // pontos na última linha com texto (mesma leitura do ver-iphone.mjs do frontend).
   const bruto = fs.readFileSync(ARQUIVO_SENHA, 'utf8');
   const linha = bruto.split(new RegExp(String.fromCharCode(92,114,63,92,110))).map((l) => l.trim()).filter(Boolean).pop() || '';
@@ -114,7 +114,7 @@ const lerGasto = async () => {
   // A figurinha em si: baixar, medir, guardar.
   fs.mkdirSync(SAIDA, { recursive: true });
   // O caminho vem do `avatar_url` que a rota devolveu — o nome do
-  // ficheiro leva carimbo de tempo (`public/<id>-ai-<kit>-<carimbo>.png`) e não
+  // arquivo leva carimbo de tempo (`public/<id>-ai-<kit>-<carimbo>.png`) e não
   // dá para o adivinhar aqui. Este é também o caminho que o resto do app
   // usa: se a prova o lê do mesmo sítio, prova a mesma coisa que o app vê.
   const marcador = '/object/public/avatars/';

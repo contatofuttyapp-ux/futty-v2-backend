@@ -1,5 +1,5 @@
 // Futty v2.0 — Bloqueio entre jogadores (exigência Apple UGC 1.2 — App Store Review
-// Guidelines §1.2: apps com conteúdo gerado por utilizador têm de oferecer um
+// Guidelines §1.2: apps com conteúdo gerado por usuário têm de oferecer um
 // mecanismo de bloqueio). Tabela `user_blocks` (DDL entregue ao dono, ver
 // db/migrations/041_user_blocks.sql). Bloquear NUNCA notifica o bloqueado (silencioso).
 const { supabase } = require('./db');

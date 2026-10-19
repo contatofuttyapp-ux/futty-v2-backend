@@ -53,7 +53,7 @@ async function promoverDaEspera(game) {
   }, { categoria: 'jogos' });
 }
 
-// Carrega o jogo e garante que o utilizador é admin da equipa.
+// Carrega o jogo e garante que o usuário é admin do time.
 async function jogoComoAdmin(req) {
   const game = await loadGame(req.params.gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
@@ -62,7 +62,7 @@ async function jogoComoAdmin(req) {
   return game;
 }
 
-// Carrega o jogo e garante que o utilizador é membro da equipa.
+// Carrega o jogo e garante que o usuário é membro do time.
 async function jogoComoMembro(req) {
   const game = await loadGame(req.params.gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');

@@ -13,7 +13,7 @@
 // Medir é barato; adivinhar custou 9× o previsto.
 //
 // SEGURANÇA (SEGURANCA-REVISAO-10SET.md secção 3): nada aqui loga a chave da
-// fal nem o URL assinado da foto do utilizador. O texto de erro da fal passa
+// fal nem o URL assinado da foto do usuário. O texto de erro da fal passa
 // por `limpar()` antes de chegar a qualquer log.
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -52,7 +52,7 @@ function custoDosHeaders(headers) {
 }
 
 // ┌──────────────────────────────────────────────────────────────────────────┐
-// │ x-fal-billable-units NÃO É DINHEIRO EM TODO O LADO (bancada de 17-set).  │
+// │ x-fal-billable-units NÃO É DINHEIRO EM TODO O LADO.                      │
 // │                                                                          │
 // │ Nos endpoints gpt-image, que a fal cobra por TOKENS, o header traz o     │
 // │ custo em dólares — e com quatro casas, como a página de preços promete.  │

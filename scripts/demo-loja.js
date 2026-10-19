@@ -136,7 +136,7 @@ const POSTS = [
 async function jaExiste() {
   // O sinal de "já existe" é o TIME, não a conta do Bruninho: por decisão do dono,
   // demo-loja@futtymock.com é conta MANTER de scripts/limpar-usuarios-teste.js e
-  // sobrevive a uma limpeza (--times-tambem) que zera o time dela mas não a conta.
+  // sobrevive a uma limpeza (--times-tambem) que zera o time dele mas não a conta.
   // "Já existe" quer dizer "o demo já está montado", não "a conta existe"
   // — ver criarUsuarios() abaixo, que reaproveita a conta em vez de abortar.
   const { data } = await supabase.from('teams').select('id').eq('slug', SLUG_TIME).maybeSingle();

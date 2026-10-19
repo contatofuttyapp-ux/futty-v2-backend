@@ -1,5 +1,5 @@
 // BANCADA v9 — Baralho oficial do sorteio: 5 personagens gerados 1x cada (ordem
-// expressa do utilizador, ~$0.20 total). Padrão copiado do pipeline real
+// expressa do usuário, ~$0.20 total). Padrão copiado do pipeline real
 // (routes/auth.js): gpt-image-1.5/edit (quality medium) + birefnet p/ recorte.
 // Inputs (V1 locais) sobem ao bucket PÚBLICO 'kits' (tmp) — o 'avatars' é privado.
 // Uso: node scripts/_bench/gerar-baralho-v9.js

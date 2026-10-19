@@ -1,4 +1,4 @@
-// Futty v2.0 — Rotas de equipas e convites.
+// Futty v2.0 — Rotas de times e convites.
 const express = require('express');
 const crypto = require('crypto');
 const multer = require('multer');
@@ -70,7 +70,7 @@ function valorFiltroOr(valor) {
   return valor;
 }
 
-// Upload do logo da equipa (em memória; gravado no bucket privado "avatars").
+// Upload do logo do time (em memória; gravado no bucket privado "avatars").
 const LOGO_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 const uploadLogo = multer({
   storage: multer.memoryStorage(),
@@ -87,7 +87,7 @@ function logoMiddleware(req, res, next) {
   });
 }
 
-/** POST /api/teams — cria uma equipa e adiciona o criador como admin. */
+/** POST /api/teams — cria um time e adiciona o criador como admin. */
 router.post(
   '/api/teams',
   requireAuth,
@@ -126,7 +126,7 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    // Cria a equipa (com retry se o slug colidir)
+    // Cria o time (com retry se o slug colidir)
     let team = null;
     let lastError = null;
     for (let attempt = 0; attempt < 3 && !team; attempt += 1) {
@@ -234,7 +234,7 @@ router.post(
   })
 );
 
-/** GET /api/teams — lista as equipas de que o utilizador é membro. */
+/** GET /api/teams — lista os times de que o usuário é membro. */
 // Lógica em services/inicio.js#obterTeams — a MESMA função que GET /api/inicio
 // usa, para o JSON nunca divergir entre as duas rotas.
 router.get(
@@ -246,8 +246,8 @@ router.get(
 );
 
 /**
- * GET /api/teams/explorar — equipas públicas (pesquisa por nome/cidade).
- * Registado ANTES de /api/teams/:slug para não colidir com o param :slug.
+ * GET /api/teams/explorar — times públicos (pesquisa por nome/cidade).
+ * Registrado ANTES de /api/teams/:slug para não colidir com o param :slug.
  */
 router.get(
   '/api/teams/explorar',
@@ -257,7 +257,7 @@ router.get(
     const loc = String(req.query.localizacao ?? '').trim();
 
     // geo_lat/geo_lng (arredondados) vão no payload → o cliente calcula a distância
-    // LOCALMENTE (a posição do utilizador nunca chega ao servidor). Só equipas públicas.
+    // LOCALMENTE (a posição do usuário nunca chega ao servidor). Só times públicos.
     const COLUNAS = 'id, nome, slug, cor, localizacao, cidade, descricao, logo_url, cor_fundo, modo_visibilidade, geo_lat, geo_lng';
     // O escudo (segunda cor e padrão, migração 077) vai junto — sem a migração a leitura repete sem ele
     // (lerComFuso). O bairro (coluna da migração 073) vai junto; sem ela a leitura repete sem o bairro e
@@ -361,10 +361,10 @@ router.get(
 );
 
 /**
- * GET /api/teams/publicas — equipas públicas com nº de membros e último jogo,
+ * GET /api/teams/publicas — times públicos com nº de membros e último jogo,
  * ordenadas por recência do último jogo (7d > 30d > resto) e depois nº membros.
  * Equivalente ao SQL do briefing (feito em JS — o cliente Supabase não faz GROUP BY).
- * Registado ANTES de /api/teams/:slug para não colidir com o param :slug.
+ * Registrado ANTES de /api/teams/:slug para não colidir com o param :slug.
  */
 router.get(
   '/api/teams/publicas',
@@ -428,7 +428,7 @@ router.get(
   })
 );
 
-/** GET /api/teams/:slug — detalhes da equipa + lista de membros (só membros). */
+/** GET /api/teams/:slug — detalhes do time + lista de membros (só membros). */
 router.get(
   '/api/teams/:slug',
   requireAuth,
@@ -491,7 +491,7 @@ router.get(
   })
 );
 
-/** PATCH /api/teams/:slug — edita a equipa (só admin). */
+/** PATCH /api/teams/:slug — edita o time (só admin). */
 router.patch(
   '/api/teams/:slug',
   requireAuth,
@@ -545,7 +545,7 @@ router.patch(
     if ('localizacao' in b) patch.localizacao = b.localizacao ? String(b.localizacao).trim().slice(0, 100) : null;
     if ('descricao' in b) patch.descricao = b.descricao ? String(b.descricao).trim().slice(0, 300) : null;
     // GEO (opt-in): guarda o nome da CIDADE (texto) + o ponto ARREDONDADO (a morada exacta nunca entra).
-    // Limpar a cidade tira a equipa da busca por distância. Regra em utils/cidade.js: cidade DA LISTA →
+    // Limpar a cidade tira o time da busca por distância. Regra em utils/cidade.js: cidade DA LISTA →
     // o ponto vem da lista; fora dela → Nominatim; nada achou → guarda o texto e LIMPA o ponto (o de antes
     // era de outra cidade; sem ponto o Explorar casa por texto). Cidade igual à de antes (o painel reenvia
     // o campo a cada "Salvar") não geocodifica de novo nem mexe no ponto.
@@ -686,8 +686,8 @@ async function soAdminDoTime(req, res, next) {
 }
 
 /**
- * POST /api/teams/:slug/logo — carrega o logo da equipa (só admin; PNG/JPG/WEBP, máx 2MB).
- * LEIS DA SEGURANÇA: filtro NSFW (explícito → 403) ANTES de guardar; ficheiro no bucket
+ * POST /api/teams/:slug/logo — carrega o logo do time (só admin; PNG/JPG/WEBP, máx 2MB).
+ * LEIS DA SEGURANÇA: filtro NSFW (explícito → 403) ANTES de guardar; arquivo no bucket
  * PRIVADO "avatars" (path logos/{teamId}); o URL é assinado/proxied na fronteira da API
  * (middleware mediaUrls), como os avatares. EscudoEquipa/TeamAvatar já mostram o logo_url.
  */
@@ -723,8 +723,8 @@ router.post(
 );
 
 /**
- * DELETE /api/teams/:slug/logo — remove o logo da equipa (só admin).
- * Sem logo, EscudoEquipa volta a desenhar o escudo (editor de escudo, Ajustes). O ficheiro
+ * DELETE /api/teams/:slug/logo — remove o logo do time (só admin).
+ * Sem logo, EscudoEquipa volta a desenhar o escudo (editor de escudo, Ajustes). O arquivo
  * sai do bucket nas 3 extensões possíveis (o upload grava em path fixo "logos/{teamId}.{ext}";
  * sem saber qual foi a última, tenta as 3 — a que não existir simplesmente não apaga nada).
  */
@@ -738,7 +738,7 @@ router.delete(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem remover o logo.');
 
-    // Best-effort: a limpeza do ficheiro no bucket nunca pode travar a remoção do logo.
+    // Best-effort: a limpeza do arquivo no bucket nunca pode travar a remoção do logo.
     try {
       await supabase.storage.from('avatars').remove(Object.values(LOGO_EXT).map((ext) => `logos/${team.id}.${ext}`));
     } catch { /* storage fora do ar, ou nada para apagar — segue */ }
@@ -770,7 +770,7 @@ router.get(
         .from('team_members')
         .select('id, role, pode_postar, categoria, visivel_ranking, nota_interna, ausente_proximo, ativo, gols, artilharia, vitorias, destaque, users ( id, nome, nome_jogador, avatar_url, avatar_generico, email )')
         .eq('team_id', team.id),
-      // Nota média exibida (0 a 10): média dos votos recebidos na equipa, com o
+      // Nota média exibida (0 a 10): média dos votos recebidos no time, com o
       // mesmo cálculo do ranking. Requer >= 3 votos, senão fica null.
       supabase.from('votes').select(`para_user_id, ${await colunaDaNota()}`).eq('team_id', team.id),
       // Últimos 5 jogos que já começaram (mais recente → mais antigo) para o histórico de presenças. Um jogador esteve presente se tem
@@ -942,7 +942,7 @@ router.patch(
 /**
  * PATCH /api/teams/:slug/membros/ausencia — o próprio jogador declara (ou
  * reverte) que não vai ao próximo jogo. Body: { ausente: true|false }.
- * Registado ANTES de /membros/:userId para o "ausencia" não cair no :userId.
+ * Registrado ANTES de /membros/:userId para o "ausencia" não cair no :userId.
  */
 router.patch(
   '/api/teams/:slug/membros/ausencia',
@@ -962,7 +962,7 @@ router.patch(
 
 /**
  * PATCH /api/teams/:slug/membros/:userId/ativo — admin marca um jogador como
- * activo/inactivo. Inactivos ficam no histórico mas saem do sorteio e ranking.
+ * ativo/inativo. Inativos ficam no histórico mas saem do sorteio e ranking.
  * Body: { ativo: true|false }.
  */
 router.patch(
@@ -990,10 +990,10 @@ router.patch(
 // "me" vem ANTES de ":userId": no Express a primeira rota que casa ganha, e com ":userId" na frente o "me" virava um id
 // (um membro comum levava 403 "só admins" ao tentar sair do time).
 /**
- * DELETE /api/teams/:slug/membros/me — SAIR da equipa pelo próprio (SPEC-EQUIPAS).
+ * DELETE /api/teams/:slug/membros/me — SAIR do time pelo próprio (SPEC-EQUIPAS).
  * História preservada (mesmo efeito da remoção pelo admin: o passado fica; sai do
  * ranking e do futuro). Guardas: último admin não sai sem passar o cargo; sozinho
- * na equipa → arquivar é vaga futura (recusa com mensagem clara).
+ * no time → arquivar é vaga futura (recusa com mensagem clara).
  */
 router.delete(
   '/api/teams/:slug/membros/me',
@@ -1205,7 +1205,7 @@ router.get(
 );
 
 /**
- * POST /api/convite/:token/aceitar — entra na equipa pelo convite. `:token` é o uuid ou o
+ * POST /api/convite/:token/aceitar — entra no time pelo convite. `:token` é o uuid ou o
  * código curto. O link é reutilizável: o convite não é consumido — quem entra fica registrado em
  * `convite_usos` (migração 058, best-effort) e o mesmo convite segue valendo para a próxima pessoa
  * até `expires_at`. Quem já é membro recebe `jaMembro: true` sem novo registro.
@@ -1254,7 +1254,7 @@ router.post(
     }
     selosCache.invalidarMembro(team.id, req.user.id);
 
-    // Regista o uso (migração 058) em vez de marcar o convite como consumido: o link continua
+    // Registra o uso (migração 058) em vez de marcar o convite como consumido: o link continua
     // válido para a próxima pessoa. Fail-safe de propósito: tabela ausente ou 23505 (mesma pessoa
     // aceitando de novo, corrida) nunca podem derrubar uma entrada que já valeu (o INSERT em
     // team_members acima já commitou).
@@ -1365,7 +1365,7 @@ function avisarAdminsDoPedido(team, userId) {
   }).catch(() => {});
 }
 
-/** POST /api/teams/:slug/pedir-entrada — pedir entrada numa equipa pública. */
+/** POST /api/teams/:slug/pedir-entrada — pedir entrada num time público. */
 router.post(
   '/api/teams/:slug/pedir-entrada',
   requireAuth,
@@ -1379,7 +1379,7 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    // Equipa aberta: entra já como membro, sem pedido pendente.
+    // Time aberto: entra já como membro, sem pedido pendente.
     if (team.modo_visibilidade === 'publico_aberto') {
       const { error: me } = await supabase
         .from('team_members')
@@ -1546,7 +1546,7 @@ router.patch(
       .single();
     if (error) throw new HttpError(500, error.message);
 
-    // Quem foi aceito recebe o push e abre o time já com as boas-vindas (`?entrou=1` → Equipa.jsx). Só na 1ª
+    // Quem foi aceito recebe o push e abre o time já com as boas-vindas (`?entrou=1` → Time.jsx). Só na 1ª
     // aprovação (um 2º toque do admin não avisa de novo), com o aceite já gravado e ANTES de responder (no
     // Cloud Run a CPU fica estrangulada depois da resposta). O push nunca derruba o aceite — falha vira
     // log — e não segura o admin: espera no máximo 4 s.
@@ -1572,7 +1572,7 @@ router.patch(
   })
 );
 
-/** GET /api/teams/:slug/convites — convites activos (não usados, não expirados). */
+/** GET /api/teams/:slug/convites — convites ativos (não usados, não expirados). */
 router.get(
   '/api/teams/:slug/convites',
   requireAuth,
@@ -1649,7 +1649,7 @@ router.delete(
   })
 );
 
-/** GET /api/teams/:slug/stats — estatísticas agregadas da equipa (só admin). */
+/** GET /api/teams/:slug/stats — estatísticas agregadas do time (só admin). */
 router.get(
   '/api/teams/:slug/stats',
   requireAuth,
@@ -1659,7 +1659,7 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (role !== 'admin') throw new HttpError(403, 'Só admins podem ver as estatísticas.');
 
-    // Jogos da equipa.
+    // Jogos do time.
     const { data: games } = await supabase
       .from('games')
       .select('id, data, local, status, cancelado')
@@ -1668,14 +1668,14 @@ router.get(
     // "Mais presente" e a média de confirmações só contam jogo que já aconteceu (confirmar é "vou", não "fui").
     const aconteceram = new Set(idsDosJogosQueAconteceram(games));
 
-    // Membros (com stats + dados do utilizador).
+    // Membros (com stats + dados do usuário).
     const { data: members } = await supabase
       .from('team_members')
       .select('user_id, gols, users ( nome, nome_jogador, avatar_url )')
       .eq('team_id', team.id);
     const total_membros = (members || []).length;
 
-    // Confirmações por jogo e por utilizador.
+    // Confirmações por jogo e por usuário.
     const gameIds = (games || []).map((g) => g.id);
     const confByGame = {};
     const confByUser = {};

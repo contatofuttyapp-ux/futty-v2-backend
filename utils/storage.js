@@ -1,7 +1,7 @@
-// Ajuda a APAGAR ficheiros no Supabase Storage a partir das suas URLs públicas.
+// Ajuda a APAGAR arquivos no Supabase Storage a partir das suas URLs públicas.
 // Remover conteúdo tem de matar o objeto no bucket também —
-// senão fica órfão, público e para sempre. Best-effort: se falhar, regista e segue
-// (nunca quebra o fluxo do utilizador que só quer apagar o post).
+// senão fica órfão, público e para sempre. Best-effort: se falhar, registra e segue
+// (nunca quebra o fluxo do usuário que só quer apagar o post).
 const { supabase } = require('./db');
 const { assinarToken, decodificarToken } = require('./mediaToken');
 const { parametroDe: recorteDoArquivo } = require('./recortesAvatar');
@@ -10,13 +10,13 @@ const { parametroDe: recorteDoArquivo } = require('./recortesAvatar');
  * Extrai o caminho dentro do bucket a partir de uma URL de mídia — a URL
  * CRUA do Storage (.../object/public/<bucket>/<path>) OU a do PROXY que
  * emitimos (/api/media/<token>). Uma URL que veio do CLIENTE (salva em
- * feed_post_media.url, comentario_anexos.url — o que o utilizador reenviou
+ * feed_post_media.url, comentario_anexos.url — o que o usuário reenviou
  * depois de um upload) é SEMPRE a forma do proxy: sem este
- * segundo caminho, removerFicheirosPorUrl nunca achava o ficheiro e ele
+ * segundo caminho, removerFicheirosPorUrl nunca achava o arquivo e ele
  * ficava órfão no Storage para sempre. Usa
  * decodificarToken (não verificarToken): apagar tem de continuar a
  * funcionar mesmo com o token há muito expirado — expiração é sobre PODER
- * SERVIR agora, não sobre saber a que ficheiro a URL se refere.
+ * SERVIR agora, não sobre saber a que arquivo a URL se refere.
  */
 function caminhoDeUrl(url, bucket) {
   if (typeof url !== 'string') return null;
@@ -30,7 +30,7 @@ function caminhoDeUrl(url, bucket) {
 }
 
 /**
- * Remove do `bucket` todos os ficheiros cujas URLs públicas são dadas.
+ * Remove do `bucket` todos os arquivos cujas URLs públicas são dadas.
  * Não lança: devolve { removidos, erro? }.
  */
 async function removerFicheirosPorUrl(bucket, urls) {

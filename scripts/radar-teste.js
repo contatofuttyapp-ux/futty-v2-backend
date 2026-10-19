@@ -14,7 +14,7 @@
 // teste-radar-<time>-<n>@futtymock.com. NUNCA toca no Várzea FC, no Missa de Quinta, no time e na conta do revisor da Apple
 // (domingueira-fc-demo, demo-loja@futtymock.com) nem em contatofuttyapp@gmail.com. Correr a partir de backend/.
 // Nada aqui corre com `require()`: o banco só é carregado dentro dos comandos, para tests/radar-teste.test.js nunca
-// tocar em produção (o banco é ÚNICO e partilhado entre dev e produção).
+// tocar em produção (o banco é ÚNICO e compartilhado entre dev e produção).
 require('dotenv').config({ quiet: true });
 const fs = require('fs');
 const path = require('path');

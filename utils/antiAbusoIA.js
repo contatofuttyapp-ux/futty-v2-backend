@@ -47,7 +47,7 @@ async function verificarTeto() {
   }
 }
 
-/** Gate ANTES de gastar: auto-freeze activo E a conta é nova (<48h)? Fail-open. */
+/** Gate ANTES de gastar: auto-freeze ativo E a conta é nova (<48h)? Fail-open. */
 async function verificarFreeze(userCreatedAt) {
   try {
     const contaNova = !!userCreatedAt && Date.now() - new Date(userCreatedAt).getTime() < 48 * 3600 * 1000;
@@ -188,7 +188,7 @@ async function verificarAutoFreeze() {
 }
 
 /**
- * Regista uma geração bem-sucedida: soma o dia, guarda o log, dispara alertas/freeze.
+ * Registra uma geração bem-sucedida: soma o dia, guarda o log, dispara alertas/freeze.
  * `custoCents` é o custo REAL desta geração (todas as chamadas à fal, retry
  * incluído). Vindo `null` — a fal não mandou header —, usa-se a média do dia
  * corrente, que é a melhor estimativa disponível, e só na primeira geração do
@@ -224,7 +224,7 @@ async function registrarGeracao({ userId, ip, custoCents = null, teamId = null }
     await alertarSeNecessario(custo_cents);
     await verificarAutoFreeze();
   } catch {
-    // nunca deve derrubar a resposta ao utilizador — a figurinha já foi entregue.
+    // nunca deve derrubar a resposta ao usuário — a figurinha já foi entregue.
   }
 }
 

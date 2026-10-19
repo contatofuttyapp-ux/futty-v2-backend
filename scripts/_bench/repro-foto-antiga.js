@@ -110,10 +110,10 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
   for (const r of resultados) {
     console.log(`  foto ${r.rotulo}: users.foto_hash ${(r.hashTabela || '—').slice(0, 12)}`);
   }
-  // O sha do ficheiro em disco NÃO tem de bater com users.foto_hash: o
+  // O sha do arquivo em disco NÃO tem de bater com users.foto_hash: o
   // `receberAvatar` auto-orienta pelo EXIF (.rotate()) e isso reescreve o JPEG
   // antes de qualquer hash. O que tem de bater — e é o que a ETAPA 0 confere —
-  // é o objeto GUARDADO com o foto_hash. Comparar com o ficheiro original só
+  // é o objeto GUARDADO com o foto_hash. Comparar com o arquivo original só
   // dava um aviso falso a cada corrida.
   console.log('Se a ETAPA 0 da segunda geração baixou o hash da foto A, o bug está reproduzido.');
   console.log('='.repeat(78));

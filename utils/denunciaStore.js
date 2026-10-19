@@ -42,7 +42,7 @@ async function guardarReporter(userId, meta) {
   await supabase.storage.from(BUCKET).upload(caminhoReporter(userId), Buffer.from(JSON.stringify(meta)),
     { contentType: 'application/json', upsert: true, cacheControl: '0' });
 }
-// Regista uma denúncia no contador diário. Devolve {ok, motivo?}.
+// Registra uma denúncia no contador diário. Devolve {ok, motivo?}.
 async function registarQuota(userId, categoria, agoraISO) {
   const m = await obterReporter(userId);
   const d = hoje(agoraISO);
@@ -63,14 +63,14 @@ async function ajustarPeso(userId, confirmada) {
 }
 
 // ─── Casos ───────────────────────────────────────────────────────────────────
-// Ficheiro por equipa para a fila do admin; equipa null (ex. perfil) → "_sem".
+// Arquivo por time para a fila do admin; time null (ex. perfil) → "_sem".
 function chaveEquipa(teamId) { return teamId || '_sem'; }
 function caminhoCaso(teamId, id) { return `casos/${chaveEquipa(teamId)}/${id}.json`; }
 
 // Quem lê casos em rota quente (services/inicio.js,
-// obterDesfechosDenuncias) guarda o resultado em cache por equipa. Gravar um
-// caso tem de esquecer essa cache, senão o utilizador não vê o desfecho da
-// própria denúncia durante minutos. Registado por quem cacheia, chamado aqui.
+// obterDesfechosDenuncias) guarda o resultado em cache por time. Gravar um
+// caso tem de esquecer essa cache, senão o usuário não vê o desfecho da
+// própria denúncia durante minutos. Registrado por quem cacheia, chamado aqui.
 const aoGravarCaso = [];
 function aoGravar(fn) { aoGravarCaso.push(fn); }
 

@@ -33,10 +33,10 @@
 //   5  (cópia, não gera) V6 de referência, de saida-prompt/<foto>/6.png
 //   6  (cópia, não gera) 2.5 low puro, de saida-modelos-2/<foto>/1.png
 //
-// A ENTRADA DA PASSADA 2 não é o 1.png tal e qual: esse ficheiro é a figurinha
+// A ENTRADA DA PASSADA 2 não é o 1.png tal e qual: esse arquivo é a figurinha
 // MONTADA (512x768, com moldura dourada e fundo escuro da casa). Mandá-lo
 // assim faria o modelo repintar a moldura. Então: corta-se a moldura, passa-se
-// pelo birefnet (US$0,002, registado) e compõe-se o jogador sobre o cinza
+// pelo birefnet (US$0,002, registrado) e compõe-se o jogador sobre o cinza
 // #8a8a8a que o prompt promete, em 1024x1536.
 //
 // CORRER:

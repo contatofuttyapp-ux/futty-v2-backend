@@ -24,12 +24,12 @@ async function gravar(m) {
 //
 // O que se perde: até 30 s de contagens se o processo morrer de morte súbita.
 // São números de publicidade agregados por dia, não dinheiro nem conteúdo — o
-// preço certo a pagar por tirar duas idas ao Storage do caminho do utilizador.
+// preço certo a pagar por tirar duas idas ao Storage do caminho do usuário.
 const FLUSH_MS = 30000;
 const pendentes = new Map(); // `${id}|${dia}` -> { imp, cli }
 let temporizador = null;
 
-/** Regista um evento (tipo 'imp' | 'cli') numa campanha, no dia de hoje. */
+/** Registra um evento (tipo 'imp' | 'cli') numa campanha, no dia de hoje. */
 function registar(id, tipo) {
   // Defesa em profundidade (a rota já só passa campanha que existe): id é texto curto, e o acumulador em memória tem teto.
   if (typeof id !== 'string' || !id || id.length > 64 || pendentes.size >= 2000) return;
@@ -46,7 +46,7 @@ function registar(id, tipo) {
   }
 }
 
-/** Soma o que está pendente ao ficheiro e grava. Idempotente com 0 pendentes. */
+/** Soma o que está pendente ao arquivo e grava. Idempotente com 0 pendentes. */
 async function descarregar() {
   if (!pendentes.size) return;
   // Tira já da fila: um evento que chegue a meio desta gravação entra no próximo

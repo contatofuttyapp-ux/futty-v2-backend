@@ -5,7 +5,7 @@
 // - modelo carrega UMA vez (singleton) — ideal: no arranque do servidor;
 // - só bloqueia em ALTA confiança (Porn/Hentai > LIMIAR); "Sexy" médio NÃO bloqueia;
 // - falso-positivo custa mais que falso-negativo numa rede de amigos → limiar alto;
-// - FALHA ABERTA em erro de infra (modelo não carrega / decode falha): regista e
+// - FALHA ABERTA em erro de infra (modelo não carrega / decode falha): registra e
 //   deixa passar, para um problema técnico não derrubar TODOS os uploads. A recusa
 //   é só por deteção positiva, nunca por avaria.
 const path = require('node:path');
@@ -44,7 +44,7 @@ let _modeloPromise = null;
  * foto de 224×224 (medido na bancada); no WASM são ~76 ms, com as MESMAS probabilidades (Neutral
  * 0,699 · Drawing 0,279 · Hentai 0,014 · Porn 0,007 · Sexy 0,002 numa imagem de prova). Sem isto seria a
  * maior fatia do POST /api/me/avatar (a rede do Supabase, de São Paulo a São Paulo, é barata).
- * Se o WASM não subir (binário, CPU, versão do Node), fica no CPU e regista: uma avaria de
+ * Se o WASM não subir (binário, CPU, versão do Node), fica no CPU e registra: uma avaria de
  * desempenho nunca pode derrubar o upload nem o filtro.
  */
 async function escolherBackend(tf) {
@@ -139,7 +139,7 @@ async function filtroNSFW(req, res, next) {
 
 /**
  * Variante FAIL-CLOSED do filtro (SEGURANCA-REVISAO-10SET.md secção 3) —
- * usada só no logo de equipa: ao contrário do avatar (foto pessoal, o próprio
+ * usada só no logo de time: ao contrário do avatar (foto pessoal, o próprio
  * dono é quem mais se protege escolhendo bem), o logo é visível a qualquer
  * visitante do time sem precisar de sessão. Um erro técnico na análise
  * BLOQUEIA o upload em vez de deixar passar.

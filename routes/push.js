@@ -76,7 +76,7 @@ router.post(
   })
 );
 
-/** DELETE /api/push/subscribe — remove a subscrição do utilizador (por endpoint). */
+/** DELETE /api/push/subscribe — remove a subscrição do usuário (por endpoint). */
 router.delete(
   '/subscribe',
   requireAuth,
@@ -101,7 +101,7 @@ router.get('/vapid-public-key', (req, res) => {
 
 /**
  * POST /api/push/equipas/:slug/broadcast — admin envia um aviso push a todos os
- * membros da equipa que tenham subscrição. Devolve { enviadas, falhas }.
+ * membros do time que tenham subscrição. Devolve { enviadas, falhas }.
  */
 router.post(
   '/equipas/:slug/broadcast',
@@ -119,7 +119,7 @@ router.post(
     if (!titulo) throw new HttpError(400, 'Indique o título.');
     if (!mensagem) throw new HttpError(400, 'Indique a mensagem.');
 
-    // Subscrições de todos os membros da equipa.
+    // Subscrições de todos os membros do time.
     const { data: membros } = await supabase.from('team_members').select('user_id').eq('team_id', team.id);
     const ids = (membros || []).map((m) => m.user_id).filter(Boolean);
     if (!ids.length) return res.json({ enviadas: 0, falhas: 0 });
@@ -180,7 +180,7 @@ router.post(
     if (!titulo) throw new HttpError(400, 'Indique o título.');
     if (!mensagem) throw new HttpError(400, 'Indique a mensagem.');
 
-    // Confirma que o destinatário é membro da equipa.
+    // Confirma que o destinatário é membro do time.
     const { userId } = req.params;
     const destRole = await getRole(team.id, userId);
     if (!destRole) throw new HttpError(404, 'Jogador não é membro deste time.');
@@ -262,7 +262,7 @@ router.patch(
 );
 
 /**
- * Envia uma notificação push a uma lista de utilizadores (fire-and-forget).
+ * Envia uma notificação push a uma lista de usuários (fire-and-forget).
  * Nunca lança: erros são engolidos; subscrições mortas (403/404/410) são apagadas.
  * @param {string[]} userIds destinatários
  * @param {{title:string, body?:string, url?:string}} payload

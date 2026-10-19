@@ -38,7 +38,7 @@ function assinatura(corpo) {
 }
 
 /**
- * Emite um token ESTÁVEL para {bucket, path}: o mesmo ficheiro dá o mesmo token
+ * Emite um token ESTÁVEL para {bucket, path}: o mesmo arquivo dá o mesmo token
  * durante toda a janela de 7 dias.
  *
  * `v` é a versão do conteúdo (o `?v=<timestamp>` que os uploads gravam no URL).
@@ -54,12 +54,12 @@ function assinarToken(bucket, path, { v } = {}) {
 
 /**
  * Decodifica um token (valida a ASSINATURA, ignora expiração). Uso interno:
- * saber a que ficheiro uma URL antiga se refere, mesmo que o token em si já
- * tenha expirado — é o caso de apagar um post/conta de meses atrás (Rodada
- * 15: sem isto, removerFicheirosPorUrl/apagarUsuario nunca resolviam a URL
- * salva em feed_post_media/comentario_anexos, que é sempre a do proxy desde
- * o Tijolo 2 — os arquivos ficavam órfãos no Storage para sempre). NUNCA
- * usar para decidir se um pedido pode VER o ficheiro agora — só verificarToken
+ * saber a que arquivo uma URL antiga se refere, mesmo que o token em si já
+ * tenha expirado — é o caso de apagar um post/conta de meses atrás (sem isto,
+ * removerFicheirosPorUrl/apagarUsuario não resolvem a URL salva em
+ * feed_post_media/comentario_anexos, que é sempre a do proxy, e os arquivos
+ * ficariam órfãos no Storage para sempre). NUNCA
+ * usar para decidir se um pedido pode VER o arquivo agora — só verificarToken
  * faz essa checagem.
  */
 function decodificarToken(token) {

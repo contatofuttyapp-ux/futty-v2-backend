@@ -18,7 +18,7 @@ function bearerToken(req) {
 // Cache de sessão (12-set, "Velocidade 2"): supabase.auth.getUser(token) é uma
 // ida à rede Supabase Auth em TODO pedido autenticado — motor em São Paulo,
 // ~240ms de RTT para quem está longe. Chave = o token inteiro (não o user id —
-// tokens diferentes do mesmo utilizador não colidem nem se pisam), TTL curto
+// tokens diferentes do mesmo usuário não colidem nem se pisam), TTL curto
 // (60s) e um teto de entradas (limpa a mais antiga ao ultrapassar — Map
 // preserva ordem de inserção) para não crescer sem fim num processo de longa
 // duração. SÓ tokens válidos entram em cache: 401 continua imediato (token em

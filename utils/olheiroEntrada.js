@@ -4,12 +4,12 @@
 //
 // Pisos CONSERVADORES (provado na bancada: foto de nitidez 4 gera bem — por
 // isso NITIDEZ NÃO reprova). Só barra o que é matematicamente impossível
-// salvar: foto minúscula, ficheiro corrompido, ou preto/estourado total.
+// salvar: foto minúscula, arquivo corrompido, ou preto/estourado total.
 // Medições baratas via sharp (metadata + stats), sem modelo nenhum.
 //
 // Ao contrário do filtroNSFW (que falha ABERTO em qualquer erro técnico),
 // aqui "não decodifica" é um dos critérios de reprovação — é um sinal em si
-// (ficheiro corrompido nunca vai gerar nada de bom). Só um erro INESPERADO no
+// (arquivo corrompido nunca vai gerar nada de bom). Só um erro INESPERADO no
 // próprio filtro (bug aqui, não na imagem) falha aberto.
 const sharp = require('sharp');
 const { LIMITE_PIXELS } = require('./imagemReal'); // o teto de pixels da casa: foto de celular cabe, imagem fabricada para estourar a memória não

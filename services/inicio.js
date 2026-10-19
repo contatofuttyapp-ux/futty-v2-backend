@@ -2,7 +2,7 @@
 // paralelo (routes/inicio.js chama tudo de uma vez; cada rota antiga chama a
 // MESMA função daqui, para nunca divergir do JSON que outras telas dependem).
 //
-// Motivo: motor em São Paulo, utilizador em Lisboa (~240ms/pedido) —
+// Motivo: motor em São Paulo, usuário em Lisboa (~240ms/pedido) —
 // os ~13 pedidos do Início ao abrir davam 3-4s só de latência de rede, antes de
 // qualquer dado chegar. GET /api/inicio junta tudo num round-trip só.
 const { supabase, getTeamBySlug, getRole, getUserById, ensureUserRow, requireTeamMember, loadGame } = require('../utils/db');
@@ -98,7 +98,7 @@ function calcFigurinhaStatus(status, statusEm) {
 }
 
 /**
- * Utilizador autenticado + stats agregadas. Garante a linha em public.users.
+ * Usuário autenticado + stats agregadas. Garante a linha em public.users.
  * @param {{ base?: Promise<[object[]|null, Set<string>|null]> }} [opts] os vínculos e quem só organiza que o /api/inicio já leu
  */
 async function obterMe(user, { base = null } = {}) {
@@ -222,7 +222,7 @@ function montarTeams(vinculos, soOrganiza) {
     });
 }
 
-/** Pedidos de entrada pendentes por equipa (só onde sou admin) → badge no chip. Muda os objetos de `teams`. */
+/** Pedidos de entrada pendentes por time (só onde sou admin) → badge no chip. Muda os objetos de `teams`. */
 async function contarPedidosPendentes(teams) {
   const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
   if (!adminIds.length) return teams;
@@ -451,7 +451,7 @@ async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
 
   const [{ data: votos }, { data: jogosDasEquipas }] = await Promise.all([
     supabase.from('votes').select('team_id, para_user_id, updated_at').eq('de_user_id', userId).in('team_id', teamIds),
-    // Só pede avaliação de quem o utilizador REALMENTE jogou junto — jogos já
+    // Só pede avaliação de quem o usuário REALMENTE jogou junto — jogos já
     // ENCERRADOS em que ambos estiveram confirmados.
     supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
   ]);
@@ -490,14 +490,11 @@ async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
 }
 
 // ─── GET /api/denuncias/meus-desfechos ────────────────────────────────────────
-// VELOCIDADE 6A (15-set): isto corria em TODO /api/inicio e fazia, por equipa,
-// um `list` no Storage MAIS um download por ficheiro de caso. Numa equipa com
-// 20 denúncias eram 21 idas ao Storage só para saber um número que quase sempre
-// é zero. Cache de 5 minutos por equipa, esquecida assim que um caso é gravado
-// (denunciaStore.aoGravar) — o utilizador vê o desfecho da própria denúncia na
-// mesma, sem pagar o preço em cada abertura da tela.
-// Velocidade 7A: pedidos simultâneos do mesmo time esperam a MESMA listagem, e
-// depois dos 5 min sai a conhecida enquanto a nova é buscada por trás.
+// Isto corre em TODO /api/inicio e, sem cache, faria por time um `list` no Storage MAIS um download por arquivo de caso — num time
+// com 20 denúncias, 21 idas ao Storage só para saber um número que quase sempre é zero. Cache de 5 minutos por time, esquecida
+// assim que um caso é gravado (denunciaStore.aoGravar) — o usuário vê o desfecho da própria denúncia na mesma, sem pagar o preço
+// em cada abertura da tela. Pedidos simultâneos do mesmo time esperam a MESMA listagem, e depois dos 5 min sai a conhecida
+// enquanto a nova é buscada por trás.
 const DESFECHOS_TTL_MS = 5 * 60 * 1000;
 const casosPorEquipa = criarCache({ nome: 'denuncias', ttlMs: DESFECHOS_TTL_MS, max: 2000 });
 
@@ -510,8 +507,8 @@ function casosDaEquipaComCache(teamId) {
 async function obterDesfechosDenuncias(userId, { vinculos = null } = {}) {
   const membros = vinculos || (await supabase.from('team_members').select('team_id').eq('user_id', userId)).data;
   const teamIds = (membros || []).map((m) => m.team_id);
-  // Todas as equipas em paralelo (e quase sempre em cache), em vez de um `for` sequencial
-  // com 1 download de Storage por equipa.
+  // Todos os times em paralelo (e quase sempre em cache), em vez de um `for` sequencial
+  // com 1 download de Storage por time.
   const porEquipa = await Promise.all(teamIds.map((tid) => casosDaEquipaComCache(tid)));
   const n = porEquipa.reduce((total, casos) => total + casos.filter((c) => c.reporter_id === userId && c.resolvido_em).length, 0);
   return { total: n }; // só a contagem — nunca o veredicto
@@ -661,7 +658,7 @@ function podeVerCampanha(c, adulto) {
 // PUBLICIDADE EM TODOS OS PLANOS (decisão do dono): Pro/Elite não ficam isentos de
 // anúncio — veem METADE das oportunidades elegíveis, nunca zero (o Free continua
 // a ver todas). Hash simples e determinístico de
-// userId+dia: o MESMO utilizador recebe a MESMA decisão em qualquer tela nesse
+// userId+dia: o MESMO usuário recebe a MESMA decisão em qualquer tela nesse
 // dia (não pisca entre Início/sorteio), e muda sozinho no dia seguinte.
 function metadeDasVezes(userId, hoje) {
   const s = `${userId}:${hoje}`;

@@ -244,7 +244,7 @@ async function montarPlano({ timesTambem = false } = {}) {
     const p = bucketEcaminho(url);
     if (p) urlsPorBucket[p.bucket].push(url);
   }
-  // Ficheiro temporário determinístico (routes/auth.js: tmp/${userId}-pad.jpg,
+  // Arquivo temporário determinístico (routes/auth.js: tmp/${userId}-pad.jpg,
   // gerado durante a geração de avatar IA) — não vem de nenhuma linha da BD,
   // tentamos remover sempre; se não existir, o remove() é um no-op silencioso.
   const caminhosTmp = apagarIds.map((id) => `tmp/${id}-pad.jpg`);

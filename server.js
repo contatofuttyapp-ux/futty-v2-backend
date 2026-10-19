@@ -1,5 +1,5 @@
 // Futty v2.0 — Backend (Express + Supabase)
-// Setup do servidor: middleware, ficheiros estáticos, rotas e tratamento de erros.
+// Setup do servidor: middleware, arquivos estáticos, rotas e tratamento de erros.
 // { quiet: true }: sem isto o dotenv imprime um "tip" promocional
 // próprio a cada arranque (ex.: "auth for agents [vestauth.com]") — propaganda
 // do pacote, não do nosso código. Não muda o carregamento das variáveis.
@@ -193,7 +193,7 @@ app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
 app.use(tempoPorRota);
 
-// Ficheiros estáticos (fotos de campeão, etc.) em /uploads
+// Arquivos estáticos (fotos de campeão, etc.) em /uploads
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
 // Avatares migrados da V1 (avatar_url relativo, ex.: /public/avatares/verde/gui.png)
@@ -203,11 +203,11 @@ app.use('/public/avatares', express.static(path.join(__dirname, 'public', 'avata
 // `app.use('/public', express.static(...))`: servia a pasta public/ inteira
 // sem login — era isso que expunha fotos-teste/fotos-teste-4/fotos-treino/
 // fotos-jogos (fotos reais de pessoas, algumas de menores) a qualquer um com
-// o URL. Também não há `/public/logos`: os logos de equipa já vão para o
+// o URL. Também não há `/public/logos`: os logos de time já vão para o
 // Storage privado do Supabase (routes/teams.js, POST /:slug/logo), a pasta
 // public/logos nunca chegou a existir em disco. Só sobem os dois mounts
 // acima — avatares (V1 migrada) e uploads (fotos de campeão) — que é tudo o
-// que o frontend de facto usa da pasta public/.
+// que o frontend de fato usa da pasta public/.
 
 // Health check — confirma o servidor e a ligação ao Supabase. Público e fora de /api, por isso
 // passa pelos mesmos limiters da /api (acima) e só olha o banco de 30 em 30 s (utils/saude.js).
@@ -276,7 +276,7 @@ if (require.main === module) {
   // As impressões de publicidade ficam num acumulador em
   // memória e só descem ao Storage de 30 em 30 s. O Cloud Run manda SIGTERM antes
   // de apagar a instância — é a última oportunidade de gravar o que está pendente.
-  // Registados JÁ (antes do modelo NSFW carregar): um SIGTERM a meio do arranque
+  // Registrados JÁ (antes do modelo NSFW carregar): um SIGTERM a meio do arranque
   // ainda encontra o handler — sem servidor para fechar, só sai.
   const encerrar = async (sinal) => {
     console.log(`[Futty] ${sinal} recebido — a gravar o que está pendente.`);

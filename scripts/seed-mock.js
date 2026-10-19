@@ -1,6 +1,6 @@
 // Futty v2.0 — Seed de dados mock para testar o sorteio.
-// Cria utilizadores no Supabase Auth, perfis em public.users e adiciona-os
-// como membros da equipa indicada.
+// Cria usuários no Supabase Auth, perfis em public.users e adiciona-os
+// como membros do time indicado.
 //
 // Uso:  node scripts/seed-mock.js
 // Requer: backend/.env com SUPABASE_URL e SUPABASE_SECRET_KEY (ou a antiga SUPABASE_SERVICE_KEY).
@@ -34,7 +34,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 async function getExistingAuthUsers() {
-  // Mapa email -> id (até 1000 utilizadores)
+  // Mapa email -> id (até 1000 usuários)
   const map = {};
   const { data, error } = await supabase.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (error) throw new Error(`listUsers: ${error.message}`);
@@ -43,7 +43,7 @@ async function getExistingAuthUsers() {
 }
 
 async function main() {
-  // 1) Resolve a equipa pelo slug
+  // 1) Resolve o time pelo slug
   const { data: team, error: teamErr } = await supabase
     .from('teams')
     .select('id, nome, slug')
@@ -64,7 +64,7 @@ async function main() {
   for (const nome of NOMES) {
     const email = emailFor(nome);
 
-    // 1) Utilizador no Auth (cria ou reutiliza se já existir)
+    // 1) Usuário no Auth (cria ou reutiliza se já existir)
     let userId = existing[email];
     if (userId) {
       reutilizados += 1;
@@ -95,7 +95,7 @@ async function main() {
       perfis += 1;
     }
 
-    // 3) Membro da equipa
+    // 3) Membro do time
     const { error: memberErr } = await supabase
       .from('team_members')
       .upsert(

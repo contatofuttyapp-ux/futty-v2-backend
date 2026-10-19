@@ -1,4 +1,4 @@
-// Futty v2.0 — Rotas da Resenha (feed social por equipa):
+// Futty v2.0 — Rotas da Resenha (feed social por time):
 // feed unificado, posts editoriais, resultado do jogo, upload, reações,
 // comentários e denúncias. Segue os padrões do repo: asyncHandler + HttpError.
 const express = require('express');
@@ -32,8 +32,8 @@ const COMENTARIO_MEDIA = ['image', 'gif'];
 // Motivos de denúncia (igual ao CHECK da migração 009).
 const DENUNCIA_MOTIVOS = ['linguagem_inapropriada', 'spam', 'conteudo_ofensivo', 'outro'];
 
-// O feed tem limite: sem ele uma equipa antiga puxaria todos os jogos e todos os posts desde sempre, em
-// cada abertura da tela. 60 de cada lado dá mais de um mês de Resenha para uma equipa que joga por
+// O feed tem limite: sem ele um time antigo puxaria todos os jogos e todos os posts desde sempre, em
+// cada abertura da tela. 60 de cada lado dá mais de um mês de Resenha para um time que joga por
 // semana. A paginação "ver mais antigos" está em PAGINA_FEED, abaixo.
 const LIMITE_FEED = 60;
 // O app novo pede o feed em PÁGINAS (`?limite=20`, e `?antes=<created_at do último>` para a seguinte).
@@ -42,7 +42,7 @@ const LIMITE_FEED = 60;
 const PAGINA_FEED = 20;
 const PAGINA_FEED_MAX = 50;
 
-// Upload: lê o ficheiro para memória; envia-se depois ao Supabase Storage.
+// Upload: lê o arquivo para memória; envia-se depois ao Supabase Storage.
 //
 // O teto geral é 12MB: fotos JPG/PNG/WebP passam por compressão (ver comprimirImagem) antes de gravar,
 // então chegam bem abaixo disto; GIF tem o seu PRÓPRIO teto, mais apertado (GIF_MAX_BYTES), porque não
@@ -215,7 +215,7 @@ const conteudoDoCampeaoComAvatares = (conteudo, avatarOf) => ({
 
 /**
  * GET /api/feed — feed unificado (jogos com campeão definido + posts),
- * ordenado por created_at DESC. Só de equipas onde o utilizador é membro.
+ * ordenado por created_at DESC. Só de times onde o usuário é membro.
  * Query: team_id (opcional) filtra por uma equipa.
  */
 router.get(
@@ -223,7 +223,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
-    // Equipas do utilizador
+    // Times do usuário
     // O fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
     const { data: memberships } = await lerComFuso((novas) => supabase
       .from('team_members')
@@ -280,7 +280,7 @@ router.get(
     // de teamIds. (A filtragem por bloqueio é feita em memória logo a seguir.)
     const [bloqueados, jogosRes, postsRes] = await Promise.all([
       // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
-      // este utilizador não aparece na Resenha dele — nem posts nem comentários.
+      // este usuário não aparece na Resenha dele — nem posts nem comentários.
       conjuntoMutuo(req.user.id),
       consultaJogos,
       consultaPosts,
@@ -308,7 +308,7 @@ router.get(
     const gameIds = games.map((g) => g.id);
     const postIds = posts.map((p) => p.id);
 
-    // Os utilizadores referenciados pelos JOGOS e pelos POSTS já se conhecem
+    // Os usuários referenciados pelos JOGOS e pelos POSTS já se conhecem
     // aqui (prémios e autores), por isso a query deles entra na onda 3 em vez
     // de esperar por ela. Os autores dos COMENTÁRIOS vêm embutidos na própria
     // query dos comentários.
@@ -480,7 +480,7 @@ router.post(
     // que o body diz — evita fingir um arquivo pequeno pra furar a cota.
     //
     // Sem a migração 053, bytesUsadosPeloTime devolve null: a cota não
-    // bloqueia (fail-open, aviso já registado por ela) E `colunaBytes` fica
+    // bloqueia (fail-open, aviso já registrado por ela) E `colunaBytes` fica
     // false, pra também NÃO tentar gravar feed_post_media.bytes — a coluna
     // simplesmente não existe ainda, e um INSERT com uma coluna inexistente
     // falharia com 500 em TODO post com mídia, não só na cota. O mesmo sinal
@@ -593,7 +593,7 @@ router.post(
   })
 );
 
-/** DELETE /api/feed/posts/:postId — apaga (autor ou admin da equipa). */
+/** DELETE /api/feed/posts/:postId — apaga (autor ou admin do time). */
 router.delete(
   '/api/feed/posts/:postId',
   requireAuth,
@@ -622,8 +622,8 @@ router.delete(
     const { error } = await supabase.from('feed_posts').delete().eq('id', post.id);
     if (error) throw new HttpError(500, error.message);
 
-    // Best-effort: mata os ficheiros no bucket. Se falhar, regista e segue — o
-    // utilizador já viu o post desaparecer; não quebramos o fluxo por um órfão.
+    // Best-effort: mata os arquivos no bucket. Se falhar, registra e segue — o
+    // usuário já viu o post desaparecer; não quebramos o fluxo por um órfão.
     const urls = (media || []).map((m) => m.url);
     if (urls.length) {
       const r = await removerFicheirosPorUrl(STORAGE_BUCKET, urls);
@@ -640,8 +640,8 @@ router.delete(
 
 /**
  * PATCH /api/feed/games/:gameId/resultado — define campeão/artilheiro/
- * destaque/rodada de cerveja (só admin da equipa). Semântica PATCH:
- * só os campos enviados são actualizados.
+ * destaque/rodada de cerveja (só admin do time). Semântica PATCH:
+ * só os campos enviados são atualizados.
  * Nota: o schema só tem role admin/member; não existe "moderador com
  * permissão jogos", por isso restringe-se a admin.
  */
@@ -750,7 +750,7 @@ router.patch(
 // =====================================================================
 
 /**
- * POST /api/feed/upload — recebe um ficheiro (multipart, campo "file"),
+ * POST /api/feed/upload — recebe um arquivo (multipart, campo "file"),
  * envia-o ao bucket público do Supabase Storage e devolve a URL pública.
  */
 router.post(
@@ -810,7 +810,7 @@ router.post(
 /**
  * POST /api/feed/reacoes — toggle de reação num target.
  * Body: { target_type, target_id, emoji }. Mesmo emoji apaga; emoji
- * diferente actualiza; inexistente cria.
+ * diferente atualiza; inexistente cria.
  */
 router.post(
   '/api/feed/reacoes',
@@ -936,7 +936,7 @@ router.get(
   })
 );
 
-/** POST /api/feed/comentarios — cria um comentário (membro da equipa). */
+/** POST /api/feed/comentarios — cria um comentário (membro do time). */
 router.post(
   '/api/feed/comentarios',
   requireAuth,
@@ -1064,7 +1064,7 @@ router.delete(
 
 /**
  * POST /api/feed/denuncias — denuncia um comentário ou post.
- * UNIQUE (target, reporter) garante uma denúncia por utilizador (23505 → idempotente).
+ * UNIQUE (target, reporter) garante uma denúncia por usuário (23505 → idempotente).
  */
 router.post(
   '/api/feed/denuncias',
@@ -1096,14 +1096,14 @@ router.post(
 );
 
 /**
- * GET /api/feed/denuncias — denúncias por resolver das equipas onde o
- * utilizador é admin. Inclui o conteúdo denunciado e o nome do reporter.
+ * GET /api/feed/denuncias — denúncias por resolver dos times onde o
+ * usuário é admin. Inclui o conteúdo denunciado e o nome do reporter.
  */
 router.get(
   '/api/feed/denuncias',
   requireAuth,
   asyncHandler(async (req, res) => {
-    // Equipas onde sou admin.
+    // Times onde sou admin.
     const { data: adminRows } = await supabase
       .from('team_members')
       .select('team_id')
@@ -1119,7 +1119,7 @@ router.get(
       .order('created_at', { ascending: true });
     if (error) throw new HttpError(500, error.message);
 
-    // Filtra pelas denúncias cujo alvo pertence a uma equipa que administro.
+    // Filtra pelas denúncias cujo alvo pertence a um time que administro.
     const visiveis = [];
     for (const d of rows || []) {
       const teamId = await targetTeamId(d.target_type, d.target_id);
@@ -1163,7 +1163,7 @@ router.get(
 
 /**
  * PATCH /api/feed/denuncias/:id/resolver — resolve uma denúncia (só admin da
- * equipa do alvo). Body: { apagar_conteudo }. Se true: soft-delete do
+ * time do alvo). Body: { apagar_conteudo }. Se true: soft-delete do
  * comentário ou apaga o post.
  */
 router.patch(

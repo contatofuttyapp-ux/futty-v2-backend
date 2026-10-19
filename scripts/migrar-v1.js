@@ -3,7 +3,7 @@
 // ÂMBITO ATUAL (decisão do Pedro): "só perfis agora".
 //   1. Perfis dos jogadores (nome_jogador, cor_preferida, avatar_url)
 //   2. Equipa "Domingueira" + membros (os dois Pedro = admin)
-//   Jogos / confirmações / votos ficam para uma FASE 2 (ver fim do ficheiro).
+//   Jogos / confirmações / votos ficam para uma FASE 2 (ver fim do arquivo).
 //
 // CRUZAMENTO: por NOME (os emails V1 não correspondem aos @futtymock.com da V2).
 //
@@ -32,10 +32,10 @@ const V1_DB_CANDIDATOS = [
 // forem copiados. Quando houver Storage, troca-se por URLs do Supabase.
 const V1_BACKEND_URL = null;
 
-// Equipa a criar/usar.
+// Time a criar/usar.
 const EQUIPA = { nome: 'Domingueira', slug: 'domingueira', cor: 'verde' };
 
-// Os dois utilizadores Pedro Borges → admin da Domingueira.
+// Os dois usuários Pedro Borges → admin da Domingueira.
 const ADMIN_EMAILS = ['contatofuttyapp@gmail.com', 'phferreiraborgesbackup@gmail.com'];
 // Quem fica como criador da equipa (criado_por). Sessão atual do Pedro.
 const CRIADOR_EMAIL = 'phferreiraborgesbackup@gmail.com';
@@ -156,7 +156,7 @@ async function migrarPerfis(v1, usersV2) {
   }
 }
 
-// ─── 2. Equipa Domingueira + membros ────────────────────────────────────────────
+// ─── 2. Time Domingueira + membros ────────────────────────────────────────────
 async function migrarEquipa(v1, usersV2) {
   console.log('\n── 2. EQUIPA + MEMBROS ─────────────────────────────────────');
 
@@ -168,7 +168,7 @@ async function migrarEquipa(v1, usersV2) {
     return;
   }
 
-  // Equipa (idempotente por slug).
+  // Time (idempotente por slug).
   let team = null;
   const { data: existente } = await supabase.from('teams').select('id, nome, slug').eq('slug', EQUIPA.slug).maybeSingle();
   if (existente) {

@@ -115,7 +115,7 @@ const caminhoDe = (url) => {
   }
 
   // 3) Varre o bucket: fica só o que o banco aponta AGORA. Tudo o resto com o
-  //    prefixo deste utilizador é sobra — de bancadas antigas ou do tempo do
+  //    prefixo deste usuário é sobra — de bancadas antigas ou do tempo do
   //    nome fixo — e não serve a ninguém.
   const { data: perfil } = await supabase.from('users').select('foto_url, avatar_url, kit_ativo, avatar_ia_mes').eq('id', userId).maybeSingle();
   const { data: slots } = await supabase.from('user_avatar_slots').select('avatar_url').eq('user_id', userId);

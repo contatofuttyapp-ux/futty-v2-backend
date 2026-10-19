@@ -90,7 +90,7 @@ const SEED = {
   },
 };
 
-// Acessos & contas (12-set): NUNCA existe campo de senha — se algo parecido
+// Acessos & contas: NUNCA existe campo de senha — se algo parecido
 // com senha/chave for colado no campo `obs`, a gravação inteira é recusada
 // (fail-closed: melhor devolver 400 do que guardar um segredo em texto claro
 // num JSON no Storage). Padrões: prefixos de chave conhecidos (re_ Resend,
@@ -115,7 +115,7 @@ function validarAcessos(lista) {
 
 // ler() corre um DOWNLOAD do Storage dentro de rotas
 // quentes — um por /api/inicio e outro por /api/ads, em todo carregamento de
-// tela. O ficheiro muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
+// tela. O arquivo muda quando o dono edita o Gabinete: raríssimo. Cache de 30 s
 // (mesmo padrão de utils/plataformaStore.js), invalidada em gravar() para o
 // dono ver a própria edição de imediato.
 // Leituras simultâneas (arranque frio) esperam o MESMO download,

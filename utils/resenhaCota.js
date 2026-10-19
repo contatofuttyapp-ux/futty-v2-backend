@@ -4,7 +4,7 @@
 // plano dariam só ~25 mil fotos. Depende da migração 053 (coluna
 // feed_post_media.bytes + as funções feed_bytes_por_time/
 // feed_bytes_por_todos_times). SEM ela aplicada, tudo aqui falha ABERTO —
-// devolve null/{} em vez de lançar, e regista um aviso; quem chama trata
+// devolve null/{} em vez de lançar, e registra um aviso; quem chama trata
 // null como "não sei, não bloqueio". O Pedro aplica a migração quando puder;
 // até lá o upload/post funciona exatamente como antes.
 const { supabase } = require('./db');

@@ -139,8 +139,8 @@ function exigirImagemReal(mimetypesAceitos) {
 
 const IMAGENS = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
-/** Middleware Express do escudo — corre DEPOIS do multer. Rejeita 400 se o ficheiro for de um formato fora da lista
- * ou não decodificar como imagem estática (ficheiro corrompido ou disfarçado). */
+/** Middleware Express do escudo — corre DEPOIS do multer. Rejeita 400 se o arquivo for de um formato fora da lista
+ * ou não decodificar como imagem estática (arquivo corrompido ou disfarçado). */
 async function verificarImagemReal(req, res, next) {
   const file = req.file;
   if (!file || !file.buffer) return next();

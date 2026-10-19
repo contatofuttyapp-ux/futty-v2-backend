@@ -18,7 +18,7 @@ const { supabase } = require('../../utils/db');
     process.exit(1);
   }
 
-  // 1) encontra o utilizador no auth
+  // 1) encontra o usuário no auth
   const { data: lista, error: eLista } = await supabase.auth.admin.listUsers({ perPage: 200 });
   if (eLista) { console.error('listUsers falhou:', eLista.message); process.exit(1); }
   const user = lista.users.find((u) => (u.email || '').toLowerCase() === email);

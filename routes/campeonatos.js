@@ -46,12 +46,12 @@ const HONRA_CAMP = { 1: 'CAMPEÃO', 2: 'VICE', 3: '3º LUGAR' };
 const POS = { 1: '1º', 2: '2º', 3: '3º' };
 
 /**
- * GET /api/me/selos — selos de honra do utilizador, lidos do Storage dos campeonatos + do ranking
+ * GET /api/me/selos — selos de honra do usuário, lidos do Storage dos campeonatos + do ranking
  * (sem DDL).
  *  - campeonato: pódio 1º/2º/3º de campeonato terminado onde o user está no time —
  *    ATIVO até 30 dias, depois histórico (vitrine).
- *  - ranking: posição atual (1º/2º/3º) na equipa — VIVO (sem prazo; sai se cair).
- *  - artilheiro: os resultados do campeonato não guardam golos por jogador → dado
+ *  - ranking: posição atual (1º/2º/3º) no time — VIVO (sem prazo; sai se cair).
+ *  - artilheiro: os resultados do campeonato não guardam gols por jogador → dado
  *    inexistente hoje (v2 na SPEC).
  * Prioridade no cromo: campeonato > (artilheiro) > ranking.
  */
@@ -60,14 +60,14 @@ async function computeSelos(uid, teamIds) {
   if (!teamIds.length) return [];
 
   // Uma query só, com .in(), traz o nome de todas as equipas
-  // (em vez de uma query de nome POR equipa).
+  // (em vez de uma query de nome POR time).
   const { data: teamsData } = await supabase.from('teams').select('id, nome').in('id', teamIds);
   const nomePorId = new Map((teamsData || []).map((t) => [t.id, t.nome]));
 
   // Era um `for` sequencial (await dentro do loop, com no-await-in-loop
   // desligado) — N equipas = N round-trips em SÉRIE ao motor em São Paulo
-  // (~240ms cada, de Lisboa). Agora todas as equipas correm em PARALELO —
-  // o tempo total passa a ser o da equipa mais lenta, não a soma de todas.
+  // (~240ms cada, de Lisboa). Agora todos os times correm em PARALELO —
+  // o tempo total passa a ser o do time mais lento, não a soma de todos.
   const porEquipa = await Promise.all(
     teamIds.map(async (teamId) => {
       const equipaNome = nomePorId.get(teamId) || 'Time';
@@ -137,7 +137,7 @@ async function computeSelos(uid, teamIds) {
   return semDuplicados;
 }
 
-/** GET /api/me/selos — selos do próprio (todas as equipas). Cache: utils/selosCache.js. */
+/** GET /api/me/selos — selos do próprio (todos os times). Cache: utils/selosCache.js. */
 router.get(
   '/api/me/selos',
   requireAuth,
@@ -159,7 +159,7 @@ router.get(
   })
 );
 
-/** GET /api/equipas/:slug/jogador/:userId/selos — selos de um jogador NESTA equipa
+/** GET /api/equipas/:slug/jogador/:userId/selos — selos de um jogador NESTE time
  * (vitrine). O viewer tem de ser membro; só conta os selos desta equipa. */
 router.get(
   '/api/equipas/:slug/jogador/:userId/selos',

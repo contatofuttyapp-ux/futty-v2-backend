@@ -1,5 +1,5 @@
 // Futty v2.0 — Exclusão de conta (LGPD / exigência das lojas). Lógica ÚNICA de
-// apagar um usuário por completo — partilhada entre a rota DELETE /api/me (o
+// apagar um usuário por completo — compartilhada entre a rota DELETE /api/me (o
 // próprio usuário) e scripts/limpar-usuarios-teste.js (limpeza em massa), para
 // nunca haver duas versões da ordem de deleção a divergir com o tempo.
 //
@@ -175,11 +175,11 @@ async function apagarUsuario(userId) {
     fotosRemovidas += r.removidos;
     if (r.erro) console.warn(`[apagarUsuario] Storage (${bucket}): ${r.erro}`);
   }
-  // VARRIMENTO POR PREFIXO. Os ficheiros do utilizador têm
+  // VARRIMENTO POR PREFIXO. Os arquivos do usuário têm
   // carimbo de tempo no nome (`public/<userId>-<carimbo>.jpg`,
   // `public/<userId>-ai-<kit>-<carimbo>.png`, `tmp/<userId>-<carimbo>-*`), por
   // duas razões: cache nenhum serve versão velha, e cada geração é um objeto
-  // novo. O efeito colateral é que o banco já não conhece TODOS os ficheiros —
+  // novo. O efeito colateral é que o banco já não conhece TODOS os arquivos —
   // uma versão anterior cuja limpeza tenha falhado fica órfã e sem ninguém a
   // apontar para ela. Por isso, além das URLs de cima, varre-se as duas pastas
   // pelo prefixo do id. Best-effort: uma sobra no bucket nunca pode impedir a

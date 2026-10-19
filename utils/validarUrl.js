@@ -1,4 +1,4 @@
-// Futty v2.0 — Validação de URLs enviadas pelo utilizador (SEGURANCA-REVISAO-
+// Futty v2.0 — Validação de URLs enviadas pelo usuário (SEGURANCA-REVISAO-
 // 10SET.md secção 3). Sem isto, feed.js aceitava qualquer string como URL de
 // mídia (o <img>/<video> do cliente ia buscar o que fosse — pixel de
 // rastreio, SSRF interno, o que der) e push.js aceitava qualquer endpoint de

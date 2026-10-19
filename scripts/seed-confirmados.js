@@ -1,4 +1,4 @@
-// Futty v2.0 — Confirma todos os membros da equipa no jogo mais recente.
+// Futty v2.0 — Confirma todos os membros do time no jogo mais recente.
 //
 // Uso:  node scripts/seed-confirmados.js
 // Requer: backend/.env com SUPABASE_URL e SUPABASE_SECRET_KEY (ou a antiga SUPABASE_SERVICE_KEY).
@@ -22,7 +22,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 async function main() {
-  // 1) Equipa
+  // 1) Time
   const { data: team, error: teamErr } = await supabase
     .from('teams')
     .select('id, nome, slug')
@@ -46,7 +46,7 @@ async function main() {
   console.log(`[seed] Jogo:   ${game.id}`);
   console.log(`        ${game.local || '(sem local)'} · ${new Date(game.data).toLocaleString('pt-PT')} · ${game.jogadores_por_time || '?'} por time`);
 
-  // 2) Membros da equipa
+  // 2) Membros do time
   const { data: membros, error: memErr } = await supabase
     .from('team_members')
     .select('user_id, users ( nome, email )')

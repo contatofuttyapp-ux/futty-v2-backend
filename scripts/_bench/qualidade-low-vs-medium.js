@@ -8,7 +8,7 @@
 //
 //        node scripts/_bench/qualidade-low-vs-medium.js ./public/fotos-teste
 //
-//   3) no fim ele escreve um ficheiro HTML e diz o caminho.
+//   3) no fim ele escreve um arquivo HTML e diz o caminho.
 //      ESSE sim abre-se com duplo-clique, no browser.
 //
 //   Opções:  --fundos preto,cinza,verde     --qualidades low,medium
@@ -175,7 +175,7 @@ async function coroaContato(buf) {
 /**
  * TESTE PROPOSTO — ACHATAMENTO. Mede se a cabeça está INCOMPLETA, não se toca
  * a borda: cabeça real afunila numa cúpula (razão baixa); cabeça comida pelo
- * recorte tem topo largo e reto (razão ~1). Validado em ficheiros reais do
+ * recorte tem topo largo e reto (razão ~1). Validado em arquivos reais do
  * Futty: 0,05 nas boas, 1,00 nas cortadas → limiar 0,5 é seguro.
  */
 async function coroaAchatamento(buf) {
@@ -270,7 +270,7 @@ function flag(nome, omissao) {
           const depois = await coroaContato(trimmed);
           const achat = await coroaAchatamento(trimmed);
 
-          // ETAPA 3 de produção → é ESTE ficheiro que o jogador vê.
+          // ETAPA 3 de produção → é ESTE arquivo que o jogador vê.
           const final = await sharp(recorteBuf)
             .trim({ threshold: 10 })
             .extend({ top: 40, background: { r: 0, g: 0, b: 0, alpha: 0 } })

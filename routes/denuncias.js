@@ -24,7 +24,7 @@ const STORAGE_BUCKET = 'resenha';
 
 function agoraISO() { return new Date().toISOString(); }
 
-// Resolve equipa + conteúdo (para a triagem) a partir do alvo.
+// Resolve time + conteúdo (para a triagem) a partir do alvo.
 async function resolverAlvo(targetType, targetId) {
   if (targetType === 'post') {
     const { data: p } = await supabase.from('feed_posts').select('id, team_id, body').eq('id', targetId).maybeSingle();
@@ -55,7 +55,7 @@ async function resolverAlvo(targetType, targetId) {
   throw new HttpError(400, 'Tipo de alvo inválido.');
 }
 
-// Remove de facto o conteúdo (só em "remover"). Best-effort no Storage.
+// Remove de fato o conteúdo (só em "remover"). Best-effort no Storage.
 async function removerConteudo(caso, urls) {
   if (caso.target_type === 'post') {
     await supabase.from('feed_posts').delete().eq('id', caso.target_id);
@@ -64,7 +64,7 @@ async function removerConteudo(caso, urls) {
     const now = agoraISO();
     await supabase.from('comentarios').update({ deleted_at: now, updated_at: now }).eq('id', caso.target_id);
   }
-  // perfil: v1 não apaga a conta — fica registado (marca no log).
+  // perfil: v1 não apaga a conta — fica registrado (marca no log).
 }
 
 /**
@@ -84,7 +84,7 @@ router.post(
 
     const { teamId, tipo, conteudo, urls } = await resolverAlvo(targetType, targetId);
     // SEGURANCA-REVISAO-10SET.md secção 3: sem isto qualquer
-    // utilizador logado denunciava conteúdo de um time onde nunca esteve
+    // usuário logado denunciava conteúdo de um time onde nunca esteve
     // (bastava adivinhar/enumerar um UUID). targetType 'perfil' não tem
     // teamId (denúncia de perfil não é presa a nenhum time) — só se aplica
     // quando o alvo pertence a um time. Mesmo padrão já usado em
@@ -130,7 +130,7 @@ router.post(
   })
 );
 
-/** GET /api/denuncias/fila?slug= — fila do admin da equipa (ambíguos + escalados). */
+/** GET /api/denuncias/fila?slug= — fila do admin do time (ambíguos + escalados). */
 router.get(
   '/api/denuncias/fila',
   requireAuth,
@@ -236,11 +236,11 @@ async function resolverAutor(caso) {
     const { data } = await supabase.from('comentarios').select('user_id').eq('id', caso.target_id).maybeSingle();
     return data?.user_id || null;
   }
-  if (caso.target_type === 'perfil') return caso.target_id; // o alvo É o utilizador
+  if (caso.target_type === 'perfil') return caso.target_id; // o alvo É o usuário
   return null;
 }
 
-// IDs de todas as equipas + os casos sem equipa (perfil → '_sem').
+// IDs de todos os times + os casos sem time (perfil → '_sem').
 async function idsDeTodasEquipas() {
   const { data: teams } = await supabase.from('teams').select('id');
   const ids = (teams || []).map((t) => t.id);

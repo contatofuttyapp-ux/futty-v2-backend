@@ -1,7 +1,7 @@
-// Futty v2.0 — Geocodificação de CIDADES de EQUIPAS (Nominatim/OSM, grátis).
+// Futty v2.0 — Geocodificação de CIDADES de TIMES (Nominatim/OSM, grátis).
 // Respeita a política do OSM: User-Agent que identifica o Futty, MÁX 1 req/s, e CACHE
 // do resultado (nunca geocodificar em loop). Arredonda a 2 casas (~1,1 km) AQUI, no
-// servidor, antes de devolver — a morada exata nunca sai daqui. Só para EQUIPAS.
+// servidor, antes de devolver — a morada exata nunca sai daqui. Só para TIMES.
 const cache = new Map(); // cidade (lower) -> {lat,lng,nomeOficial} | null
 let ultimoReq = 0;
 

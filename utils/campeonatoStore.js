@@ -6,7 +6,7 @@
 // fixos) fica INTOCADA. A migração 039 (tabelas reais) fica escrita como alvo
 // futuro, não aplicada.
 //
-// RANKING DA EQUIPA INTOCADO: este módulo NUNCA escreve em votes/ratings/
+// RANKING DO TIME INTOCADO: este módulo NUNCA escreve em votes/ratings/
 // team_members — o campeonato é auto-contido no seu JSON.
 const crypto = require('crypto');
 const { supabase } = require('./db');
