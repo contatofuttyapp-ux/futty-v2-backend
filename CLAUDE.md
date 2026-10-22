@@ -8,7 +8,9 @@ para o processo completo: mockup-first, look do utilizador, selo só após aprov
 - **Commits coordenados**: routes/*.js novos entram no MESMO commit que o server.js
   que os importa; vagas que tocam os dois repos selam-se em par (mensagens em pt).
 - **Migrations**: `db/migrations/NNN_nome.sql`, idempotentes (`if not exists`);
-  aplicadas à mão no Supabase — o commit regista, não executa.
+  aplicadas à mão no Supabase — o commit regista, não executa. Toda tabela/view/função
+  nova em `public` termina com GRANT explícito + RLS (o Supabase não dá mais permissão
+  automática): receita em `db/migrations/LEIA-ME.md`.
 - **Gating por membership**: endpoints de equipa passam por requireTeamMember/getRole;
   dados de jogador só saem para quem partilha equipa (`equipas_partilhadas`).
 - **Flags de equipa**: `teams.mostrar_gols` (037) — off → gols/artilharia fora do

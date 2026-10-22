@@ -24,6 +24,9 @@ numeradas pela ordem em que devem ser aplicadas.
 
 - O backend usa a **service_role key** (faz *bypass* da RLS), mas cada migração
   inclui os `GRANT` necessários para essa role.
+- **Migração nova:** ler `db/migrations/LEIA-ME.md` antes. Desde 30-out-2026 o Supabase
+  não dá permissão automática a objeto novo em `public`; sem `GRANT` explícito nem o motor
+  enxerga a tabela.
 - `db/schema.sql` mantém o esquema completo consolidado (equivalente a aplicar
   001→005 de uma vez) — útil para uma instalação rápida de raiz.
 - Os ficheiros antigos por fase (`convites.sql`, `games.sql`, `fase6.sql`,
