@@ -97,6 +97,7 @@ const CRUZADAS = [
   ['POST', (m) => `/api/games/${m.ids.jogoAbertoB}/presencas`, (m) => ({ jogadores: [{ user_id: m.p.memB.id }] })],
   ['POST', (m) => `/api/games/${m.ids.jogoAbertoB}/times-manuais`, (m) => ({ times: [{ nome: 'X', jogadores: [{ nome: 'Zeca', convidado: true }] }, { nome: 'Y', jogadores: [{ nome: 'Beto', convidado: true }] }] })],
   ['POST', (m) => `/api/games/${m.ids.jogoAbertoB}/sortear`, () => ({ convidados: ['a', 'b', 'c', 'd', 'e', 'f'] })],
+  ['PUT', (m) => `/api/games/${m.ids.jogoAbertoB}/convidados`, () => ({ convidados: [{ nome: 'invasor', cabeca_chave: true }] })],
   ['PATCH', (m) => `/api/games/${m.ids.jogoPassadoB}/times`, (m) => ({ times_resultado: { times: [{ nome: 'X', jogadores: [{ user_id: m.p.admB.id, nome: 'Bruno' }] }, { nome: 'Y', jogadores: [{ user_id: m.p.memB.id, nome: 'Beto' }] }], reservas: [] } })],
   ['PATCH', (m) => `/api/games/${m.ids.jogoPassadoB}/resultado`, () => ({ campeao_time_index: 0 })],
   ['PATCH', (m) => `/api/feed/games/${m.ids.jogoPassadoB}/resultado`, () => ({ campeao_time_index: 0 })],

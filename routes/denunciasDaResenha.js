@@ -3,7 +3,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { denunciaLimiter } = require('../middleware/limiters');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, ensureUserRow } = require('../utils/db');
 const { targetTeamId } = require('../utils/ajudaDaResenha');
 
@@ -34,7 +34,7 @@ router.post(
     const teamId = await targetTeamId(targetType, targetId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     await ensureUserRow(req.user);
 

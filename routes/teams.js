@@ -3,7 +3,7 @@
 const express = require('express');
 const multer = require('multer');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow } = require('../utils/db');
 const { obterTeams } = require('../services/inicio');
 const { filtroNSFWFailClosed } = require('../utils/nsfwFilter');
@@ -244,7 +244,7 @@ router.get(
         .order('created_at', { ascending: true }),
       idsQueSoOrganizam(team.id), // em consulta à parte (a coluna `joga` é da migração 067)
     ]);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
     if (error) throw new HttpError(500, error.message);
 
     // E-mail não sai aqui: página pública do time, visível a qualquer membro.

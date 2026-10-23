@@ -3,7 +3,7 @@
 
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, loadGame } = require('../utils/db');
 const { aplicarRostoPublico } = require('../utils/rostoPublico');
 const { comAvataresAtuais } = require('../utils/avataresDoSorteio');
@@ -25,7 +25,7 @@ router.post(
     const game = await loadGame(req.params.id);
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
     const role = await getRole(game.team_id, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
     res.json({ codigo: await codigoDoSorteio(supabase, game.id) });
   })
 );

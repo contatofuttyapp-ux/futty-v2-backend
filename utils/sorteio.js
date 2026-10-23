@@ -102,8 +102,9 @@ function distribuirCabecasChave(cabecas, numTimes, rng = Math.random) {
  * @param {number} jogadoresPorTime tamanho exato de cada time
  * @param {object} [opts]
  * @param {number} [opts.seed] semente do RNG (gerada se ausente) — replay exacto
- * @param {string[]} [opts.convidados] nomes de CONVIDADOS SEM APP (SPEC §11):
- *   entram como jogadores de linha sem user_id; zero impacto em users/ranking.
+ * @param {Array<string|{nome:string, goleiro?:boolean, cabeca_chave?:boolean}>} [opts.convidados] CONVIDADOS SEM APP (SPEC §11):
+ *   entram sem user_id; zero impacto em users/ranking. O nome solto (o app antigo) é jogador de linha; com as marcas,
+ *   o convidado é goleiro ou cabeça de chave como qualquer membro.
  * @returns {{ numTimes:number, times:Array<Array>, reservas:Array, seed:number }}
  */
 function executarSorteio(confirmados, jogadoresPorTime, opts = {}) {
@@ -112,12 +113,14 @@ function executarSorteio(confirmados, jogadoresPorTime, opts = {}) {
 
   // Convidados sem app: só nome, sem conta — vivem apenas neste resultado. Sem histórico nenhum, entram com a
   // MESMA nota de quem tem conta e ainda não recebeu voto (RATING_DEFAULT): com 0 caíam quase sempre na reserva,
-  // e o convidado não é pior do que um membro novo só por não ter o app.
+  // e o convidado não é pior do que um membro novo só por não ter o app. As marcas (goleiro, cabeça de chave) valem igual às de
+  // quem tem conta: o admin escolhe quem abre cada time, tenha a pessoa o app ou não.
   const convidados = (opts.convidados || [])
-    .map((n) => String(n).trim())
-    .filter(Boolean)
+    .map((c) => (c && typeof c === 'object' ? c : { nome: c }))
+    .map((c) => ({ nome: String(c.nome ?? '').trim(), goleiro: c.goleiro === true, cabeca_chave: c.cabeca_chave === true }))
+    .filter((c) => c.nome)
     .slice(0, 28)
-    .map((nome) => ({ user_id: null, convidado: true, nome, rating: RATING_DEFAULT, goleiro: false, cabeca_chave: false, avatar_url: null }));
+    .map(({ nome, goleiro, cabeca_chave: cabecaChave }) => ({ user_id: null, convidado: true, nome, rating: RATING_DEFAULT, goleiro, cabeca_chave: cabecaChave, avatar_url: null }));
   const todos = confirmados.concat(convidados);
 
   // VARIEDADE (modo B) — ruído derivado da SEED: cada rating leva uma perturbação

@@ -2,7 +2,7 @@
 // (jogoPublico), os times (sorteioDoJogo) e o "Associar jogador" (associarJogador) vivem em sub-roteadores montados aqui.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings, goleirosDoTime } = require('../utils/db');
 const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // o padrão do time
 const { obterConvites } = require('../services/inicio');
@@ -17,6 +17,7 @@ const { anunciarResultado } = require('../utils/avisoDoResultado');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo: uma regra só
 const { textoCurto, ehUuid } = require('../utils/entrada'); // o que a pessoa digita: texto com teto, número em faixa
 const { round1 } = require('../utils/ajudaDoJogo');
+const { convidadosGuardados } = require('../utils/convidadosDoJogo'); // a lista de convidados sem app do jogo
 
 const router = express.Router();
 
@@ -106,7 +107,7 @@ router.get(
     if (!team) throw new HttpError(404, 'Time não encontrado.');
 
     const role = await getRole(team.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     const { data: games, error } = await supabase
       .from('games')
@@ -171,7 +172,7 @@ router.get(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
 
     const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     // Estas 4 leituras não dependem umas das outras (só de game.id/
     // game.teams.id, já conhecidos) — em paralelo, não uma round-trip a seguir à
@@ -255,6 +256,9 @@ router.get(
         rodada_foto_url: game.rodada_foto_url,
       },
       players,
+      // Os convidados sem app do jogo, com as marcas do sorteio: é a lista "Alguém sem o app vai jogar?" de quem organiza
+      // (utils/convidadosDoJogo.js). Só o admin edita e sorteia; os outros veem os convidados nos times.
+      ...(role === 'admin' ? { convidados: convidadosGuardados(game) } : {}),
       gols,
       meuEstado: meu
         ? { confirmado: meu.confirmado, goleiro: meu.goleiro, cabeca_chave: meu.cabeca_chave }
@@ -402,7 +406,7 @@ router.post(
     if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
 
     const role = await getRole(game.teams.id, req.user.id);
-    if (!role) throw new HttpError(403, 'Não é membro deste time.');
+    if (!role) throw foraDoTime();
     // Quem só organiza o time não entra na lista de presença (desmarcar continua valendo).
     if (confirmado && (await soOrganiza(game.teams.id, req.user.id))) throw new HttpError(403, MSG_SO_ORGANIZA);
 

@@ -4,7 +4,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { marcarFase, medir } = require('../middleware/tempo');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, requireTeamMember, getTeamBySlug, getRole, ensureUserRow } = require('../utils/db');
 const { obterVotacaoStatus, obterVotacoesPendentes } = require('../services/inicio');
 const { agregadosDaEquipa, COLUNAS_JOGOS } = require('../utils/agregados');
@@ -293,7 +293,7 @@ router.get(
     ]);
     // O próprio id passa SEMPRE — antes de qualquer verificação de time em comum.
     const ehOProprio = userId === req.user.id;
-    if (!role && !ehOProprio) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role && !ehOProprio) throw foraDoTime();
     marcarFase(res, 'onda2');
 
     const games = teamGames || [];

@@ -2,7 +2,7 @@
 
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, ensureUserRow, getUserById } = require('../utils/db');
 const { midiaEhDe } = require('../utils/validarUrl');
 const { conjuntoMutuo } = require('../utils/blocksStore');
@@ -39,7 +39,7 @@ router.post(
     const teamId = await targetTeamId(targetType, targetId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     await ensureUserRow(req.user);
 
@@ -90,7 +90,7 @@ router.get(
     const teamId = await parentTeamId(parentType, parentId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     // Bloqueio entre jogadores: comentários de quem está bloqueado/me bloqueou não existem para mim.
     const bloqueados = await conjuntoMutuo(req.user.id);
@@ -167,7 +167,7 @@ router.post(
     const teamId = await parentTeamId(parentType, parentId);
     if (!teamId) throw new HttpError(404, 'Alvo não encontrado.');
     const role = await getRole(teamId, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
 
     // Os anexos valem o mesmo que a mídia de um post: do Storage da Resenha e subida por quem comenta (a v1 do app só manda texto).
     const anexosPedidos = (Array.isArray(anexos) ? anexos : []).filter((a) => a && a.url).slice(0, 8);
@@ -258,7 +258,7 @@ router.delete(
 
     const teamId = await parentTeamId(c.parent_type, c.parent_id);
     const role = teamId ? await getRole(teamId, req.user.id) : null;
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
     if (c.author_id !== req.user.id && role !== 'admin') {
       throw new HttpError(403, 'Só o autor ou um admin pode excluir.');
     }

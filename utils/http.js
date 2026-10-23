@@ -15,6 +15,12 @@ class HttpError extends Error {
   }
 }
 
+// Quem não é do time e abre o jogo, o ranking, o elenco ou a Resenha dele. Frase e código únicos: a tela mostra a verdade ("você não
+// faz parte") pelo código, em vez de tratar o 403 como falha de internet.
+const MSG_FORA_DO_TIME = 'Você não faz parte deste time.';
+const CODIGO_FORA_DO_TIME = 'FORA_DO_TIME';
+const foraDoTime = () => new HttpError(403, MSG_FORA_DO_TIME, CODIGO_FORA_DO_TIME);
+
 /**
  * Envolve um handler async para que qualquer erro (throw/rejeição) seja
  * encaminhado para o error handler central via next(err).
@@ -22,4 +28,4 @@ class HttpError extends Error {
  */
 const asyncHandler = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-module.exports = { HttpError, asyncHandler };
+module.exports = { HttpError, asyncHandler, MSG_FORA_DO_TIME, CODIGO_FORA_DO_TIME, foraDoTime };

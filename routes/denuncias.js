@@ -4,7 +4,7 @@
 const express = require('express');
 const { requireAuth, requireSuperAdmin } = require('../middleware/auth');
 const { denunciaLimiter } = require('../middleware/limiters');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug } = require('../utils/db');
 const { obterDesfechosDenuncias } = require('../services/inicio');
 const { removerFicheirosPorUrl } = require('../utils/storage');
@@ -90,7 +90,7 @@ router.post(
     // quando o alvo pertence a um time. Mesmo padrão já usado em
     // feed.js (POST /api/feed/denuncias).
     if (teamId && !(await getRole(teamId, req.user.id))) {
-      throw new HttpError(403, 'Você não é membro deste time.');
+      throw foraDoTime();
     }
     const agora = agoraISO();
 

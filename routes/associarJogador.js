@@ -16,8 +16,13 @@ const campeonatos = require('../utils/campeonatoStore');
 const selosCache = require('../utils/selosCache');
 const { sincronizarPostDoCampeao } = require('../utils/postDoCampeao');
 const { quemFez } = require('../utils/ajudaDoJogo');
+const { semConvidado, comConvidado } = require('../utils/convidadosDoJogo'); // a lista de convidados sem app guardada no jogo
 
 const router = express.Router();
+
+// O pedaço do update que acerta `games.convidados`: só quando o jogo tem a lista gravada (sem ela, o motor lê os convidados do sorteio).
+const listaSem = (game, nome) => (Array.isArray(game.convidados) ? { convidados: semConvidado(game.convidados, nome) } : {});
+const listaCom = (game, convidado) => (Array.isArray(game.convidados) ? { convidados: comConvidado(game.convidados, convidado) } : {});
 
 // ─── Associar jogador: o convidado sem app vira a conta de um membro do time ────────────────────────────────────────
 // A troca vive em utils/associarJogador.js. Aqui a ORDEM das gravações: gols, presença e campeonatos primeiro, e o `times_resultado` por
@@ -103,7 +108,8 @@ function outrosJogosDoConvidado(jogos, gameId, nome) {
 
 /** Os jogos do time com sorteio (ou times anotados): o que "Associar em todos" percorre. */
 async function jogosDoTimeComTimes(teamId) {
-  const { data, error } = await supabase.from('games').select('id, data, status, cancelado, times_resultado').eq('team_id', teamId).not('times_resultado', 'is', null);
+  // `*` e não a lista de colunas: a de convidados (087) entra quando existe, e o motor não quebra antes da migração.
+  const { data, error } = await supabase.from('games').select('*').eq('team_id', teamId).not('times_resultado', 'is', null);
   if (error) throw new HttpError(500, error.message);
   return data || [];
 }
@@ -148,7 +154,7 @@ async function associarNoJogo({ game, team, nomeConvidado, userId, membro, autor
 
   // 2) a presença: o mesmo registro que o ranking e a lista de presença já usam (um por jogo e jogador, sem duplicar)
   if (!presencaAntes) {
-    const { error } = await supabase.from('game_players').insert({ game_id: game.id, user_id: userId, confirmado: true, goleiro: achado.jogador.goleiro === true });
+    const { error } = await supabase.from('game_players').insert({ game_id: game.id, user_id: userId, confirmado: true, goleiro: achado.jogador.goleiro === true, cabeca_chave: achado.jogador.cabeca_chave === true });
     if (error) throw new HttpError(500, error.message);
   } else if (!presencaAntes.confirmado) {
     const { error } = await supabase.from('game_players').update({ confirmado: true }).eq('game_id', game.id).eq('user_id', userId);
@@ -180,7 +186,9 @@ async function associarNoJogo({ game, team, nomeConvidado, userId, membro, autor
     gols: golsDele.length,
   };
   novoTr.registro = registroComAssociacoes(novoTr.registro || registroDe(tr), [...antes, associacao]);
-  const { error: erroJogo } = await supabase.from('games').update({ times_resultado: novoTr }).eq('id', game.id);
+  // A vaga do convidado agora é da conta (que já conta como confirmada): ele sai da lista de convidados do jogo, senão a mesma pessoa
+  // contaria duas vezes e voltaria no "Sortear de novo". Jogo sem lista gravada lê os convidados do sorteio, que já leva a troca.
+  const { error: erroJogo } = await supabase.from('games').update({ times_resultado: novoTr, ...listaSem(game, achado.jogador.nome) }).eq('id', game.id);
   if (erroJogo) throw new HttpError(500, erroJogo.message);
 
   return {
@@ -295,7 +303,7 @@ router.post(
     }
 
     novoTr.registro = registroComAssociacoes(novoTr.registro, lista.map((a) => (a === ultima ? { ...a, desfeita_em: new Date().toISOString() } : a)));
-    const { error: erroJogo } = await supabase.from('games').update({ times_resultado: novoTr }).eq('id', game.id);
+    const { error: erroJogo } = await supabase.from('games').update({ times_resultado: novoTr, ...listaCom(game, convidado) }).eq('id', game.id);
     if (erroJogo) throw new HttpError(500, erroJogo.message);
 
     selosCache.invalidarMembro(team.id, userId);

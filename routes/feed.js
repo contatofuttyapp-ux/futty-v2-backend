@@ -3,7 +3,7 @@
 // sub-roteadores (uploadDaResenha, conversaDaResenha, denunciasDaResenha) montados aqui. asyncHandler + HttpError.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
 const { removerFicheirosPorUrl } = require('../utils/storage');
@@ -105,7 +105,7 @@ router.get(
     let teamIds = Object.keys(teamMap);
     const filtro = req.query.team_id;
     if (filtro) {
-      if (!teamMap[filtro]) throw new HttpError(403, 'Você não é membro deste time.');
+      if (!teamMap[filtro]) throw foraDoTime();
       teamIds = [filtro];
     }
     if (!teamIds.length) return res.json({ items: [] });
@@ -328,7 +328,7 @@ router.post(
       .eq('team_id', teamId)
       .eq('user_id', req.user.id)
       .maybeSingle();
-    if (!membership) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!membership) throw foraDoTime();
     if (membership.role !== 'admin' && !membership.pode_postar) {
       throw new HttpError(403, 'Você não tem permissão para publicar neste time.');
     }
@@ -473,7 +473,7 @@ router.delete(
     if (!post) throw new HttpError(404, 'Post não encontrado.');
 
     const role = await getRole(post.team_id, req.user.id);
-    if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+    if (!role) throw foraDoTime();
     if (post.author_id !== req.user.id && role !== 'admin') {
       throw new HttpError(403, 'Só o autor ou um admin pode excluir.');
     }

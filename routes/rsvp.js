@@ -3,7 +3,7 @@
 // recusado) enquanto estiver aberto e dentro do prazo.
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
-const { asyncHandler, HttpError } = require('../utils/http');
+const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, loadGame, goleirosDoTime } = require('../utils/db');
 const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
@@ -67,7 +67,7 @@ async function jogoComoMembro(req) {
   const game = await loadGame(req.params.gameId);
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
   const role = await getRole(game.teams.id, req.user.id);
-  if (!role) throw new HttpError(403, 'Não é membro deste time.');
+  if (!role) throw foraDoTime();
   return game;
 }
 

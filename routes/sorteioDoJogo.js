@@ -14,6 +14,7 @@ const { fusoDoTime } = require('../utils/fuso');
 const { registroDeSorteio, registroDeMontagem, resultadoAjustado } = require('../utils/registroDoSorteio');
 const { limparTimes, limparReservas } = require('../utils/timesDoCorpo'); // os times que o app manda à mão
 const { quemFez, round1 } = require('../utils/ajudaDoJogo');
+const { MAX_CONVIDADOS, limparConvidados, convidadosGuardados, nomeRepetido, semAColuna } = require('../utils/convidadosDoJogo'); // os convidados sem app guardados no jogo
 
 const router = express.Router();
 
@@ -76,6 +77,34 @@ router.post(
       .single();
     if (error) throw new HttpError(500, error.message);
     res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
+  })
+);
+
+/**
+ * PUT /api/games/:id/convidados — ADMIN grava a lista de convidados sem app do jogo ("Alguém sem o app vai jogar?"), com as marcas do
+ * sorteio. A lista inteira substitui a de antes (é o que a tela mostra). Não mexe nos times já sorteados: vale para o próximo sorteio.
+ * Body: { convidados: [{ nome, goleiro?, cabeca_chave? }] }
+ */
+router.put(
+  '/api/games/:id/convidados',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins podem mudar os convidados.');
+
+    if (!Array.isArray(req.body?.convidados)) throw new HttpError(400, 'Mande a lista de convidados.');
+    if (req.body.convidados.length > MAX_CONVIDADOS) throw new HttpError(400, `Máximo de ${MAX_CONVIDADOS} convidados por jogo.`);
+    const convidados = limparConvidados(req.body.convidados);
+    // Dois convidados com o mesmo nome viram uma pessoa só nos times, nos gols e no Associar: o admin põe um sobrenome ou um apelido.
+    const repetido = nomeRepetido(convidados);
+    if (repetido) throw new HttpError(400, `"${repetido}" já está na lista. Use um sobrenome ou apelido para diferenciar.`);
+
+    const { error } = await supabase.from('games').update({ convidados }).eq('id', game.id);
+    if (semAColuna(error)) throw new HttpError(503, 'Essa opção ainda não está disponível.');
+    if (error) throw new HttpError(500, error.message);
+    res.json({ convidados });
   })
 );
 
@@ -147,11 +176,10 @@ router.post(
 
     const all = confirmados.map(toPlayer);
 
-    // CONVIDADOS SEM APP (SPEC-SORTEIO §11): nomes soltos do organizador — entram
-    // no sorteio como linha, sem user_id, zero impacto em users/ranking.
-    const convidados = Array.isArray(req.body?.convidados)
-      ? req.body.convidados.map((n) => (typeof n === 'string' ? n.trim().slice(0, 40) : '')).filter(Boolean).slice(0, 28)
-      : [];
+    // CONVIDADOS SEM APP (SPEC-SORTEIO §11): sem user_id, zero impacto em users/ranking. Os que o pedido traz (o app antigo manda
+    // só os nomes; o novo, com goleiro e cabeça de chave) ou, sem lista no pedido, os guardados no jogo — é o "Sortear de novo" sem
+    // digitar tudo de novo (utils/convidadosDoJogo.js).
+    const convidados = Array.isArray(req.body?.convidados) ? limparConvidados(req.body.convidados) : convidadosGuardados(game);
 
     // TECTOS FORMAIS (SPEC-SORTEIO §14): 3..28 participantes; 2..4 times.
     const totalParticipantes = all.length + convidados.length;
@@ -164,9 +192,6 @@ router.post(
     if (totalParticipantes > 28) {
       throw new HttpError(400, 'Máximo de 28 jogadores por sorteio (28 = 4 times de 7).');
     }
-    if (Math.floor(totalParticipantes / porTime) < 2) {
-      throw new HttpError(400, );
-    }
     if (Math.floor(totalParticipantes / porTime) > 4) {
       throw new HttpError(400, 'Máximo de 4 times por sorteio: aumente os jogadores por time.');
     }
@@ -177,7 +202,7 @@ router.post(
     const sorteio = executarSorteio(all, porTime, { convidados });
 
     const avisos = [];
-    const totalGoleiros = all.filter((p) => p.goleiro).length;
+    const totalGoleiros = all.filter((p) => p.goleiro).length + convidados.filter((c) => c.goleiro).length;
     if (totalGoleiros > 0 && totalGoleiros < sorteio.numTimes) {
       avisos.push(
         `Há ${totalGoleiros} goleiro(s) para ${sorteio.numTimes} times: ${sorteio.numTimes - totalGoleiros} time(s) ficam sem goleiro.`
@@ -213,12 +238,17 @@ router.post(
     const jaComecou = !!game.data && new Date(game.data).getTime() <= Date.now();
     const patchStatus = jaComecou && game.status !== 'cancelado' ? { status: 'em_curso' } : {};
 
-    const { data: updated, error } = await supabase
+    // A lista usada fica guardada no jogo (recarregar a página e o "Sortear de novo" partem dela). Sem a coluna (a migração 087 ainda
+    // não rodou) o sorteio grava igual, sem ela: a lista continua dentro do sorteio, que é de onde o motor a lê nesse caso.
+    const gravarSorteio = (comLista) => supabase
       .from('games')
-      .update({ jogadores_por_time: porTime, num_times: sorteio.numTimes, sorteio_realizado: true, times_resultado: resultado, ...patchStatus })
+      .update({ jogadores_por_time: porTime, num_times: sorteio.numTimes, sorteio_realizado: true, times_resultado: resultado, ...patchStatus, ...(comLista ? { convidados } : {}) })
       .eq('id', game.id)
       .select()
       .single();
+    let gravado = await gravarSorteio(true);
+    if (semAColuna(gravado.error)) gravado = await gravarSorteio(false);
+    const { data: updated, error } = gravado;
     if (error) throw new HttpError(500, error.message);
 
     res.json({

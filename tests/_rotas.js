@@ -8,7 +8,7 @@
 const path = require('node:path');
 const express = require('express');
 const { criarSupabaseFalso } = require('./_supabaseFalso');
-const { HttpError } = require('../utils/http');
+const { HttpError, foraDoTime } = require('../utils/http');
 const { tratadorDeErros } = require('../middleware/erros');
 
 const RECARREGAR = [
@@ -50,7 +50,7 @@ function dbFalso(cliente) {
       const team = await getTeamBySlug(slug);
       if (!team) throw new HttpError(404, 'Time não encontrado.');
       const role = await getRole(team.id, userId);
-      if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+      if (!role) throw foraDoTime();
       return { team, role };
     },
     loadGame: async (id) => {

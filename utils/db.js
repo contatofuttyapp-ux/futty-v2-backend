@@ -4,7 +4,7 @@
 require('dotenv').config({ quiet: true });
 
 const { createClient } = require('@supabase/supabase-js');
-const { HttpError } = require('./http');
+const { HttpError, foraDoTime } = require('./http');
 const { RATING_DEFAULT } = require('./helpers');
 const { chaveSecreta } = require('./chavesSupabase');
 const { lerComFuso } = require('./fuso');
@@ -120,7 +120,7 @@ async function requireTeamMember(slug, userId) {
   const team = await getTeamBySlug(slug, 'id, slug, nome, cor');
   if (!team) throw new HttpError(404, 'Time não encontrado.');
   const role = await getRole(team.id, userId);
-  if (!role) throw new HttpError(403, 'Você não é membro deste time.');
+  if (!role) throw foraDoTime();
   return { team, role };
 }
 
