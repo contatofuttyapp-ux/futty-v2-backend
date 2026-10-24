@@ -1,8 +1,9 @@
-// Futty v2.0 — POST /api/csp: os avisos da Content-Security-Policy do site (public/_headers do frontend, em modo só-aviso).
+// Futty v2.0 — POST /api/csp: os avisos da Content-Security-Policy do site (public/_headers do frontend).
 //
-// O navegador manda um aviso a cada coisa que a política BLOQUEARIA. Aqui ele vira UMA linha no log ("[csp] img-src bloquearia
-// https://exemplo.com em /feed") — é por ela que se decide, depois de uma semana limpa, virar a política em bloqueio de verdade.
-// Nada vai para o banco. Sem sessão de propósito (o navegador manda sozinho, sem o token), com limiter próprio por IP, fora do
+// O navegador manda um aviso a cada coisa que a política barra. Aqui ele vira UMA linha no log ("[csp] img-src bloqueou
+// https://exemplo.com em /feed") — é por ela que se descobre se a política barrou algo que o site usa. O aviso diz se a política
+// BLOQUEOU (disposition "enforce", a Content-Security-Policy de verdade) ou só BLOQUEARIA (disposition "report", uma política em
+// Report-Only); sem o campo, vale "bloqueou", que é o modo em que o site está. Nada vai para o banco. Sem sessão de propósito (o navegador manda sozinho, sem o token), com limiter próprio por IP, fora do
 // balde geral da /api: um site com muitos avisos nunca pode gastar a cota de pedidos de quem está usando o app.
 //
 // Os dois formatos que os navegadores mandam: o antigo `report-uri` (application/csp-report, { "csp-report": {…} }) e o novo
@@ -31,7 +32,7 @@ function semDetalhe(valor) {
   }
 }
 
-/** Os avisos do corpo, nos dois formatos, como { diretiva, bloqueado, pagina }. Corpo estranho = lista vazia. */
+/** Os avisos do corpo, nos dois formatos, como { diretiva, acao, bloqueado, pagina }. Corpo estranho = lista vazia. */
 function avisosDoCorpo(corpo) {
   const lista = Array.isArray(corpo) ? corpo : corpo && typeof corpo === 'object' ? [corpo] : [];
   const avisos = [];
@@ -41,10 +42,11 @@ function avisosDoCorpo(corpo) {
     const r = antigo || novo;
     if (!r || typeof r !== 'object') continue;
     const diretiva = String(r['effective-directive'] || r.effectiveDirective || r['violated-directive'] || r.violatedDirective || '?').split(' ')[0].slice(0, 40);
+    const acao = r.disposition === 'report' ? 'bloquearia' : 'bloqueou';
     const bloqueado = semDetalhe(r['blocked-uri'] ?? r.blockedURL);
     let pagina = '?';
     try { pagina = new URL(String(r['document-uri'] || r.documentURL || '')).pathname.slice(0, 80); } catch { /* fica "?" */ }
-    avisos.push({ diretiva, bloqueado, pagina });
+    avisos.push({ diretiva, acao, bloqueado, pagina });
   }
   return avisos;
 }
@@ -55,7 +57,7 @@ function criarRotaCsp({ registrar = (linha) => console.warn(linha), limite = cri
   // strict: false — um corpo que é JSON mas não é objeto (texto, número) cai em "corpo estranho" (204 sem linha), não num 400.
   router.post('/api/csp', limite, express.json({ type: TIPOS, limit: '16kb', strict: false }), (req, res) => {
     for (const a of avisosDoCorpo(req.body)) {
-      const linha = `[csp] ${a.diretiva} bloquearia ${a.bloqueado} em ${a.pagina}`.slice(0, TETO_DA_LINHA);
+      const linha = `[csp] ${a.diretiva} ${a.acao} ${a.bloqueado} em ${a.pagina}`.slice(0, TETO_DA_LINHA);
       const ultima = vistas.get(linha);
       if (ultima != null && agora() - ultima < JANELA_DE_REPETICAO_MS) continue;
       vistas.set(linha, agora());

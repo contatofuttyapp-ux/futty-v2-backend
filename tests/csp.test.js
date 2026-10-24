@@ -1,7 +1,7 @@
 // POST /api/csp — os avisos da CSP do site viram uma linha no log, sem query, sem token, sem repetir, e sem gastar a cota da /api.
 //
 // O que isto prova:
-//   1. os dois formatos (report-uri antigo e report-to novo) viram "[csp] <diretiva> bloquearia <origem+caminho> em <caminho>";
+//   1. os dois formatos (report-uri antigo e report-to novo) viram "[csp] <diretiva> bloqueou <origem+caminho> em <caminho>" ("bloquearia" quando o aviso é de Report-Only);
 //   2. query, fragmento e o token do /api/media nunca chegam ao log; data:/blob: e as palavras-chave ("inline", "eval") passam limpas;
 //   3. a mesma linha não se repete em 10 min; corpo estranho responde 204 sem linha nenhuma;
 //   4. os limiters gerais da /api deixam /csp de fora (ele tem o próprio, por IP);
@@ -29,8 +29,17 @@ function subir(opcoes) {
 const mandar = (base, corpo, tipo) => fetch(`${base}/api/csp`, { method: 'POST', headers: { 'content-type': tipo }, body: typeof corpo === 'string' ? corpo : JSON.stringify(corpo) });
 
 test('os dois formatos viram a mesma linha curta: diretiva, origem + caminho do bloqueado, caminho da página', () => {
-  assert.deepEqual(avisosDoCorpo(ANTIGO()), [{ diretiva: 'img-src', bloqueado: 'https://img.exemplo.com/a.jpg', pagina: '/feed' }]);
-  assert.deepEqual(avisosDoCorpo([NOVO()]), [{ diretiva: 'frame-src', bloqueado: 'https://www.youtube.com/embed/abc', pagina: '/home' }]);
+  assert.deepEqual(avisosDoCorpo(ANTIGO()), [{ diretiva: 'img-src', acao: 'bloqueou', bloqueado: 'https://img.exemplo.com/a.jpg', pagina: '/feed' }]);
+  assert.deepEqual(avisosDoCorpo([NOVO()]), [{ diretiva: 'frame-src', acao: 'bloqueou', bloqueado: 'https://www.youtube.com/embed/abc', pagina: '/home' }]);
+});
+
+test('o aviso diz se a política bloqueou (enforce, o site de hoje) ou só bloquearia (report, Report-Only); sem o campo, bloqueou', () => {
+  assert.equal(avisosDoCorpo(ANTIGO({ disposition: 'enforce' }))[0].acao, 'bloqueou');
+  assert.equal(avisosDoCorpo(ANTIGO({ disposition: 'report' }))[0].acao, 'bloquearia');
+  assert.equal(avisosDoCorpo([NOVO({ disposition: 'enforce' })])[0].acao, 'bloqueou');
+  assert.equal(avisosDoCorpo([NOVO({ disposition: 'report' })])[0].acao, 'bloquearia');
+  assert.equal(avisosDoCorpo(ANTIGO())[0].acao, 'bloqueou');
+  assert.equal(avisosDoCorpo(ANTIGO({ disposition: '<lixo>' }))[0].acao, 'bloqueou', 'só duas palavras saem para o log, nunca o texto do aviso');
 });
 
 test('nada de query, token do /api/media ou texto solto; data:, blob: e palavras-chave passam limpas', () => {
@@ -51,7 +60,7 @@ test('a rota: 204, uma linha por aviso novo, a mesma linha só volta depois de 1
   assert.equal((await mandar(base, ANTIGO(), 'application/csp-report')).status, 204);
   assert.equal((await mandar(base, [NOVO()], 'application/reports+json')).status, 204);
   assert.equal((await mandar(base, ANTIGO(), 'application/csp-report')).status, 204);
-  assert.deepEqual(linhas, ['[csp] img-src bloquearia https://img.exemplo.com/a.jpg em /feed', '[csp] frame-src bloquearia https://www.youtube.com/embed/abc em /home']);
+  assert.deepEqual(linhas, ['[csp] img-src bloqueou https://img.exemplo.com/a.jpg em /feed', '[csp] frame-src bloqueou https://www.youtube.com/embed/abc em /home']);
   assert.ok(!linhas.join(' ').includes('SEGREDO'));
   relogio += 10 * 60 * 1000;
   await mandar(base, ANTIGO(), 'application/csp-report');
@@ -82,5 +91,5 @@ test('no servidor de verdade: sem sessão, 204, e a linha vai para o log', async
   const r = await fetch(`${app.base}/api/csp`, { method: 'POST', headers: { 'content-type': 'application/csp-report', origin: 'https://futtyapp.com.br' }, body: JSON.stringify(ANTIGO({ 'blocked-uri': 'https://um-host-so-deste-teste.com/x.png' })) });
   assert.equal(r.status, 204);
   assert.equal(r.headers.get('ratelimit-policy'), `${LIMITES.csp};w=900`, 'o limiter próprio conta este pedido');
-  assert.deepEqual(avisos, ['[csp] img-src bloquearia https://um-host-so-deste-teste.com/x.png em /feed']);
+  assert.deepEqual(avisos, ['[csp] img-src bloqueou https://um-host-so-deste-teste.com/x.png em /feed']);
 });
