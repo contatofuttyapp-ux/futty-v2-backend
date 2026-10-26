@@ -5,7 +5,7 @@
 //   2. token de quem NÃO é membro -> 403 nas 6 rotas sensíveis listadas
 //   3. rotas públicas  -> nunca 401 (200 ou 404, conforme o caso)
 //
-// A conta de teste nasce via SUPABASE_SERVICE_KEY (auth.admin.createUser +
+// A conta de teste nasce via SUPABASE_SECRET_KEY (auth.admin.createUser +
 // signInWithPassword com o cliente ANON, para sacar um access_token real —
 // o mesmo tipo que requireAuth valida) e morre no fim (after), mesmo que um
 // teste falhe a meio.
@@ -20,7 +20,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 
 let server;
 let baseUrl;
@@ -31,7 +31,7 @@ let gameIdReal;
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env — precisa dela para assinar sessão de teste.');
 
   // Sobe o app numa porta livre (server.js só faz o próprio app.listen()
   // quando corrido diretamente — ver require.main === module em server.js).
@@ -53,7 +53,7 @@ before(async () => {
   if (createErr) throw createErr;
   testUserId = created.user.id;
 
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: signIn, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
   if (signInErr) throw signInErr;
   accessToken = signIn.session.access_token;

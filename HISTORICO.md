@@ -3755,3 +3755,11 @@ A lista mestra de decisões continua em C:\Users\phfer\Desktop\FUT\LISTA-CURTA.m
 
 ## (todo o motor)
 - Rodada 31X (19-out): ~255 comentários passaram de PT-PT para PT-BR (equipa→time, ficheiro→arquivo, utilizador→usuário, registo→registro, golo→gol, actual→atual, activo→ativo, detetar→detectar…). Só comentários: o minificado de cada arquivo ficou igual. Exemplos de código dentro de comentário e texto entre aspas ou crases ficaram como estavam.
+
+## utils/chavesSupabase.js · utils/db.js · scripts/seed-* · tests (Rodada 32E, 26-out)
+- (cabeçalho) Antes: "As duas famílias convivem até o Pedro desligar as antigas no painel (Settings → API Keys); o motor prefere a nova e cai para a antiga enquanto ela for a única no ambiente." As chaves JWT (anon / service_role) foram desligadas no painel em 26-out, depois de encerrado o vazamento do Railway e com a 1.0.5 nas duas lojas; o motor deixou de ler SUPABASE_SERVICE_KEY / SUPABASE_ANON_KEY. O formato 'antiga' do log de partida virou 'JWT' (sinal de chave desligada colada numa variável nova).
+- (utils/db.js, linha ~12) Antes: "a service_role antiga (SUPABASE_SERVICE_KEY) só vale enquanto a nova não estiver no ambiente". As mensagens "(ou a antiga …)" saíram de db.js, dos seeds e dos testes; nos testes a constante SUPABASE_ANON_KEY virou SUPABASE_PUBLISHABLE_KEY.
+- (.env.example) Saíram as linhas SUPABASE_ANON_KEY / SUPABASE_SERVICE_KEY ("reserva enquanto as novas não estiverem aqui", Rodada 28).
+
+## utils/contaProtegida.js (Rodada 32E, 26-out)
+- (linha ~12) Antes: `DEMO_DAS_LOJAS_PROTEGIDA = true` "Enquanto a revisão do 1.0.4 nas lojas não passar", protegendo TODA conta @futtymock.com. A demo das lojas foi apagada em 26-out (demo-loja.js --limpar); a trava ficou só no e-mail do revisor (demo-loja@futtymock.com), que o demo-loja.js recria a cada envio. Os textos "fica até a revisão do 1.0.4 passar" viraram "fica enquanto houver envio em revisão" (revisor das lojas) e "fica para as próximas revisões" (John Apple, que segue protegido por decisão do dono).

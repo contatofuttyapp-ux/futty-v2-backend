@@ -18,7 +18,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 const EMAIL_DEMO = 'demo-loja@futtymock.com';
 
 let server;
@@ -32,7 +32,7 @@ const fotoDeTeste = (tom) => sharp({
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => {
     server.once('listening', resolve);
@@ -46,7 +46,7 @@ before(async () => {
   if (criarErr) throw criarErr;
   userId = criado.user.id;
 
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: entrou, error: entrarErr } = await anon.auth.signInWithPassword({ email, password });
   if (entrarErr) throw entrarErr;
   accessToken = entrou.session.access_token;
@@ -84,7 +84,7 @@ test('conta nova com foto (sem figurinha nenhuma) -> GET /api/me tem_figurinha=f
 });
 
 test('demo-loja@futtymock.com (figurinha pronta, sem linha em brilhantes_time/historico) -> tem_figurinha=true', { skip: !COM_BANCO && MOTIVO_SKIP }, async (t) => {
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const fs = require('node:fs');
   const path = require('node:path');
   const arqSenha = path.join(__dirname, '..', '..', '..', 'LOJA', 'demo-senha.txt');

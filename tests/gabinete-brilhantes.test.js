@@ -22,7 +22,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 
 const KIT_TIME = 'dark-purple'; // o uniforme que o dono fixa no pacote
 const KIT_OUTRO = 'dark-gold'; // o que a pessoa poderia ter de antes
@@ -43,7 +43,7 @@ async function criarConta(etiqueta) {
   const { data: criado, error } = await supabase.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) throw error;
   await supabase.from('users').upsert({ id: criado.user.id, email, nome_jogador: etiqueta.toUpperCase() }, { onConflict: 'id' });
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: entrou, error: erroLogin } = await anon.auth.signInWithPassword({ email, password });
   if (erroLogin) throw erroLogin;
   return { id: criado.user.id, email, token: entrou.session.access_token };
@@ -60,7 +60,7 @@ async function pedir(metodo, path, { token, body } = {}) {
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env.');
 
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });

@@ -21,7 +21,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 
 /** "AAAA-MM-DD" de quem faz `anos` anos HOJE (UTC, a régua do motor), deslocada `dias`. 29/02 cai em 28/02. */
 function aniversarioHoje(anos, dias = 0) {
@@ -83,7 +83,7 @@ const contas = [];
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
@@ -103,7 +103,7 @@ async function criarConta({ onboardingConcluido = false } = {}) {
     user_metadata: onboardingConcluido ? { onboarding_completo: true } : {},
   });
   if (error) throw error;
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: sessao, error: erroSessao } = await anon.auth.signInWithPassword({ email, password });
   if (erroSessao) throw erroSessao;
   const conta = { id: data.user.id, token: sessao.session.access_token };

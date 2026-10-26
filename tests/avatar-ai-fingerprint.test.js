@@ -31,7 +31,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 const KIT = 'dark-gold'; // grátis, sempre ativo — nenhum gate de plano no caminho
 
 let server;
@@ -42,7 +42,7 @@ let migracao052Pendente = false;
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env — precisa dela para assinar sessão de teste.');
 
   // Sonda barata (mesma lógica de scripts/conferir-migracoes.js): sem a
   // coluna, os testes abaixo saem skipped em vez de failed.
@@ -67,7 +67,7 @@ before(async () => {
   if (createErr) throw createErr;
   testUserId = created.user.id;
 
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: signIn, error: signInErr } = await anon.auth.signInWithPassword({ email, password });
   if (signInErr) throw signInErr;
   accessToken = signIn.session.access_token;

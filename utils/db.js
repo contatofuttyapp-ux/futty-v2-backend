@@ -9,13 +9,11 @@ const { RATING_DEFAULT } = require('./helpers');
 const { chaveSecreta } = require('./chavesSupabase');
 const { lerComFuso } = require('./fuso');
 
-// A chave secreta nova (SUPABASE_SECRET_KEY, sb_secret_…) manda; a
-// service_role antiga (SUPABASE_SERVICE_KEY) só vale enquanto a nova não estiver no
-// ambiente. Ver utils/chavesSupabase.js.
+// Só a chave secreta (SUPABASE_SECRET_KEY, sb_secret_…). Ver utils/chavesSupabase.js.
 const { SUPABASE_URL } = process.env;
 const CHAVE_SECRETA = chaveSecreta();
 if (!SUPABASE_URL || !CHAVE_SECRETA) {
-  console.error('[Futty] ERRO: faltam SUPABASE_URL / SUPABASE_SECRET_KEY (ou a antiga SUPABASE_SERVICE_KEY) no .env.');
+  console.error('[Futty] ERRO: faltam SUPABASE_URL / SUPABASE_SECRET_KEY no .env.');
   process.exit(1);
 }
 

@@ -29,7 +29,7 @@ const { chaveDoDerivado, cacheLer, TAMANHOS_DA_FOTO } = require('../utils/deriva
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 
 let server;
 let baseUrl;
@@ -49,7 +49,7 @@ async function criarConta(rotulo) {
   const password = `Fx7!${crypto.randomUUID()}`;
   const { data: criado, error } = await supabase.auth.admin.createUser({ email, password, email_confirm: true });
   if (error) throw error;
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: entrou, error: entrarErr } = await anon.auth.signInWithPassword({ email, password });
   if (entrarErr) throw entrarErr;
   contas[rotulo] = { id: criado.user.id, email, token: entrou.session.access_token };
@@ -92,7 +92,7 @@ const restaurarGanchos = () => { ApiDoBucket.prototype.remove = originais.remove
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env — precisa dela para assinar sessão de teste.');
   server = app.listen(0);
   await new Promise((resolve, reject) => { server.once('listening', resolve); server.once('error', reject); });
   baseUrl = `http://127.0.0.1:${server.address().port}`;

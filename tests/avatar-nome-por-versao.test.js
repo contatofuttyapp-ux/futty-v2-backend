@@ -32,7 +32,7 @@ const { app, supabase } = require('../server');
 const { COM_BANCO, MOTIVO_SKIP } = require('./_ajudaBanco');
 
 const { SUPABASE_URL } = process.env;
-const SUPABASE_ANON_KEY = require('../utils/chavesSupabase').chavePublica();
+const SUPABASE_PUBLISHABLE_KEY = require('../utils/chavesSupabase').chavePublica();
 const KIT = 'dark-gold'; // grátis, sempre ativo — nenhum gate de plano no caminho
 const MARCADOR = '/object/public/avatars/';
 
@@ -66,7 +66,7 @@ function subirFoto(buf) {
 
 before(async () => {
   if (!COM_BANCO) return;
-  if (!SUPABASE_ANON_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY (ou a antiga SUPABASE_ANON_KEY) em falta no .env — precisa dela para assinar sessão de teste.');
+  if (!SUPABASE_PUBLISHABLE_KEY) throw new Error('SUPABASE_PUBLISHABLE_KEY em falta no .env — precisa dela para assinar sessão de teste.');
 
   server = app.listen(0);
   await new Promise((resolve, reject) => {
@@ -81,7 +81,7 @@ before(async () => {
   if (criarErr) throw criarErr;
   testUserId = criado.user.id;
 
-  const anon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const anon = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
   const { data: entrou, error: entrarErr } = await anon.auth.signInWithPassword({ email, password });
   if (entrarErr) throw entrarErr;
   accessToken = entrou.session.access_token;

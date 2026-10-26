@@ -6,7 +6,7 @@
 require('dotenv').config({ quiet: true });
 
 // SEGURANCA-REVISAO-10SET.md secção 3: em produção o token do proxy de imagem
-// (utils/mediaToken.js) não pode cair para a SUPABASE_SERVICE_KEY como segredo de
+// (utils/mediaToken.js) não pode cair para a chave secreta do Supabase como segredo de
 // assinatura quando MEDIA_TOKEN_SECRET falta — seria reaproveitar um segredo que
 // já abre o banco inteiro para outra coisa. Falha alto e cedo em produção em
 // vez de arrancar silenciosamente inseguro.

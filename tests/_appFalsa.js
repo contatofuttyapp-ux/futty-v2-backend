@@ -27,11 +27,11 @@ const URL_DO_BANCO = 'https://projeto-falso.supabase.test';
 function prepararAmbiente({ producao = false } = {}) {
   for (const k of ['SENTRY_DSN', 'STRIPE_SECRET_KEY', 'RC_API_KEY', 'RC_ACEITAR_SANDBOX', 'ANTHROPIC_API_KEY', 'VAPID_PUBLIC_KEY', 'VAPID_PRIVATE_KEY', 'VAPID_SUBJECT',
     'CLOUD_TASKS_QUEUE', 'URL_DO_SERVICO', 'INTERNO_SEGREDO', 'CLOUD_TASKS_SA_EMAIL', 'PAGAMENTOS_ATIVOS', 'PAGAMENTOS_PLATAFORMAS', 'CORS_ORIGINS', 'SUPABASE_SECRET_KEY',
-    'SUPABASE_PUBLISHABLE_KEY', 'SUPABASE_ANON_KEY', 'TETO_DIARIO_CENTS', 'FEED_COTA_BYTES_POR_TIME']) delete process.env[k];
+    'SUPABASE_PUBLISHABLE_KEY', 'TETO_DIARIO_CENTS', 'FEED_COTA_BYTES_POR_TIME']) delete process.env[k];
   Object.assign(process.env, {
     NODE_ENV: producao ? 'production' : 'test',
     SUPABASE_URL: URL_DO_BANCO,
-    SUPABASE_SERVICE_KEY: 'chave-secreta-de-mentira',
+    SUPABASE_SECRET_KEY: 'chave-secreta-de-mentira',
     MEDIA_TOKEN_SECRET: SEGREDO_DA_MIDIA,
     RC_WEBHOOK_SECRET: SEGREDO_DO_WEBHOOK,
     FAL_KEY: 'fal-de-mentira', // a rota de IA só precisa disto para chegar ao teste do direito; a rede está fechada
