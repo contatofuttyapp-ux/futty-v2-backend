@@ -3,22 +3,22 @@
 //
 // Para tirar uma proteção, o dono pede e muda-se AQUI (um lugar só, lido pela rota do Gabinete e pelo script de limpeza):
 //   · TIMES_PROTEGIDOS — membros destes times não saem pelo Gabinete (time de verdade, gente de verdade);
-//   · DEMO_DAS_LOJAS_PROTEGIDA — as contas @futtymock.com da demo que a Apple e o Google usam para revisar o app;
+//   · EMAIL_DO_REVISOR_DAS_LOJAS — a conta com que a Apple e o Google entram para revisar o app (scripts/demo-loja.js a recria a cada
+//     envio); as outras @futtymock.com são contas de teste e saem;
 //   · REVISORES_DAS_LOJAS — as contas que os próprios revisores criaram ("John Apple").
 // As contas do dono e os super-admins nunca saem por aqui (quem quer sair da própria conta usa "Excluir minha conta" no Perfil).
 
 const EMAILS_DO_DONO = ['contatofuttyapp@gmail.com', 'phferreiraborgesbackup@gmail.com'];
 const TIMES_PROTEGIDOS = [{ slug: 'missa-de-quinta-ogqq6', nome: 'Missa de Quinta' }];
-// Enquanto a revisão do 1.0.4 nas lojas não passar.
-const DEMO_DAS_LOJAS_PROTEGIDA = true;
+const EMAIL_DO_REVISOR_DAS_LOJAS = 'demo-loja@futtymock.com';
 const REVISORES_DAS_LOJAS = ['john apple'];
 
 const MOTIVO = {
   propria: 'Esta é a sua conta: não sai pelo Gabinete.',
   dono: 'Conta do dono: não sai pelo Gabinete.',
   super: 'Conta de super-admin: não sai pelo Gabinete.',
-  demo: 'Conta da demo das lojas: fica até a revisão do 1.0.4 passar.',
-  revisor: 'Conta de revisor da Apple: fica até a revisão do 1.0.4 passar.',
+  demo: 'Conta do revisor das lojas: fica enquanto houver envio em revisão.',
+  revisor: 'Conta de revisor da Apple: fica para as próximas revisões.',
   time: (nome) => `Membro do ${nome}: o time está protegido.`,
 };
 
@@ -38,7 +38,7 @@ function motivoParaNaoExcluir({ conta, quemPede = null, slugsDosTimes = [] }) {
   const email = minusculo(conta.email);
   if (EMAILS_DO_DONO.includes(email)) return MOTIVO.dono;
   if (conta.is_super_admin) return MOTIVO.super;
-  if (DEMO_DAS_LOJAS_PROTEGIDA && email.endsWith('@futtymock.com')) return MOTIVO.demo;
+  if (email === EMAIL_DO_REVISOR_DAS_LOJAS) return MOTIVO.demo;
   if ([conta.nome, conta.nome_jogador].some((n) => REVISORES_DAS_LOJAS.includes(minusculo(n)))) return MOTIVO.revisor;
   const time = TIMES_PROTEGIDOS.find((t) => slugsDosTimes.includes(t.slug));
   if (time) return MOTIVO.time(time.nome);
@@ -52,4 +52,4 @@ function emailMascarado(email) {
   return `${nome.slice(0, 3)}…@${dominio}`;
 }
 
-module.exports = { motivoParaNaoExcluir, emailMascarado, EMAILS_DO_DONO, TIMES_PROTEGIDOS, DEMO_DAS_LOJAS_PROTEGIDA, REVISORES_DAS_LOJAS };
+module.exports = { motivoParaNaoExcluir, emailMascarado, EMAILS_DO_DONO, TIMES_PROTEGIDOS, EMAIL_DO_REVISOR_DAS_LOJAS, REVISORES_DAS_LOJAS };

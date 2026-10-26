@@ -2,8 +2,8 @@
 // conta" (DELETE /api/me), porque as duas rotas chamam a MESMA utils/apagarUsuario.js. Provado lado a lado, no app de verdade sobre banco,
 // Storage e Auth de mentira (tests/_appFalsa.js): o mesmo mundo, uma vez por cada porta, e o que sobra tem de ser igual — times passados
 // adiante (sucessão), time em que ela era a única apagado com o escudo, fotos e mídia da Resenha fora do Storage, a conta fora do Auth.
-// E as recusas: a conta do próprio dono, as contas do dono, outro super-admin, a demo das lojas (@futtymock), os revisores da Apple e os
-// membros da Missa de Quinta. Recusado = nada muda.
+// E as recusas: a conta do próprio dono, as contas do dono, outro super-admin, a do revisor das lojas (demo-loja@futtymock.com), os
+// revisores da Apple e os membros da Missa de Quinta. Recusado = nada muda. As outras @futtymock.com são contas de teste e saem.
 //
 // Uso: npm test  (ou: node --test tests/excluir-conta-gabinete.test.js)
 const { test, before, after } = require('node:test');
@@ -28,7 +28,8 @@ function mundo() {
     bia: usuario(uuid('a2', n), 'Bia', { email: `bia${n}@exemplo.test` }),
     caio: usuario(uuid('a3', n), 'Caio', { email: `caio${n}@exemplo.test` }),
     pessoal: usuario(uuid('a4', n), 'Pedro Borges', { email: 'phferreiraborgesbackup@gmail.com' }),
-    demo: usuario(uuid('a5', n), 'Bruninho'), // @futtymock.com
+    demo: usuario(uuid('a5', n), 'Bruninho', { email: 'demo-loja@futtymock.com' }),
+    testeX: usuario(uuid('a9', n), 'Teste X', { email: `teste-x-${n}@futtymock.com` }),
     apple: usuario(uuid('a6', n), 'John Apple', { nome: 'John Apple', nome_jogador: '', email: `revisor${n}@privaterelay.appleid.com` }),
     missa: usuario(uuid('a7', n), 'Wesley', { email: `wesley${n}@exemplo.test` }),
     outroSuper: usuario(uuid('a8', n), 'Outro Super', { email: `super${n}@exemplo.test` }),
@@ -121,14 +122,14 @@ test('excluir pelo Gabinete = a pessoa excluir a própria conta (times com suces
   assert.deepEqual(ultima.detalhe, { times_apagados: 1, times_passados_adiante: 1, fotos_removidas: r2.json.fotos_removidas });
 });
 
-test('recusas: a própria conta, as do dono, outro super-admin, a demo das lojas, o revisor da Apple, membro da Missa — e nada muda', async () => {
+test('recusas: a própria conta, as do dono, outro super-admin, o revisor das lojas, o revisor da Apple, membro da Missa — e nada muda', async () => {
   const w = mundo();
   const antes = JSON.stringify(retrato(w));
   const casos = [
     ['dono', /sua conta/],
     ['pessoal', /Conta do dono/],
     ['outroSuper', /super-admin/],
-    ['demo', /demo das lojas/],
+    ['demo', /revisor das lojas/],
     ['apple', /revisor da Apple/],
     ['missa', /Membro do Missa de Quinta/],
   ];
@@ -144,7 +145,18 @@ test('recusas: a própria conta, as do dono, outro super-admin, a demo das lojas
   const lista = await app.pedir('GET', '/api/super/users?page=1&limit=50', { token: app.token(w.p.dono.id) });
   const porId = new Map(lista.json.users.map((u) => [u.id, u]));
   for (const [quem] of casos) assert.ok(porId.get(w.p[quem].id).protegida, `${quem} aparece protegido`);
-  for (const quem of ['alvo', 'bia', 'caio']) assert.equal(porId.get(w.p[quem].id).protegida, null, `${quem} pode sair`);
+  for (const quem of ['alvo', 'bia', 'caio', 'testeX']) assert.equal(porId.get(w.p[quem].id).protegida, null, `${quem} pode sair`);
+});
+
+test('uma conta de teste @futtymock.com que não é a do revisor das lojas sai pelo Gabinete', async () => {
+  const w = mundo();
+  const r = await app.pedir('DELETE', `/api/super/users/${w.p.testeX.id}`, { token: app.token(w.p.dono.id), corpo: { confirmar: 'EXCLUIR' } });
+  assert.equal(r.status, 200, r.texto);
+  assert.equal(r.json.ok, true);
+  assert.deepEqual(retrato(w).auth, ['testeX'], 'a conta saiu do Auth');
+  const { json } = await app.pedir('GET', '/api/super/acoes', { token: app.token(w.p.dono.id) });
+  assert.equal(json.acoes[0].acao, 'excluir_conta');
+  assert.equal(json.acoes[0].alvo.email, 'tes…@futtymock.com');
 });
 
 test('sem a confirmação "EXCLUIR" nada sai; conta que não existe = 404; quem não é super-admin = 403', async () => {

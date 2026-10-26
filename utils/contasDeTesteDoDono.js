@@ -1,7 +1,7 @@
 // Futty v2.0 — Quais são as contas de teste do dono, para scripts/limpar-usuarios-teste.js --do-dono. Função pura (sem banco), testada à parte.
 //
 // O dono testa o cadastro com apelidos do próprio Gmail ("phferreiraborgesbackup+teste7@gmail.com" chega na mesma caixa). Essas saem. A conta
-// pessoal dele (sem o "+") e as de utils/contaProtegida.js (Chavo, super-admins, demo das lojas, revisores da Apple, membros da Missa) nunca.
+// pessoal dele (sem o "+") e as de utils/contaProtegida.js (Chavo, super-admins, revisor das lojas, revisores da Apple, membros da Missa) nunca.
 // As contas SEM NOME (nem nome, nem apelido) recentes aparecem à parte, "para conferir": podem ser testes do dono por Google/Apple, mas também
 // gente de verdade que parou no meio do cadastro — só saem se o dono der o e-mail de cada uma (--incluir).
 const { motivoParaNaoExcluir } = require('./contaProtegida');

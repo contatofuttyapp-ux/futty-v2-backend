@@ -129,8 +129,8 @@ router.patch(
 /**
  * DELETE /api/super/users/:id — exclui a conta de outra pessoa pelo Gabinete. Body: { confirmar: 'EXCLUIR' }.
  * A exclusão é a MESMA de DELETE /api/me (utils/apagarUsuario.js: sucessão dos times, Storage, logs, Auth) — nunca uma segunda versão.
- * Recusa (403, CONTA_PROTEGIDA) as contas de utils/contaProtegida.js: a do próprio dono, super-admins, a demo das lojas, os revisores
- * da Apple e os membros dos times protegidos. Fica no log de ações do Gabinete.
+ * Recusa (403, CONTA_PROTEGIDA) as contas de utils/contaProtegida.js: a do próprio dono, super-admins, a do revisor das lojas, os
+ * revisores da Apple e os membros dos times protegidos. Fica no log de ações do Gabinete.
  */
 router.delete(
   '/api/super/users/:id',

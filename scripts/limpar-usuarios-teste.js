@@ -137,7 +137,8 @@ async function montarPlano({ timesTambem = false } = {}) {
     ...(superAdmins || []).map((u) => u.id),
   ]);
 
-  // As contas protegidas do Gabinete (utils/contaProtegida.js: dono, demo das lojas, revisores da Apple, times protegidos) também ficam.
+  // As contas protegidas do Gabinete (utils/contaProtegida.js: dono, a do revisor das lojas demo-loja@futtymock.com, revisores da Apple,
+  // times protegidos) também ficam. As outras @futtymock.com são contas de teste e saem.
   const linhasDeUsers = await selecionarEmLotes('users', 'id', 'id, nome, nome_jogador, is_super_admin', todosAuth.map((u) => u.id));
   const usersPorId = new Map(linhasDeUsers.map((u) => [u.id, u]));
   const slugsPorConta = await slugsProtegidosPorConta();

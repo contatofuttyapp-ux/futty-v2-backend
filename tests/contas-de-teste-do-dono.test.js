@@ -29,10 +29,14 @@ test('as "(sem nome)" recentes aparecem para conferir e só saem com o e-mail da
   const semNome1 = c('pedro.relay1@privaterelay.appleid.com', { nome: '', nome_jogador: null, created_at: '2026-10-16T21:00:00Z' });
   const semNome2 = c('outra@gmail.com', { nome: ' ', nome_jogador: '', created_at: '2026-09-29T10:00:00Z' });
   const antiga = c('antiga@gmail.com', { nome: '', nome_jogador: '', created_at: '2026-08-01T10:00:00Z' });
-  const demoSemNome = c('x@futtymock.com', { nome: '', nome_jogador: '' });
+  const demoSemNome = c('demo-loja@futtymock.com', { nome: '', nome_jogador: '' });
   const r = separarContasDeTeste([semNome1, semNome2, antiga, demoSemNome]);
   assert.deepEqual(r.saem, []);
-  assert.deepEqual(r.paraConferir.map((x) => x.email), [semNome2.email, semNome1.email], 'da mais antiga para a mais nova; a de agosto e a da demo não');
+  assert.deepEqual(r.paraConferir.map((x) => x.email), [semNome2.email, semNome1.email], 'da mais antiga para a mais nova; a de agosto e a do revisor das lojas não');
+
+  // uma @futtymock.com de teste não é mais protegida: sem nome e recente, entra para conferir como qualquer outra
+  const testeSemNome = c('teste-x@futtymock.com', { nome: '', nome_jogador: '', created_at: '2026-10-20T10:00:00Z' });
+  assert.deepEqual(separarContasDeTeste([testeSemNome]).paraConferir.map((x) => x.email), [testeSemNome.email]);
 
   const r2 = separarContasDeTeste([semNome1, semNome2, antiga], { incluir: ['Pedro.Relay1@privaterelay.appleid.com', 'nao-existe@gmail.com'] });
   assert.deepEqual(r2.saem.map((x) => x.email), [semNome1.email]);
