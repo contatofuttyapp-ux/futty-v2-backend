@@ -220,7 +220,9 @@ async function subirApp({ producao = false } = {}) {
   prepararAmbiente({ producao });
   fecharARede();
 
-  const falso = criarClienteFalso({});
+  // `app.falhar(fn)`: um teste faz uma tabela responder erro (fn(tabela, op) → { message } | null), ex.: "a migração ainda não rodou".
+  let falharAgora = null;
+  const falso = criarClienteFalso({}, { falso: { falhar: (...a) => (falharAgora ? falharAgora(...a) : null) } });
 
   // O @supabase/supabase-js de mentira: o createClient devolve o falso; o resto do módulo (isAuthRetryableFetchError…) é o de verdade.
   const real = require('@supabase/supabase-js');
@@ -249,6 +251,7 @@ async function subirApp({ producao = false } = {}) {
    * @param {string[]} [o.superAdmins] ids dos super-admins (users.is_super_admin = true)
    */
   function reiniciar({ tabelas = {}, usuarios = [], superAdmins = [] } = {}) {
+    falharAgora = null;
     for (const k of Object.keys(falso.tabelas)) delete falso.tabelas[k];
     const linhasDeUsuarios = usuarios.map((u) => ({ ...u, ...(superAdmins.includes(u.id) ? { is_super_admin: true } : {}) }));
     const dados = { ...tabelas, users: [...(tabelas.users || []), ...linhasDeUsuarios] };
@@ -292,6 +295,7 @@ async function subirApp({ producao = false } = {}) {
     app,
     pedir,
     reiniciar,
+    falhar: (fn) => { falharAgora = fn; },
     criarBucketsDoProjeto,
     cliente: falso.cliente,
     tabelas: falso.tabelas,

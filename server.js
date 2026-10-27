@@ -84,6 +84,7 @@ const cspRoutes = require('./routes/csp');
 const comprasRoutes = require('./routes/compras');
 const aviseMeRoutes = require('./routes/aviseMe');
 const figurinhaJobRoutes = require('./routes/figurinhaJob');
+const mensalidadeRoutes = require('./routes/mensalidade');
 const geracaoJobs = require('./utils/geracaoJobs');
 const tarefasPintura = require('./utils/tarefasPintura');
 const { marcarFigurinhaStatus } = require('./services/inicio');
@@ -252,6 +253,7 @@ app.use(cspRoutes); // POST /api/csp — os avisos da CSP do site viram uma linh
 app.use(aviseMeRoutes); // POST /api/avise-me — lista de quem quer ser avisado do lançamento (pública, limiter por IP)
 app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano
 app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
+app.use(mensalidadeRoutes); // /api/teams/:slug/mensalidade — pagou / não pagou (sem dinheiro) + "Traga seu histórico" + lembretes
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {

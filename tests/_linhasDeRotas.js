@@ -16,6 +16,8 @@ const CLASSES = {
 const L = (classe, metodo, rota, corpo, extra = {}) => ({ classe, metodo, rota, corpo, ...extra });
 // A mídia da Resenha que `userId` acabou de subir (o upload dá ao arquivo o id de quem subiu como prefixo do nome).
 const midiaDe = (userId) => `https://projeto-falso.supabase.test/storage/v1/object/public/resenha/${userId}-arquivo.webp`;
+// O mês da mensalidade na URL: o de agora (relógio de São Paulo, o padrão do time); no mundo de marcadores, o ":p" do desenho.
+const mesDa = (m) => (m.A.slug === ':p' ? ':p' : require('../utils/mensalidade').mesNoFuso(new Date(), 'America/Sao_Paulo'));
 
 // Um mundo só de marcadores (":p"): a rota da tabela vira o desenho do Express (/api/teams/:p/convites/:p).
 const marcador = new Proxy({}, { get: () => ':p' });
@@ -113,6 +115,13 @@ const LINHAS = [
   L('proprio', 'POST', () => '/api/brilhantes/pedido', () => ({ produto: 'minha' })),
   L('proprio', 'POST', () => '/api/diagnostico', () => ({ resumo: 'ok' })),
   L('proprio', 'POST', () => '/api/compras/sincronizar', () => ({ transacoes: [] })),
+  // ── Mensalidade e "Traga seu histórico" (mensalidade.js). No mundo da matriz a mensalidade está desligada: quem pode passa da
+  //    autorização e leva o 409 da regra de negócio; quem não pode leva 403/404 antes de qualquer leitura da mensalidade. ──
+  L('admin', 'PUT', (m) => `/api/teams/${m.A.slug}/mensalidade/ajustes`, () => ({ ativa: true, valor: 'R$ 60', dia_vencimento: 10, como_pagar: 'https://picpay.me/time', lista_publica: false, lembrete: true })),
+  L('admin', 'PUT', (m) => `/api/teams/${m.A.slug}/mensalidade/${mesDa(m)}/membros/${m.p.memA.id}`, () => ({ status: 'pago' })),
+  L('membro', 'POST', (m) => `/api/teams/${m.A.slug}/mensalidade/${mesDa(m)}/ja-paguei`, () => ({})),
+  L('membro', 'DELETE', (m) => `/api/teams/${m.A.slug}/mensalidade/${mesDa(m)}/ja-paguei`),
+  L('membro', 'POST', (m) => `/api/teams/${m.A.slug}/historico/interesse`, () => ({ origem: 'ranking' })),
   // ── Gabinete e super-admin ──
   L('super', 'PATCH', (m) => `/api/super/users/${m.p.memA2.id}/suspender`, () => ({ suspenso: true })),
   L('super', 'PATCH', (m) => `/api/super/users/${m.p.memA2.id}/ban`, () => ({ ban: true })),
@@ -132,6 +141,7 @@ const LINHAS = [
 const PUBLICAS_DE_PROPOSITO = [
   'POST /api/ads/evento', 'POST /api/ads/eventos', 'POST /api/telemetria', 'POST /api/avise-me', 'POST /api/compras/webhook/revenuecat',
   'POST /api/interno/pintar/:jobId', // segredo + token do Cloud Tasks
+  'POST /api/interno/mensalidade/lembretes', // o agendador: o mesmo segredo + token da conta de serviço (tests/mensalidade.test.js)
   'POST /api/csp', // os avisos da CSP do site: o navegador manda sem sessão; limite por IP, nada vai para o banco (tests/csp.test.js)
   'POST /api/convite/:token/pendente', // sem sessão de propósito (a página do convite ainda não tem conta); limite por IP, convite válido, nada volta na resposta
 ];

@@ -21,6 +21,7 @@ const { temDireito } = require('../utils/direitoBrilhante');
 const { timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { pedidosVivos } = require('./brilhantes');
 const { lojaProntaDoPedido } = require('../utils/lojaPronta');
+const { talvezEnviarLembretes } = require('../utils/lembretesMensalidade');
 
 const router = express.Router();
 
@@ -40,6 +41,9 @@ router.get(
     const userId = req.user.id;
     // O requireAuth já correu: tudo até aqui foi autenticação.
     marcarFase(res, 'auth');
+    // Os lembretes de vencimento da mensalidade pegam carona aqui (o pedido mais comum do app): sem esperar e no máximo a cada
+    // 10 min por instância — o agendador é o caminho principal (utils/lembretesMensalidade.js).
+    talvezEnviarLembretes();
 
     // O que pesava no /api/inicio era a FILA de idas ao banco, não o volume: medido com a conta pesada (super-admin,
     // 2 times) e a leve (1 time), com 4 idas em série levava ~990 ms de motor e 31 consultas nas DUAS.

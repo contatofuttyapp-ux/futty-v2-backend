@@ -235,7 +235,7 @@ router.get(
 
     // Role e membros só dependem do team.id, não um do outro — em
     // paralelo em vez de dois round-trips seguidos ao Supabase.
-    const [role, { data: rawMembers, error }, organizam] = await Promise.all([
+    const [role, { data: rawMembers, error }, organizam, mensalidadeAtiva] = await Promise.all([
       getRole(team.id, req.user.id),
       supabase
         .from('team_members')
@@ -243,6 +243,8 @@ router.get(
         .eq('team_id', team.id)
         .order('created_at', { ascending: true }),
       idsQueSoOrganizam(team.id), // em consulta à parte (a coluna `joga` é da migração 067)
+      // Só o "está ligada?" (a aba Mensalidade aparece por isto). Sem a migração 088, ou com erro, vale desligada: a página nunca cai.
+      supabase.from('team_mensalidade').select('ativa').eq('team_id', team.id).maybeSingle().then((r) => r.data?.ativa === true, () => false),
     ]);
     if (!role) throw foraDoTime();
     if (error) throw new HttpError(500, error.message);
@@ -278,6 +280,7 @@ router.get(
         mostrar_destaque: team.mostrar_destaque !== false,
         role,
         joga: !organizam.has(req.user.id),
+        mensalidade_ativa: mensalidadeAtiva,
       },
       members,
     });

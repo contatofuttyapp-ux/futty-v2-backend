@@ -98,7 +98,9 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         for (const nova of e.linhas) {
           const i = todas.findIndex((l) => e.onConflict.every((c) => l[c] === nova[c]));
           if (i >= 0) {
-            if (!e.ignorarDuplicadas) Object.assign(todas[i], copia(nova));
+            // Como o PostgREST: com ignoreDuplicates a linha que já existia nem muda nem volta na resposta (só as inseridas voltam).
+            if (e.ignorarDuplicadas) continue;
+            Object.assign(todas[i], copia(nova));
             saida.push(copia(todas[i]));
           } else {
             const criada = copia({ id: crypto.randomUUID(), ...nova });
