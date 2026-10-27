@@ -22,7 +22,7 @@ const DIA = 86400000;
 const AGORA = Date.parse('2026-10-03T15:00:00Z');
 const em = (dias, base = Date.now()) => new Date(base + dias * DIA).toISOString();
 
-test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo em dia', () => {
+test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo em dia (presença não é mais pendência: o jogo nasce chamando)', () => {
   const jogos = [
     { id: 'passado-1', data: em(-10, AGORA), campeao_time_index: 1 },
     { id: 'passado-2', data: em(-3, AGORA), campeao_time_index: null },
@@ -31,8 +31,8 @@ test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo
   ];
   const p = pendenciasDoTime({ pedidos: 2, jogos, denuncias: 1 }, AGORA);
   assert.deepEqual(p, {
-    pedidos: 2, denuncias: 1, total: 5,
-    presenca: { game_id: 'proximo', data: em(2, AGORA) },
+    pedidos: 2, denuncias: 1, total: 4,
+    presenca: null,
     resultado: { game_id: 'passado-2', data: em(-3, AGORA) },
   });
   const emDia = pendenciasDoTime({ jogos: [{ id: 'a', data: em(-3, AGORA), campeao_time_index: 0 }, { id: 'b', data: em(2, AGORA), rsvp_aberto: true }] }, AGORA);
@@ -40,7 +40,8 @@ test('pendências de um time: cada uma na sua linha, e total 0 quando está tudo
   assert.equal(pendenciasDoTime({}, AGORA).total, 0, 'time sem jogo nenhum: nada pendente');
 });
 
-test('presença: o jogo daqui a 3 semanas não é pendência; a presença já encerrada também não', () => {
+test('presença: nunca é pendência (nem perto, nem longe, nem cancelado) — o jogo nasce chamando o elenco', () => {
+  assert.equal(pendenciasDoTime({ jogos: [{ id: 'perto', data: em(1, AGORA), rsvp_aberto: false }] }, AGORA).presenca, null);
   assert.equal(pendenciasDoTime({ jogos: [{ id: 'longe', data: em(21, AGORA) }] }, AGORA).presenca, null);
   assert.equal(pendenciasDoTime({ jogos: [{ id: 'x', data: em(1, AGORA), rsvp_fechado: true }] }, AGORA).presenca, null);
   assert.equal(pendenciasDoTime({ jogos: [{ id: 'x', data: em(1, AGORA), status: 'cancelado' }] }, AGORA).presenca, null);
@@ -84,9 +85,9 @@ test('GET /api/inicio: `seu_time` só com os times em que a pessoa é admin, e a
   assert.equal(varzea.slug, 'varzea-fc');
   assert.equal(varzea.pendencias.pedidos, 1);
   assert.equal(varzea.pendencias.denuncias, 2, 'fila + escalada; a resolvida não conta');
-  assert.equal(varzea.pendencias.presenca?.game_id, 'g-proximo');
+  assert.equal(varzea.pendencias.presenca, null, 'o próximo jogo já nasceu chamando: não há presença por abrir');
   assert.equal(varzea.pendencias.resultado?.game_id, 'g-passado');
-  assert.equal(varzea.pendencias.total, 5);
+  assert.equal(varzea.pendencias.total, 4);
   const zeca = (await pedir('GET', '/api/inicio', null, ZECA)).json;
   assert.deepEqual(zeca.seu_time, [], 'quem não administra não recebe o card');
 });

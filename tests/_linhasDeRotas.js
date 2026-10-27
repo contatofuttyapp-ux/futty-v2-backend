@@ -79,6 +79,8 @@ const LINHAS = [
   // ── Presença (RSVP) ──
   L('admin', 'POST', (m) => `/api/jogos/${m.ids.jogoAbertoA}/rsvp/abrir`, () => ({ prazo: iso(24 * HORA) })),
   L('admin', 'POST', (m) => `/api/jogos/${m.ids.jogoAbertoA}/rsvp/fechar`, () => ({})),
+  // chamar mais gente: no mundo da matriz o jogo chama o elenco inteiro, então quem pode passa e leva o 409 da regra (ELENCO_INTEIRO)
+  L('admin', 'POST', (m) => `/api/games/${m.ids.jogoAbertoA}/chamar`, (m) => ({ user_ids: [m.p.memA.id] })),
   L('membro', 'POST', (m) => `/api/jogos/${m.ids.jogoAbertoA}/rsvp/responder`, () => ({ status: 'confirmado' })),
   L('membro', 'POST', (m) => `/api/jogos/${m.ids.jogoAbertoA}/rsvp/sair-espera`, () => ({})),
   // ── Ranking e notas ──

@@ -15,6 +15,7 @@ const plataforma = require('../utils/plataformaStore');
 const selosCache = require('../utils/selosCache');
 const { idsQueSoOrganizam } = require('../utils/soOrganiza');
 const { enviarNotificacao } = require('./push'); // o "Você entrou no <time>!" do aceite de pedido
+const { chamarQuemEntrou } = require('../utils/avisosDoJogo'); // quem entra no time é chamado para os jogos do elenco inteiro
 const { criarCodigo, convitePorParametro, codigosDosConvites } = require('../utils/conviteCodigo'); // o link curto /c/<código>
 const { fusoDoTime, lerComFuso } = require('../utils/fuso'); // o fuso do time
 const { escudoDoTime } = require('../utils/escudo'); // o escudo do time
@@ -51,6 +52,31 @@ router.post(
     const codigo = await criarCodigo(supabase, convite.id);
 
     res.status(201).json({ token: convite.token, codigo, expires_at: convite.expires_at });
+  })
+);
+
+/**
+ * GET /api/teams/:slug/convite/atual — o link de convite ATUAL do time (o mais recente; qualquer membro, como quem gera): a tela
+ * "Convidar" mostra ele com "vale até dd/mm (X dias)", ou "vencido" (e aí só o "Gerar link novo"). { convite: null } se o time
+ * nunca gerou link (ou o admin revogou todos).
+ */
+router.get(
+  '/api/teams/:slug/convite/atual',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { team } = await requireTeamMember(req.params.slug, req.user.id);
+    const { data: c, error } = await supabase
+      .from('convites')
+      .select('id, token, expires_at')
+      .eq('team_id', team.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw new HttpError(500, error.message);
+    if (!c) return res.json({ convite: null });
+    const codigos = await codigosDosConvites(supabase, [c.id]);
+    const vencido = !c.expires_at || new Date(c.expires_at).getTime() <= Date.now();
+    res.json({ convite: { token: c.token, codigo: codigos[c.id] || null, expires_at: c.expires_at, vencido } });
   })
 );
 
@@ -179,6 +205,8 @@ router.post(
       throw new HttpError(500, memberError.message);
     }
     selosCache.invalidarMembro(team.id, req.user.id);
+    // Os jogos que chamam o elenco inteiro passam a chamar quem entrou (e avisam agora).
+    chamarQuemEntrou(team.id, req.user.id);
 
     // Registra o uso (migração 058) em vez de marcar o convite como consumido: o link continua
     // válido para a próxima pessoa. Fail-safe de propósito: tabela ausente ou 23505 (mesma pessoa
@@ -312,6 +340,7 @@ router.post(
         .upsert({ team_id: team.id, user_id: req.user.id, role: 'member' }, { onConflict: 'user_id,team_id' });
       if (me) throw new HttpError(500, me.message);
       selosCache.invalidarMembro(team.id, req.user.id);
+      chamarQuemEntrou(team.id, req.user.id);
       return res.status(201).json({ entrou: true });
     }
 
@@ -462,6 +491,7 @@ router.patch(
         .upsert({ team_id: team.id, user_id: pedido.user_id, role: 'member' }, { onConflict: 'user_id,team_id' });
       if (me) throw new HttpError(500, me.message);
       selosCache.invalidarMembro(team.id, pedido.user_id);
+      chamarQuemEntrou(team.id, pedido.user_id);
     }
 
     const { data: updated, error } = await supabase

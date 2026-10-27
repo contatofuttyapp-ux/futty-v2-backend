@@ -117,15 +117,15 @@ test('RSVP: a lista de presença não tem quem só organiza (nem como pendente) 
   assert.equal(vistaDoDono.eu_jogo, false, 'o app esconde o "Vou / Não vou" de quem só organiza');
 });
 
-test('RSVP: ao fechar, o elenco só recebe quem joga (mesmo que o organizador tivesse respondido antes de mudar de papel)', async (t) => {
+test('RSVP: o "Vou" entra no elenco na hora; quem só organiza não responde; o "fechar" antigo não mexe em nada', async (t) => {
   const { pedir, tabelas } = cenarioRsvp(t);
-  tabelas.rsvp_respostas.push(
-    { game_id: JOGO, user_id: A, status: 'confirmado' },
-    { game_id: JOGO, user_id: ORG2, status: 'confirmado' }, // respondeu quando ainda jogava
-  );
+  tabelas.rsvp_respostas.push({ game_id: JOGO, user_id: ORG2, status: 'confirmado' }); // respondeu quando ainda jogava
+  const vou = await pedir('POST', `/api/jogos/${JOGO}/rsvp/responder`, { status: 'confirmado' }, A);
+  assert.equal(vou.status, 200, JSON.stringify(vou.json));
+  assert.equal((await pedir('POST', `/api/jogos/${JOGO}/rsvp/responder`, { status: 'confirmado' }, ORG2)).status, 403);
   const r = await pedir('POST', `/api/jogos/${JOGO}/rsvp/fechar`, {}, DONO);
   assert.equal(r.status, 200);
-  assert.deepEqual(tabelas.game_players.map((x) => x.user_id), [A]);
+  assert.deepEqual(tabelas.game_players.filter((x) => x.confirmado).map((x) => x.user_id), [A], 'só quem joga, e já na hora da resposta');
 });
 
 test('presença: "confirmar" de quem só organiza → 403; desmarcar continua valendo; a checklist do admin ignora quem só organiza', async (t) => {

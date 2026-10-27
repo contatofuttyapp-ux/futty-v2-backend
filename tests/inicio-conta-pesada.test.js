@@ -200,9 +200,12 @@ test('a fila de idas ao banco caiu de 4 para 3: com 100 ms por consulta a conta 
   // O relógio fica só como rede de segurança larga (o teste não pode reprovar por pressa da máquina): 6 idas inteiras de folga.
   assert.ok(ms < 6 * ATRASO, `${ms} ms com ${ATRASO} ms por ida`);
   // O RSVP do próximo jogo sai numa ida só: suas consultas começam juntas, logo depois da lista de jogos.
-  const rsvp = obs.consultas.filter((c) => c.tabela === 'rsvp_respostas' || c.tabela === 'rsvp_espera');
-  assert.equal(rsvp.length, 2);
-  assert.ok(Math.abs(rsvp[0].inicio - rsvp[1].inicio) < ATRASO / 2, 'respostas e fila do RSVP saem juntas');
+  // (A 3ª consulta dessas tabelas é a minha fila de espera de todos os jogos do Início, que sai JUNTO com a lista de jogos.)
+  const rsvp = obs.consultas.filter((c) => c.tabela === 'rsvp_respostas' || c.tabela === 'rsvp_espera').sort((a, b) => a.inicio - b.inicio);
+  assert.equal(rsvp.length, 3);
+  const jogos = obs.consultas.filter((c) => c.tabela === 'games').sort((a, b) => a.inicio - b.inicio);
+  assert.ok(Math.abs(rsvp[0].inicio - jogos[0].inicio) < ATRASO / 2, 'a minha fila do Início sai junto com os jogos');
+  assert.ok(Math.abs(rsvp[1].inicio - rsvp[2].inicio) < ATRASO / 2, 'respostas e fila do RSVP do próximo jogo saem juntas');
 });
 
 test('RSVP com o time já conhecido: uma ida só; se o jogo for de outro time, refaz pelo caminho de sempre', async (t) => {

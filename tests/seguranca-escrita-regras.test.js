@@ -533,13 +533,19 @@ test('voto: a nota é de 0,5 a 5 em passos de 0,5 — negativo, zero, 6, decimal
   assert.equal(app.tabelas.votes.length, 1, 'o voto novo atualiza o antigo (um por votante/votado/time)');
 });
 
-test('capacidade, prazo e recorrentes: números absurdos são 400', async () => {
+test('capacidade, hora do sorteio, chamados e recorrentes: valores absurdos são 400', async () => {
   const m = criarMundo(app);
   const cap = (max_jogadores) => app.pedir('PATCH', `/api/games/${m.ids.jogoAbertoA}/capacidade`, { token: m.tok.admA, corpo: { max_jogadores } });
   for (const v of [-1, 0.5, 'abc', { a: 1 }, [1]]) assert.equal((await cap(v)).status, 400, JSON.stringify(v));
   assert.equal((await cap(12)).status, 200);
-  const prazo = (p) => app.pedir('POST', `/api/jogos/${m.ids.jogoAbertoA}/rsvp/abrir`, { token: m.tok.admA, corpo: { prazo: p } });
-  for (const p of ['ontem', iso(-HORA), { a: 1 }, null]) assert.equal((await prazo(p)).status, 400, JSON.stringify(p));
+  // A hora do sorteio (no lugar do antigo prazo): no passado, depois do jogo ou que não é hora → 400, na criação e na edição.
+  const novo = (corpo) => app.pedir('POST', '/api/games', { token: m.tok.admA, corpo: { team_slug: m.A.slug, data: iso(48 * HORA), ...corpo } });
+  for (const sorteio_em of ['ontem', iso(-HORA), iso(72 * HORA), { a: 1 }]) assert.equal((await novo({ sorteio_em })).status, 400, JSON.stringify(sorteio_em));
+  for (const chamados of ['todos', [123], [{ a: 1 }], ['nao-e-uuid']]) assert.equal((await novo({ chamados })).status, 400, JSON.stringify(chamados));
+  const editar = (corpo) => app.pedir('PATCH', `/api/games/${m.ids.jogoAbertoA}`, { token: m.tok.admA, corpo });
+  for (const corpo of [{ sorteio_time: '25:00' }, { sorteio_date: 'ontem' }, { sorteio_date: '2020-01-01', sorteio_time: '20:00' }]) {
+    assert.equal((await editar(corpo)).status, 400, JSON.stringify(corpo));
+  }
   const rec = (corpo) => app.pedir('POST', `/api/teams/${m.A.slug}/jogos/recorrentes`, { token: m.tok.admA, corpo });
   for (const corpo of [{ dia_semana: 7, hora: '20:00', semanas: 4 }, { dia_semana: -1, hora: '20:00', semanas: 4 }, { dia_semana: 1, hora: '25:00', semanas: 4 }, { dia_semana: 1, hora: '20:00', semanas: 1000 }, { dia_semana: 1, hora: { a: 1 }, semanas: 4 }]) {
     assert.equal((await rec(corpo)).status, 400, JSON.stringify(corpo));

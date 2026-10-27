@@ -22,6 +22,8 @@ const { jogosDeFundadorDaPessoa } = require('../utils/presencaDeFundador'); // o
 const { jogoAconteceu } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 const { normalizarFuso, lerComFuso, temColuna } = require('../utils/fuso');
 const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo no rótulo e na lista: uma regra só
+const { sorteioDoJogo, listaAberta, chamadosDoJogo, foiChamado } = require('../utils/chamadaDoJogo'); // a chamada: sorteio e lista
+const { lerComChamada } = require('../utils/colunasDaChamada'); // sorteio_em e chamados (migração 089), sem quebrar antes dela
 
 // ─── GET /api/me ──────────────────────────────────────────────────────────────
 const PERFIL_COLS_BASE =
@@ -311,11 +313,11 @@ const MARGEM_ULTIMOS = 8;
 // `campeao_time_index` e `time_vencedor` entram só para o estado do jogo ("Em andamento" acaba quando o resultado é lançado).
 const JOGO_COLS = 'id, team_id, data, local, status, sorteio_realizado, cancelado, campeao_time_index, time_vencedor, seed:times_resultado->seed, game_players ( user_id, confirmado )';
 
-async function jogosDoInicio(teamIds) {
+async function jogosDoInicio(teamIds, cols = JOGO_COLS) {
   const agoraIso = new Date().toISOString();
   const [proximos, ...recentes] = await Promise.all([
-    supabase.from('games').select(JOGO_COLS).in('team_id', teamIds).or(`data.gte.${agoraIso},data.is.null`).order('data', { ascending: true }),
-    ...teamIds.map((id) => supabase.from('games').select(JOGO_COLS).eq('team_id', id).lt('data', agoraIso).order('data', { ascending: false }).limit(MARGEM_ULTIMOS)),
+    supabase.from('games').select(cols).in('team_id', teamIds).or(`data.gte.${agoraIso},data.is.null`).order('data', { ascending: true }),
+    ...teamIds.map((id) => supabase.from('games').select(cols).eq('team_id', id).lt('data', agoraIso).order('data', { ascending: false }).limit(MARGEM_ULTIMOS)),
   ]);
   for (const r of [proximos, ...recentes]) if (r.error) return { error: r.error };
   const porId = new Map();
@@ -363,14 +365,20 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
   const teamIds = Object.keys(teamById);
   if (!teamIds.length) return { games: [] };
 
-  const { data: games, error } = limitar
-    ? await jogosDoInicio(teamIds)
-    : await supabase
-      .from('games')
-      .select(JOGO_COLS)
-      .in('team_id', teamIds)
-      .order('data', { ascending: true });
+  // A chamada (sorteio_em, chamados) vem junto; sem a migração 089 a leitura repete sem elas (utils/colunasDaChamada.js). A minha fila de
+  // espera (jogo com lotação: "Você está em 2º na espera") sai na MESMA ida: é por pessoa, não depende dos jogos.
+  const [{ data: games, error }, { data: minhaFila }] = await Promise.all([
+    lerComChamada((extra) => (limitar
+      ? jogosDoInicio(teamIds, JOGO_COLS + extra)
+      : supabase
+        .from('games')
+        .select(JOGO_COLS + extra)
+        .in('team_id', teamIds)
+        .order('data', { ascending: true }))),
+    supabase.from('rsvp_espera').select('game_id, posicao').eq('user_id', userId),
+  ]);
   if (error) throw new HttpError(500, error.message);
+  const filaPorJogo = new Map((minhaFila || []).map((r) => [r.game_id, r.posicao]));
 
   const counts = {};
   const myStatus = {};
@@ -408,6 +416,11 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
       ausente_proximo: ausenteByTeam[g.team_id] || false,
       eu_jogo: !soOrganiza.has(g.team_id),
       montado_a_mao: !!g.sorteio_realizado && g.seed == null,
+      // A chamada: a hora do sorteio (a lista fecha nela), se ainda dá para responder, se eu fui chamado e a minha vez na espera.
+      sorteio_em: sorteioDoJogo(g),
+      lista_aberta: listaAberta(g, now),
+      chamado: foiChamado(g, userId),
+      espera_posicao: filaPorJogo.get(g.id) ?? null,
     };
   });
 
@@ -605,8 +618,12 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = resto;
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
-  // Quem só organiza o time não está na lista de presença (nem como pendente).
+  // Quem só organiza o time não está na lista de presença (nem como pendente). Pendente é só quem foi CHAMADO e não respondeu
+  // (utils/chamadaDoJogo.js: o elenco inteiro, ou os escolhidos pelo admin).
   const users = (membros || []).map((m) => m.users).filter((u) => u && !organizam.has(u.id));
+  const chamadosSet = new Set(chamadosDoJogo(game, users.map((u) => u.id)));
+  const aberta = listaAberta(game);
+  const sorteioEm = sorteioDoJogo(game);
   const statusPorUser = {};
   (respostas || []).forEach((r) => {
     statusPorUser[r.user_id] = r.status;
@@ -625,17 +642,22 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const minhaEspera = (filaRows || []).find((r) => r.user_id === userId);
 
   return {
-    // O prazo de confirmação e a hora do jogo se leem no relógio do campo.
+    // A hora do sorteio e a do jogo se leem no relógio do campo.
     fuso: normalizarFuso(game.teams?.fuso),
-    rsvp_aberto: game.rsvp_aberto || false,
-    rsvp_prazo: game.rsvp_prazo || null,
-    rsvp_fechado: game.rsvp_fechado || false,
+    // A chamada: a lista fecha na hora do sorteio (ou quando o admin sorteia antes); `chamado` = eu fui chamado para este jogo.
+    sorteio_em: sorteioEm,
+    lista_aberta: aberta,
+    chamado: chamadosSet.has(userId),
+    // Os campos de antes, para o app antigo (até a atualização chegar): "aberto" = a lista aceita resposta; o "prazo" = a hora do sorteio.
+    rsvp_aberto: aberta,
+    rsvp_prazo: sorteioEm,
+    rsvp_fechado: !aberta,
     max_jogadores: max,
     lugares_disponiveis: lugaresDisponiveis,
     cheio: max != null && confirmados.length >= max,
     confirmados,
     recusados: users.filter((u) => statusPorUser[u.id] === 'recusado'),
-    pendentes: users.filter((u) => !statusPorUser[u.id]),
+    pendentes: users.filter((u) => !statusPorUser[u.id] && chamadosSet.has(u.id) && !(filaRows || []).some((r) => r.user_id === u.id)),
     espera,
     minha_posicao_espera: minhaEspera ? minhaEspera.posicao : null,
     eu_jogo: !organizam.has(userId),

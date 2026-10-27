@@ -3,7 +3,7 @@
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
-const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings, goleirosDoTime } = require('../utils/db');
+const { supabase, getTeamBySlug, getRole, ensureUserRow, loadGame, computeRatings } = require('../utils/db');
 const { jogadoresPorTimeDoTime } = require('../utils/jogadoresPorTime'); // o padrão do time
 const { obterConvites } = require('../services/inicio');
 const { RATING_DEFAULT } = require('../utils/helpers');
@@ -18,6 +18,10 @@ const { estadoDoJogo } = require('../utils/estadoDoJogo'); // o estado do jogo: 
 const { textoCurto, ehUuid } = require('../utils/entrada'); // o que a pessoa digita: texto com teto, número em faixa
 const { round1 } = require('../utils/ajudaDoJogo');
 const { convidadosGuardados } = require('../utils/convidadosDoJogo'); // a lista de convidados sem app do jogo
+const { sorteioPadrao, sorteioDoJogo, sorteioEscolhido, sorteioAoMudarOJogo, listaAberta, chamadosDoJogo, foiChamado } = require('../utils/chamadaDoJogo');
+const { erroDaChamada, semColunasDaChamada } = require('../utils/colunasDaChamada');
+const { avisarJogo } = require('../utils/avisosDoJogo');
+const { responderPresenca } = require('./rsvp');
 
 const router = express.Router();
 
@@ -43,7 +47,7 @@ router.post(
   '/api/games',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime, historico } = req.body || {};
+    const { team_slug: teamSlug, data, local, jogadores_por_time: jogadoresPorTime, historico, sorteio_em: sorteioPedido, chamados: chamadosPedido } = req.body || {};
     if (!teamSlug || !data) throw new HttpError(400, 'Time e data são obrigatórios.');
 
     const team = await getTeamBySlug(teamSlug, 'id, slug, nome');
@@ -65,16 +69,45 @@ router.post(
 
     // LEI (jogo histórico/retroativo): carregamento de dados — NÃO notifica ninguém.
     const eHistorico = historico === true;
+
+    // A chamada (utils/chamadaDoJogo.js): a hora do sorteio (sem ela, 1 h antes do jogo) e quem é chamado (sem lista, todo o elenco).
+    let sorteioEm = null;
+    let chamados = null;
+    if (!eHistorico) {
+      if (sorteioPedido != null && sorteioPedido !== '') {
+        const s = sorteioEscolhido(sorteioPedido, quando.toISOString());
+        if (s.erro) throw new HttpError(400, s.erro);
+        sorteioEm = s.iso;
+      } else {
+        sorteioEm = sorteioPadrao(quando.toISOString());
+      }
+      if (chamadosPedido != null) {
+        if (!Array.isArray(chamadosPedido) || chamadosPedido.some((id) => !ehUuid(id))) throw new HttpError(400, 'Lista de chamados inválida.');
+        const [elenco, organizam] = await Promise.all([membrosDaEquipa(team.id), idsQueSoOrganizam(team.id)]);
+        const quemJoga = elenco.filter((id) => !organizam.has(id));
+        const escolhidos = [...new Set(chamadosPedido)].filter((id) => quemJoga.includes(id));
+        if (!escolhidos.length) throw new HttpError(400, 'Escolha pelo menos uma pessoa para chamar.');
+        // Escolheu todo mundo que joga = o elenco inteiro (quem entrar depois também é chamado).
+        chamados = escolhidos.length === quemJoga.length ? null : escolhidos;
+      }
+    }
+
     // num_times fica por definir; é calculado no sorteio conforme os confirmados.
     const linha = {
       team_id: team.id,
       data: quando.toISOString(),
       local: localTexto || null,
       jogadores_por_time: porTime,
+      ...(sorteioEm ? { sorteio_em: sorteioEm } : {}),
+      ...(chamados ? { chamados } : {}),
     };
     if (eHistorico) linha.historico = true; // coluna opcional (migração à mão); ver nota abaixo
     let insert = await supabase.from('games').insert(linha).select().single();
-    // Resiliência: se a coluna `historico` ainda não existir (DDL por correr), repete sem ela.
+    // Resiliência: colunas que ainda não existem no banco (`historico`; `sorteio_em`/`chamados` antes da 089) — repete sem elas.
+    if (insert.error && erroDaChamada(insert.error)) {
+      if (chamados) throw new HttpError(503, 'Escolher quem chamar ainda não está disponível. Chame o elenco inteiro.', 'CHAMADA_INDISPONIVEL');
+      insert = await supabase.from('games').insert(semColunasDaChamada(linha)).select().single();
+    }
     if (insert.error && eHistorico && /historico/i.test(insert.error.message || '')) {
       delete linha.historico;
       insert = await supabase.from('games').insert(linha).select().single();
@@ -83,17 +116,13 @@ router.post(
     const game = insert.data;
 
     const fuso = fusoDoTime(team);
-    res.status(201).json({ game: { ...game, fuso } });
+    res.status(201).json({ game: { ...game, fuso, sorteio_em: sorteioDoJogo(game) } });
 
-    // Notifica os membros — EXCETO em jogo histórico (silencioso por lei).
+    // O jogo nasce chamando: quem foi chamado recebe o "Você vai?" — EXCETO em jogo histórico (silencioso por lei).
     if (!eHistorico) {
-      membrosDaEquipa(team.id).then((memberIds) =>
-        enviarNotificacao(memberIds, {
-          title: '⚽ Novo jogo criado',
-          body: `${team.nome || 'Seu time'} · ${dataCurtaNoFuso(game.data, fuso)}`,
-          url: '/home',
-        }, { categoria: 'jogos' }) // quem desligou "Jogos e presença" no Perfil fica de fora
-      );
+      Promise.all([membrosDaEquipa(team.id), idsQueSoOrganizam(team.id)])
+        .then(([elenco, organizam]) => avisarJogo('criado', { game, team: { ...team, fuso }, ids: chamadosDoJogo(game, elenco, organizam), autorId: req.user.id }))
+        .catch((e) => console.warn('[games] aviso do jogo criado:', e.message));
     }
   })
 );
@@ -235,6 +264,11 @@ router.get(
         jogadores_por_time: game.jogadores_por_time,
         max_jogadores: game.max_jogadores ?? null,
         sorteio_realizado: game.sorteio_realizado,
+        // A chamada: a hora do sorteio (a lista fecha nela) e se ainda dá para responder (utils/chamadaDoJogo.js).
+        sorteio_em: sorteioDoJogo(game),
+        lista_aberta: listaAberta(game),
+        // Quem foi chamado: null = todo o elenco. Só o admin vê a lista (é ele quem chama mais gente).
+        ...(role === 'admin' ? { chamados: Array.isArray(game.chamados) ? game.chamados : null } : {}),
         times_resultado: timesResultado,
         historico: !!game.historico,
         // Cancelamento.
@@ -263,6 +297,7 @@ router.get(
       meuEstado: meu
         ? { confirmado: meu.confirmado, goleiro: meu.goleiro, cabeca_chave: meu.cabeca_chave }
         : null,
+      chamado: foiChamado(game, req.user.id),
       jaVotei: (votosCount || 0) > 0,
     });
   })
@@ -412,24 +447,25 @@ router.post(
 
     await ensureUserRow(req.user);
 
-    let ehGoleiro = !!goleiro;
-    if (goleiro == null) {
-      const { data: linha } = await supabase
-        .from('game_players')
-        .select('goleiro')
-        .eq('game_id', game.id)
-        .eq('user_id', req.user.id)
-        .maybeSingle();
-      ehGoleiro = linha ? !!linha.goleiro : (await goleirosDoTime(game.teams.id, [req.user.id])).has(req.user.id);
+    // Sair da lista nunca é bloqueado para quem só organiza (pode ter confirmado antes de mudar de papel): sai do elenco e da lista.
+    if (!confirmado && (await soOrganiza(game.teams.id, req.user.id))) {
+      await supabase.from('game_players').update({ confirmado: false }).eq('game_id', game.id).eq('user_id', req.user.id);
+      await supabase.from('rsvp_respostas').delete().eq('game_id', game.id).eq('user_id', req.user.id);
+      return res.json({ meuEstado: { confirmado: false, goleiro: false } });
     }
 
-    const { error } = await supabase.from('game_players').upsert(
-      { game_id: game.id, user_id: req.user.id, confirmado: !!confirmado, goleiro: ehGoleiro },
-      { onConflict: 'game_id,user_id' }
-    );
-    if (error) throw new HttpError(500, error.message);
+    // Só trocar o "sou goleiro" de quem já respondeu (a resposta não muda) vale mesmo com a lista fechada: é marca do sorteio.
+    const { data: linha } = await supabase.from('game_players').select('confirmado, goleiro').eq('game_id', game.id).eq('user_id', req.user.id).maybeSingle();
+    if (linha && !!linha.confirmado === !!confirmado && goleiro != null) {
+      const { error } = await supabase.from('game_players').update({ goleiro: !!goleiro }).eq('game_id', game.id).eq('user_id', req.user.id);
+      if (error) throw new HttpError(500, error.message);
+      return res.json({ meuEstado: { confirmado: !!confirmado, goleiro: !!goleiro } });
+    }
 
-    res.json({ meuEstado: { confirmado: !!confirmado, goleiro: ehGoleiro } });
+    // Mudar a resposta é "Vou / Não vou": a MESMA porta da lista de presença (routes/rsvp.js) — lista aberta, só quem foi chamado.
+    const r = await responderPresenca({ game, userId: req.user.id, status: confirmado ? 'confirmado' : 'recusado', goleiro: goleiro == null ? null : !!goleiro });
+    if (r.espera) return res.json({ meuEstado: { confirmado: false, goleiro: !!goleiro }, espera: true, posicao: r.posicao });
+    res.json({ meuEstado: { confirmado: !!confirmado, goleiro: r.goleiro } });
   })
 );
 
@@ -522,11 +558,71 @@ router.patch(
       patch.jogadores_por_time = n;
     }
 
+    // A hora do sorteio (a lista fecha nela), no relógio do time como a do jogo. Sem ela no pedido, mudar a data/hora do jogo leva o
+    // sorteio junto se ele estava no "1 h antes" (utils/chamadaDoJogo.js#sorteioAoMudarOJogo).
+    const fuso = fusoDoTime(game.teams);
+    const dataFinal = patch.data || game.data;
+    if ('sorteio_date' in b || 'sorteio_time' in b) {
+      const base = partesNoFuso(sorteioDoJogo(game), fuso);
+      const pad = (n) => String(n).padStart(2, '0');
+      const dia = b.sorteio_date ? String(b.sorteio_date).slice(0, 10) : (base ? `${base.ano}-${pad(base.mes)}-${pad(base.dia)}` : '');
+      const hora = b.sorteio_time ? String(b.sorteio_time).slice(0, 5) : (base ? `${pad(base.hora)}:${pad(base.minuto)}` : '');
+      const instante = instanteNoFuso(dia, hora, fuso);
+      if (!instante) throw new HttpError(400, 'Hora do sorteio inválida.');
+      const s = sorteioEscolhido(instante.toISOString(), dataFinal);
+      if (s.erro) throw new HttpError(400, s.erro);
+      patch.sorteio_em = s.iso;
+    } else if (patch.data && patch.data !== new Date(game.data).toISOString()) {
+      patch.sorteio_em = sorteioAoMudarOJogo({ sorteioAntigo: game.sorteio_em || null, dataAntiga: game.data, dataNova: patch.data });
+    }
+
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');
 
-    const { data: updated, error } = await supabase.from('games').update(patch).eq('id', game.id).select().single();
+    let r = await supabase.from('games').update(patch).eq('id', game.id).select().single();
+    if (r.error && erroDaChamada(r.error)) r = await supabase.from('games').update(semColunasDaChamada(patch)).eq('id', game.id).select().single();
+    const { data: updated, error } = r;
     if (error) throw new HttpError(500, error.message);
-    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
+    res.json({ game: { ...updated, fuso, sorteio_em: sorteioDoJogo(updated) } });
+
+    // Mudou a data, a hora ou o local: quem foi chamado fica sabendo (a hora do sorteio sozinha, ou o número por time, não avisa ninguém).
+    const mudouData = patch.data && new Date(patch.data).getTime() !== new Date(game.data).getTime();
+    const mudouLocal = 'local' in patch && (patch.local || null) !== (game.local || null);
+    if (mudouData || mudouLocal) {
+      Promise.all([membrosDaEquipa(game.teams.id), idsQueSoOrganizam(game.teams.id)])
+        .then(([elenco, organizam]) => avisarJogo('mudou', {
+          game: updated, team: game.teams, ids: chamadosDoJogo(updated, elenco, organizam), autorId: req.user.id,
+          detalhe: { antes: { data: game.data, local: game.local || null }, depois: { data: updated.data, local: updated.local || null } },
+        }))
+        .catch((e) => console.warn('[games] aviso do jogo que mudou:', e.message));
+    }
+  })
+);
+
+/**
+ * POST /api/games/:id/chamar — o admin chama mais gente para um jogo que não chamou o elenco inteiro. Body: { user_ids: [...] }.
+ * Quem é chamado agora recebe o "Você vai?" (e o push) na hora. Jogo que chama o elenco inteiro já chama todo mundo (409).
+ */
+router.post(
+  '/api/games/:id/chamar',
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const game = await loadGame(req.params.id);
+    if (!game || !game.teams) throw new HttpError(404, 'Jogo não encontrado.');
+    const role = await getRole(game.teams.id, req.user.id);
+    if (role !== 'admin') throw new HttpError(403, 'Só admins chamam gente para o jogo.');
+    if (!listaAberta(game)) throw new HttpError(409, 'A lista deste jogo já fechou.', 'LISTA_FECHADA');
+    if (!Array.isArray(game.chamados)) throw new HttpError(409, 'Este jogo já chama o elenco inteiro.', 'ELENCO_INTEIRO');
+    const pedidos = req.body?.user_ids;
+    if (!Array.isArray(pedidos) || !pedidos.length || pedidos.some((id) => !ehUuid(id))) throw new HttpError(400, 'Escolha quem chamar.');
+    const [elenco, organizam] = await Promise.all([membrosDaEquipa(game.teams.id), idsQueSoOrganizam(game.teams.id)]);
+    const podem = new Set(elenco.filter((id) => !organizam.has(id)));
+    const novos = [...new Set(pedidos)].filter((id) => podem.has(id) && !game.chamados.includes(id));
+    if (!novos.length) return res.json({ chamados: game.chamados, novos: [] });
+    const todos = [...game.chamados, ...novos];
+    const { error } = await supabase.from('games').update({ chamados: todos }).eq('id', game.id);
+    if (error) throw new HttpError(500, error.message);
+    res.json({ chamados: todos, novos });
+    avisarJogo('chamado', { game, team: game.teams, ids: novos, autorId: req.user.id }).catch(() => {});
   })
 );
 
@@ -703,22 +799,25 @@ router.post(
       criadas.push(d.toISOString());
     }
 
+    let inseridos = [];
     if (aInserir.length) {
-      const { error } = await supabase.from('games').insert(aInserir);
+      const { data, error } = await supabase.from('games').insert(aInserir).select('id, data, local');
       if (error) throw new HttpError(500, error.message);
+      inseridos = data || [];
     }
 
     res.status(201).json({ criados: aInserir.length, datas: criadas, ignorados, fuso });
 
-    // Notifica os membros se algo foi criado (fire-and-forget).
-    if (aInserir.length) {
-      membrosDaEquipa(team.id).then((memberIds) =>
-        enviarNotificacao(memberIds, {
-          title: '⚽ Novos jogos agendados',
-          body: `${team.nome || 'Seu time'} · ${aInserir.length} jogos nas próximas semanas`,
-          url: '/home',
-        }, { categoria: 'jogos' })
-      );
+    // Cada jogo nasce chamando o elenco (sorteio 1 h antes de cada um). O aviso é UM só para a série (não um push por semana),
+    // registrado no primeiro jogo, pelo mesmo cano dos outros avisos de jogo.
+    if (inseridos.length) {
+      Promise.all([membrosDaEquipa(team.id), idsQueSoOrganizam(team.id)])
+        .then(([elenco, organizam]) => avisarJogo('criado', {
+          game: inseridos[0], team: { ...team, fuso }, ids: elenco.filter((id) => !organizam.has(id)), autorId: req.user.id,
+          detalhe: { recorrentes: inseridos.map((g) => g.id) },
+          payload: { title: '⚽ Novos jogos agendados', body: `${team.nome || 'Seu time'} · ${inseridos.length} jogos nas próximas semanas. Você vai? Responda no app.`, url: '/home' },
+        }))
+        .catch((e) => console.warn('[games] aviso dos recorrentes:', e.message));
     }
   })
 );

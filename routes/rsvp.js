@@ -1,22 +1,57 @@
-// Futty v2.0 — RSVP: confirmação de presença com prazo.
-// O admin abre/fecha o RSVP de um jogo; os membros respondem (confirmado/
-// recusado) enquanto estiver aberto e dentro do prazo.
+// Futty v2.0 — A presença do jogo: "Vou / Não vou".
+//
+// O jogo nasce CHAMANDO (utils/chamadaDoJogo.js): a lista está aberta desde que o jogo existe e fecha sozinha na hora do sorteio (ou quando
+// o admin sorteia antes, ou o jogo é cancelado). Não há "abrir presença", "fechar presença" nem prazo. Cada resposta vale na hora para o
+// sorteio: grava na lista (rsvp_respostas, com a fila de espera quando o jogo tem lotação) E no elenco do jogo (game_players.confirmado,
+// que é o que o sorteio lê) — antes, o elenco só se acertava quando o admin "fechava a presença".
 const express = require('express');
 const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, loadGame, goleirosDoTime } = require('../utils/db');
 const { obterRsvp } = require('../services/inicio');
 const { enviarNotificacao } = require('./push');
-const { soOrganiza, idsQueSoOrganizam, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
+const { soOrganiza, MSG_SO_ORGANIZA } = require('../utils/soOrganiza');
 const { fusoDoTime, dataCurtaNoFuso } = require('../utils/fuso');
+const { listaAberta, foiChamado } = require('../utils/chamadaDoJogo');
 
 const router = express.Router();
 
-// Data curta (ex.: "12/06 · 20:30") para o corpo das notificações — no relógio do CAMPO (fuso do time).
+const MSG_LISTA_FECHADA = 'A lista deste jogo já fechou.';
+const MSG_NAO_CHAMADO = 'Você não foi chamado para este jogo.';
 
 /**
- * Promove o primeiro da lista de espera de um jogo (se houver vaga libertada):
- * confirma-o, remove-o da fila, reorganiza as posições e notifica-o por push.
+ * O elenco do jogo (game_players) acompanha a resposta: "Vou" = confirmado, "Não vou" (ou a fila de espera) = fora. Quem já tem linha
+ * mantém o goleiro que ele ou o admin marcaram; quem entra agora herda a marca do time (team_members.categoria === 'GR'), a não ser que
+ * o pedido diga o goleiro (o /api/games/:id/confirmar antigo pode dizer).
+ */
+async function acertarElenco(game, userId, confirmado, goleiro = null) {
+  let ehGoleiro = goleiro;
+  if (ehGoleiro == null) {
+    const { data: linha } = await supabase.from('game_players').select('goleiro').eq('game_id', game.id).eq('user_id', userId).maybeSingle();
+    ehGoleiro = linha ? !!linha.goleiro : (await goleirosDoTime(game.teams.id, [userId])).has(userId);
+  }
+  const { error } = await supabase
+    .from('game_players')
+    .upsert({ game_id: game.id, user_id: userId, confirmado: !!confirmado, goleiro: !!ehGoleiro }, { onConflict: 'game_id,user_id' });
+  if (error) throw new HttpError(500, error.message);
+  return !!ehGoleiro;
+}
+
+/** Tira a pessoa da fila de espera (se estiver) e quem estava atrás avança uma posição. */
+async function sairDaFila(game, userId) {
+  const { data: minha } = await supabase.from('rsvp_espera').select('id, posicao').eq('game_id', game.id).eq('user_id', userId).maybeSingle();
+  if (!minha) return false;
+  await supabase.from('rsvp_espera').delete().eq('id', minha.id);
+  const { data: restantes } = await supabase.from('rsvp_espera').select('id, posicao').eq('game_id', game.id).gt('posicao', minha.posicao);
+  for (const r of restantes || []) {
+    await supabase.from('rsvp_espera').update({ posicao: r.posicao - 1 }).eq('id', r.id);
+  }
+  return true;
+}
+
+/**
+ * Promove o primeiro da lista de espera de um jogo (se houver vaga libertada): confirma-o (na lista e no elenco), tira-o da fila e
+ * avisa por push.
  */
 async function promoverDaEspera(game) {
   const { data: primeiro } = await supabase
@@ -34,32 +69,77 @@ async function promoverDaEspera(game) {
       { game_id: game.id, user_id: primeiro.user_id, status: 'confirmado', respondido_em: new Date().toISOString() },
       { onConflict: 'game_id,user_id' }
     );
-  await supabase.from('rsvp_espera').delete().eq('id', primeiro.id);
-
-  // Reorganiza as posições dos restantes (todos os que estavam atrás avançam 1).
-  const { data: restantes } = await supabase
-    .from('rsvp_espera')
-    .select('id, posicao')
-    .eq('game_id', game.id)
-    .gt('posicao', primeiro.posicao);
-  for (const r of restantes || []) {
-    await supabase.from('rsvp_espera').update({ posicao: r.posicao - 1 }).eq('id', r.id);
-  }
+  await acertarElenco(game, primeiro.user_id, true);
+  await sairDaFila(game, primeiro.user_id);
 
   enviarNotificacao([primeiro.user_id], {
     title: '✅ Vaga disponível!',
-    body: `Você foi confirmado para o jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))}. Confirme sua presença no app.`,
-    url: `/time/${game.teams.slug}`,
+    body: `Você entrou no jogo de ${dataCurtaNoFuso(game.data, fusoDoTime(game.teams))}.`,
+    url: `/time/${game.teams.slug}/jogo/${game.id}`,
   }, { categoria: 'jogos' });
 }
 
-// Carrega o jogo e garante que o usuário é admin do time.
-async function jogoComoAdmin(req) {
-  const game = await loadGame(req.params.gameId);
-  if (!game) throw new HttpError(404, 'Jogo não encontrado.');
-  const role = await getRole(game.teams.id, req.user.id);
-  if (role !== 'admin') throw new HttpError(403, 'Só admins podem gerir a presença.');
-  return game;
+/**
+ * A resposta de uma pessoa a um jogo — a ÚNICA porta ("Vou / Não vou" do Início, do aviso e da página do jogo, e o /confirmar antigo).
+ * `status`: 'confirmado' | 'recusado'. Devolve { ok, status, goleiro } ou { ok, espera: true, posicao } (jogo cheio).
+ */
+async function responderPresenca({ game, userId, status, goleiro = null }) {
+  if (!['confirmado', 'recusado'].includes(status)) throw new HttpError(400, 'Estado inválido.');
+  // Quem só organiza o time não entra na lista de presença.
+  if (await soOrganiza(game.teams.id, userId)) throw new HttpError(403, MSG_SO_ORGANIZA);
+  if (!listaAberta(game)) throw new HttpError(409, MSG_LISTA_FECHADA, 'LISTA_FECHADA');
+  if (!foiChamado(game, userId)) throw new HttpError(403, MSG_NAO_CHAMADO, 'NAO_CHAMADO');
+
+  const { data: anterior } = await supabase
+    .from('rsvp_respostas')
+    .select('status')
+    .eq('game_id', game.id)
+    .eq('user_id', userId)
+    .maybeSingle();
+  const eraConfirmado = anterior?.status === 'confirmado';
+
+  // Lotação: se o jogo já estiver cheio, "Vou" entra na lista de espera (fora do elenco até abrir vaga).
+  if (status === 'confirmado' && game.max_jogadores != null && !eraConfirmado) {
+    const { count } = await supabase
+      .from('rsvp_respostas')
+      .select('user_id', { count: 'exact', head: true })
+      .eq('game_id', game.id)
+      .eq('status', 'confirmado')
+      .neq('user_id', userId);
+    if ((count || 0) >= game.max_jogadores) {
+      const { data: jaNaFila } = await supabase.from('rsvp_espera').select('posicao').eq('game_id', game.id).eq('user_id', userId).maybeSingle();
+      if (jaNaFila) return { ok: true, espera: true, posicao: jaNaFila.posicao };
+
+      await supabase.from('rsvp_respostas').delete().eq('game_id', game.id).eq('user_id', userId);
+      await acertarElenco(game, userId, false, goleiro);
+      const { data: ultima } = await supabase
+        .from('rsvp_espera')
+        .select('posicao')
+        .eq('game_id', game.id)
+        .order('posicao', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      const posicao = (ultima?.posicao || 0) + 1;
+      const { error: espErr } = await supabase
+        .from('rsvp_espera')
+        .upsert({ game_id: game.id, user_id: userId, posicao }, { onConflict: 'game_id,user_id' });
+      if (espErr) throw new HttpError(500, espErr.message);
+      return { ok: true, espera: true, posicao };
+    }
+  }
+
+  const { error } = await supabase
+    .from('rsvp_respostas')
+    .upsert({ game_id: game.id, user_id: userId, status, respondido_em: new Date().toISOString() }, { onConflict: 'game_id,user_id' });
+  if (error) throw new HttpError(500, error.message);
+  const ehGoleiro = await acertarElenco(game, userId, status === 'confirmado', goleiro);
+
+  // "Não vou" de quem estava na fila: sai da fila. "Não vou" de quem estava confirmado: abre vaga para o 1º da fila.
+  if (status === 'recusado') {
+    await sairDaFila(game, userId);
+    if (eraConfirmado) await promoverDaEspera(game);
+  }
+  return { ok: true, status, goleiro: ehGoleiro };
 }
 
 // Carrega o jogo e garante que o usuário é membro do time.
@@ -68,167 +148,34 @@ async function jogoComoMembro(req) {
   if (!game) throw new HttpError(404, 'Jogo não encontrado.');
   const role = await getRole(game.teams.id, req.user.id);
   if (!role) throw foraDoTime();
-  return game;
+  return { game, role };
 }
 
-/** POST /api/jogos/:gameId/rsvp/abrir — admin abre o RSVP com um prazo. */
-router.post(
-  '/api/jogos/:gameId/rsvp/abrir',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const game = await jogoComoAdmin(req);
-    const { prazo } = req.body || {};
-    const prazoData = prazo ? new Date(prazo) : null;
-    if (!prazoData || Number.isNaN(prazoData.getTime())) throw new HttpError(400, 'Prazo inválido.');
-    if (prazoData.getTime() <= Date.now()) throw new HttpError(400, 'O prazo deve ser no futuro.');
+/**
+ * POST /api/jogos/:gameId/rsvp/abrir e /rsvp/fechar — não existem mais como ação (a lista abre quando o jogo nasce e fecha na hora do
+ * sorteio). Ficam respondendo o jogo como está, sem mudar nada, para o app antigo (até a atualização chegar) não dar erro na tela.
+ */
+for (const acao of ['abrir', 'fechar']) {
+  router.post(
+    `/api/jogos/:gameId/rsvp/${acao}`,
+    requireAuth,
+    asyncHandler(async (req, res) => {
+      const { game, role } = await jogoComoMembro(req);
+      if (role !== 'admin') throw new HttpError(403, 'Só admins podem gerir a presença.');
+      const { teams, ...semTime } = game;
+      res.json({ game: { ...semTime, fuso: fusoDoTime(teams), rsvp_aberto: listaAberta(game), rsvp_fechado: !listaAberta(game) } });
+    })
+  );
+}
 
-    const { data: updated, error } = await supabase
-      .from('games')
-      .update({ rsvp_aberto: true, rsvp_prazo: prazoData.toISOString(), rsvp_fechado: false })
-      .eq('id', game.id)
-      .select()
-      .single();
-    if (error) throw new HttpError(500, error.message);
-
-    // Auto-preenche 'recusado' para quem já declarou ausência ao próximo jogo.
-    // ignoreDuplicates → não sobrescreve quem entretanto já tenha respondido.
-    const { data: ausentes } = await supabase
-      .from('team_members')
-      .select('user_id')
-      .eq('team_id', game.teams.id)
-      .eq('ausente_proximo', true);
-    const ausenteRows = (ausentes || [])
-      .filter((m) => m.user_id)
-      .map((m) => ({ game_id: game.id, user_id: m.user_id, status: 'recusado', respondido_em: new Date().toISOString() }));
-    if (ausenteRows.length) {
-      await supabase.from('rsvp_respostas').upsert(ausenteRows, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
-    }
-
-    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
-  })
-);
-
-/** POST /api/jogos/:gameId/rsvp/fechar — admin fecha o RSVP. */
-router.post(
-  '/api/jogos/:gameId/rsvp/fechar',
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const game = await jogoComoAdmin(req);
-    const { data: updated, error } = await supabase
-      .from('games')
-      .update({ rsvp_fechado: true })
-      .eq('id', game.id)
-      .select()
-      .single();
-    if (error) throw new HttpError(500, error.message);
-
-    // Sincroniza os confirmados via RSVP para game_players (alimenta o sorteio
-    // sem o admin ter de adicionar os jogadores manualmente).
-    // Quem já tem linha no jogo mantém o `goleiro` que ele ou o admin
-    // marcaram; quem entra agora herda a flag do time (team_members.categoria === 'GR', via goleirosDoTime).
-    const { data: confirmados } = await supabase
-      .from('rsvp_respostas')
-      .select('user_id')
-      .eq('game_id', game.id)
-      .eq('status', 'confirmado');
-    // Quem só organiza o time nunca entra no elenco (nem se respondeu antes de mudar de papel).
-    const organizam = await idsQueSoOrganizam(game.teams.id);
-    const ids = (confirmados || []).map((r) => r.user_id).filter((id) => id && !organizam.has(id));
-    const { data: jaNoJogo } = ids.length
-      ? await supabase.from('game_players').select('user_id, goleiro').eq('game_id', game.id).in('user_id', ids)
-      : { data: [] };
-    const goleiroAtual = new Map((jaNoJogo || []).map((g) => [g.user_id, !!g.goleiro]));
-    const goleirosTime = await goleirosDoTime(game.teams.id, ids);
-    const rows = ids.map((userId) => ({
-      game_id: game.id,
-      user_id: userId,
-      confirmado: true,
-      goleiro: goleiroAtual.has(userId) ? goleiroAtual.get(userId) : goleirosTime.has(userId),
-    }));
-    if (rows.length) {
-      const { error: gpErr } = await supabase.from('game_players').upsert(rows, { onConflict: 'game_id,user_id' });
-      if (gpErr) throw new HttpError(500, gpErr.message);
-    }
-
-    res.json({ game: { ...updated, fuso: fusoDoTime(game.teams) } });
-  })
-);
-
-/** POST /api/jogos/:gameId/rsvp/responder — membro confirma/recusa presença. */
+/** POST /api/jogos/:gameId/rsvp/responder — "Vou" (confirmado) ou "Não vou" (recusado). */
 router.post(
   '/api/jogos/:gameId/rsvp/responder',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const game = await jogoComoMembro(req);
-    // Quem só organiza o time não entra na lista de presença.
-    if (await soOrganiza(game.teams.id, req.user.id)) throw new HttpError(403, MSG_SO_ORGANIZA);
-    const { status } = req.body || {};
-    if (!['confirmado', 'recusado'].includes(status)) throw new HttpError(400, 'Estado inválido.');
-    if (!game.rsvp_aberto || game.rsvp_fechado) throw new HttpError(400, 'A confirmação de presença não está aberta.');
-    if (!game.rsvp_prazo || new Date(game.rsvp_prazo).getTime() <= Date.now()) {
-      throw new HttpError(400, 'O prazo para confirmar presença já passou.');
-    }
-
-    // Estado anterior (para saber se uma vaga foi libertada ao recusar).
-    const { data: anterior } = await supabase
-      .from('rsvp_respostas')
-      .select('status')
-      .eq('game_id', game.id)
-      .eq('user_id', req.user.id)
-      .maybeSingle();
-    const eraConfirmado = anterior?.status === 'confirmado';
-
-    // Capacidade: se o jogo já estiver cheio, entra na lista de espera.
-    if (status === 'confirmado' && game.max_jogadores != null) {
-      const { count } = await supabase
-        .from('rsvp_respostas')
-        .select('user_id', { count: 'exact', head: true })
-        .eq('game_id', game.id)
-        .eq('status', 'confirmado')
-        .neq('user_id', req.user.id);
-      if ((count || 0) >= game.max_jogadores) {
-        // Já está na fila? Devolve a posição atual sem reordenar.
-        const { data: jaNaFila } = await supabase
-          .from('rsvp_espera')
-          .select('posicao')
-          .eq('game_id', game.id)
-          .eq('user_id', req.user.id)
-          .maybeSingle();
-        if (jaNaFila) return res.json({ ok: true, espera: true, posicao: jaNaFila.posicao });
-
-        // Garante que não fica também marcado como confirmado/recusado.
-        await supabase.from('rsvp_respostas').delete().eq('game_id', game.id).eq('user_id', req.user.id);
-
-        const { data: ultima } = await supabase
-          .from('rsvp_espera')
-          .select('posicao')
-          .eq('game_id', game.id)
-          .order('posicao', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-        const posicao = (ultima?.posicao || 0) + 1;
-        const { error: espErr } = await supabase
-          .from('rsvp_espera')
-          .upsert({ game_id: game.id, user_id: req.user.id, posicao }, { onConflict: 'game_id,user_id' });
-        if (espErr) throw new HttpError(500, espErr.message);
-        return res.json({ ok: true, espera: true, posicao });
-      }
-    }
-
-    const { error } = await supabase
-      .from('rsvp_respostas')
-      .upsert(
-        { game_id: game.id, user_id: req.user.id, status, respondido_em: new Date().toISOString() },
-        { onConflict: 'game_id,user_id' }
-      );
-    if (error) throw new HttpError(500, error.message);
-
-    // Se um confirmado recusou, libertou uma vaga → promove o 1º da espera.
-    if (status === 'recusado' && eraConfirmado) {
-      await promoverDaEspera(game);
-    }
-
-    res.json({ ok: true, status });
+    const { game } = await jogoComoMembro(req);
+    const r = await responderPresenca({ game, userId: req.user.id, status: req.body?.status });
+    res.json(r.espera ? { ok: true, espera: true, posicao: r.posicao } : { ok: true, status: r.status });
   })
 );
 
@@ -237,28 +184,8 @@ router.post(
   '/api/jogos/:gameId/rsvp/sair-espera',
   requireAuth,
   asyncHandler(async (req, res) => {
-    const game = await jogoComoMembro(req);
-
-    const { data: minha } = await supabase
-      .from('rsvp_espera')
-      .select('id, posicao')
-      .eq('game_id', game.id)
-      .eq('user_id', req.user.id)
-      .maybeSingle();
-    if (!minha) return res.json({ ok: true });
-
-    await supabase.from('rsvp_espera').delete().eq('id', minha.id);
-
-    // Reorganiza as posições de quem estava atrás.
-    const { data: restantes } = await supabase
-      .from('rsvp_espera')
-      .select('id, posicao')
-      .eq('game_id', game.id)
-      .gt('posicao', minha.posicao);
-    for (const r of restantes || []) {
-      await supabase.from('rsvp_espera').update({ posicao: r.posicao - 1 }).eq('id', r.id);
-    }
-
+    const { game } = await jogoComoMembro(req);
+    await sairDaFila(game, req.user.id);
     res.json({ ok: true });
   })
 );
@@ -277,3 +204,5 @@ router.get(
 );
 
 module.exports = router;
+module.exports.responderPresenca = responderPresenca;
+module.exports.MSG_LISTA_FECHADA = MSG_LISTA_FECHADA;

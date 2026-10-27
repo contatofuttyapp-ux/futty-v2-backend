@@ -19,6 +19,7 @@ const RECARREGAR = [
   'routes/campeonatos', 'utils/campeonatoStore', 'utils/selosCache', // campeonatos no Storage: guardam o supabase no require
   'utils/presencaDeFundador', // a presença de fundador lê o time e os jogos com o supabase do require
   'utils/apagarUsuario', 'utils/storage', 'utils/acoesDoGabinete', 'utils/notaDoVoto', // a exclusão pelo Gabinete e o log de ações guardam o supabase no require
+  'utils/avisosDoJogo', // o cano dos avisos de jogo: guarda o supabase e o módulo do push no require
 ];
 const caminho = (m) => require.resolve(`../${m}`);
 
