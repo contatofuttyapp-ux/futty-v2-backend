@@ -1,6 +1,6 @@
 // Futty v2.0 — A chamada do jogo: quem foi chamado, até quando dá para responder "Vou / Não vou" e a hora do sorteio.
 //
-// Regras do dono (Rodada 32H):
+// Regras do dono:
 //   · o jogo nasce CHAMANDO: o elenco inteiro (games.chamados NULL) ou só quem o admin escolheu (games.chamados = [ids]). Não existe
 //     mais "abrir presença", "fechar presença" nem prazo — a lista está aberta desde que o jogo existe;
 //   · o jogo tem a HORA DO SORTEIO (games.sorteio_em; sem ela, 1 hora antes do jogo). Nessa hora a lista FECHA SOZINHA (ninguém mais

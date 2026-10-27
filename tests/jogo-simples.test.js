@@ -228,3 +228,41 @@ test('o link ATUAL do convite: o mais recente, com a validade; vencido diz venci
   assert.equal((await pedir('ana', 'GET', '/api/teams/missa/convite/atual')).json.convite.vencido, true);
   assert.equal((await pedir('admin', 'GET', '/api/teams/outro/convite/atual')).status, 404);
 });
+
+test('a presença do jogo diz a minha resposta, quem ainda não foi chamado (o admin chama daí) e lê o "Vou" dos jogos de antes', async () => {
+  const g = (await criar({ chamados: [P.ana.id] })).json.game;
+  await pedir('ana', 'POST', `/api/jogos/${g.id}/rsvp/responder`, { status: 'recusado' });
+  const r = (await pedir('ana', 'GET', `/api/jogos/${g.id}/rsvp`)).json;
+  assert.equal(r.minha_resposta, 'recusado');
+  assert.deepEqual(r.nao_chamados.map((u) => u.id), [P.admin.id, P.beto.id].sort(), 'o elenco que joga e não foi chamado (quem só organiza, nunca)');
+  assert.deepEqual(r.recusados.map((u) => u.id), [P.ana.id]);
+  // Jogo de antes da porta única: o "Vou" ficou só no elenco do jogo (game_players), sem linha na lista.
+  const velho = (await criar()).json.game;
+  app.tabelas.game_players.push({ id: uuid(900), game_id: velho.id, user_id: P.beto.id, confirmado: true, goleiro: false });
+  const v = (await pedir('beto', 'GET', `/api/jogos/${velho.id}/rsvp`)).json;
+  assert.equal(v.minha_resposta, 'confirmado');
+  assert.deepEqual(v.confirmados.map((u) => u.id), [P.beto.id], 'conta como confirmado, como no Início e no sorteio');
+  assert.deepEqual(v.nao_chamados, [], 'jogo do elenco inteiro: ninguém fora');
+});
+
+test('a lista de jogos do time leva a hora do sorteio, a lista aberta e (só para o admin) quem foi chamado; conta pelo elenco do jogo', async () => {
+  const g = (await criar({ chamados: [P.ana.id] })).json.game;
+  await pedir('ana', 'POST', `/api/jogos/${g.id}/rsvp/responder`, { status: 'confirmado' });
+  const doAdmin = (await pedir('admin', 'GET', '/api/teams/missa/games')).json.games.find((x) => x.id === g.id);
+  assert.equal(doAdmin.sorteio_em, g.sorteio_em);
+  assert.equal(doAdmin.lista_aberta, true);
+  assert.deepEqual(doAdmin.chamados, [P.ana.id]);
+  assert.equal(doAdmin.confirmados, 1);
+  const doMembro = (await pedir('beto', 'GET', '/api/teams/missa/games')).json.games.find((x) => x.id === g.id);
+  assert.equal('chamados' in doMembro, false, 'quem foi chamado é coisa do admin');
+});
+
+test('o Início lê a resposta pelo elenco do jogo: "Vou" → going e a contagem sobe; "Não vou" → not_going', async () => {
+  const g = (await criar()).json.game;
+  await pedir('ana', 'POST', `/api/jogos/${g.id}/rsvp/responder`, { status: 'confirmado' });
+  let jogo = (await pedir('ana', 'GET', '/api/inicio')).json.convites.games.find((x) => x.id === g.id);
+  assert.deepEqual([jogo.user_status, jogo.confirmed_count], ['going', 1]);
+  await pedir('ana', 'POST', `/api/jogos/${g.id}/rsvp/responder`, { status: 'recusado' });
+  jogo = (await pedir('ana', 'GET', '/api/inicio')).json.convites.games.find((x) => x.id === g.id);
+  assert.deepEqual([jogo.user_status, jogo.confirmed_count], ['not_going', 0]);
+});

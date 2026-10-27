@@ -598,6 +598,7 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
     supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', gameId),
     supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', gameId).order('posicao', { ascending: true }),
     idsQueSoOrganizam(tid),
+    supabase.from('game_players').select('user_id, confirmado').eq('game_id', gameId),
   ];
   let game;
   let resto;
@@ -615,7 +616,7 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   // awaits em série). O acesso só é confirmado depois — se `role` vier vazio
   // o resto é descartado a seguir.
   if (!resto) resto = await Promise.all(consultasDoTime(game.teams.id));
-  const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam] = resto;
+  const [role, { data: membros }, { data: respostas }, { data: filaRows }, organizam, { data: elencoDoJogo }] = resto;
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
 
   // Quem só organiza o time não está na lista de presença (nem como pendente). Pendente é só quem foi CHAMADO e não respondeu
@@ -624,7 +625,12 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
   const chamadosSet = new Set(chamadosDoJogo(game, users.map((u) => u.id)));
   const aberta = listaAberta(game);
   const sorteioEm = sorteioDoJogo(game);
+  // A resposta de cada um: a da lista (rsvp_respostas) e, para quem não tem linha lá, a do elenco do jogo (game_players) — o "Vou" dos
+  // jogos de antes da porta única só foi gravado ali. Hoje a porta única (routes/rsvp.js) grava nos dois.
   const statusPorUser = {};
+  (elencoDoJogo || []).forEach((p) => {
+    statusPorUser[p.user_id] = p.confirmado ? 'confirmado' : 'recusado';
+  });
   (respostas || []).forEach((r) => {
     statusPorUser[r.user_id] = r.status;
   });
@@ -658,8 +664,12 @@ async function obterRsvp(gameId, userId, { teamId = null } = {}) {
     confirmados,
     recusados: users.filter((u) => statusPorUser[u.id] === 'recusado'),
     pendentes: users.filter((u) => !statusPorUser[u.id] && chamadosSet.has(u.id) && !(filaRows || []).some((r) => r.user_id === u.id)),
+    // Quem do elenco ainda não foi chamado (o admin chama mais gente daqui). Vazio quando o jogo chama o elenco inteiro.
+    nao_chamados: users.filter((u) => !chamadosSet.has(u.id)),
     espera,
     minha_posicao_espera: minhaEspera ? minhaEspera.posicao : null,
+    // A minha resposta ('confirmado' | 'recusado' | null): a página do jogo trava o "Vou / Não vou" nela.
+    minha_resposta: statusPorUser[userId] || null,
     eu_jogo: !organizam.has(userId),
   };
 }

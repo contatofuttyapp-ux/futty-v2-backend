@@ -4,6 +4,10 @@
 // rsvp_respostas — routes/rsvp.js só sincroniza para game_players no "Fechar presença". GET
 // /api/teams/:slug/games contava sempre por game_players, por isso ficava para trás.
 //
+// Rodada 32H: a presença não abre nem fecha mais — a porta única (routes/rsvp.js) grava em rsvp_respostas E em game_players, e o sorteio
+// lê game_players. A contagem passa a vir sempre de game_players (a mesma do Início e do sorteio). Os jogos que estavam com a presença
+// antiga aberta são acertados pelo bloco ACERTO da migração 089 (leva as respostas para game_players).
+//
 // Uso: npm test  (ou: node --test tests/confirmados-por-jogo.test.js)
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -47,12 +51,12 @@ function cenario(t) {
   return { pedir, tabelas };
 }
 
-test('RSVP aberto e não fechado: a contagem vem de rsvp_respostas (3), não de game_players (2, que ficou para trás)', async (t) => {
+test('32H · presença antiga aberta: a contagem vem de game_players, onde o sorteio lê (o acerto da 089 leva o resto para lá)', async (t) => {
   const { pedir } = cenario(t);
   const r = await pedir('GET', '/api/teams/varzea-fc/games', null, DONO);
   assert.equal(r.status, 200);
   const j1 = r.json.games.find((g) => g.id === J1);
-  assert.equal(j1.confirmados, 3, 'achado 116: a mesma conta que o bloco de presença mostra');
+  assert.equal(j1.confirmados, 2, 'a conta de quem entra no sorteio');
 });
 
 test('RSVP já fechado: a contagem vem de game_players (sincronizado no fechar), não de rsvp_respostas', async (t) => {

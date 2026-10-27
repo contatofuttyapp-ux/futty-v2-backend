@@ -110,11 +110,15 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         }
         return { data: e.retorna ? saida : null, error: null };
       }
+      // O embed: muitos-para-um, a linha ganha o objeto (ou null); um-para-muitos (`muitos: true`, como games → game_players), a lista.
+      const juntar = (def, l) => (def.muitos
+        ? linhasDe(def.tabela).filter((r) => r[def.remota] === l[def.local]).map(copia)
+        : linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null);
       // Filtro sobre coluna do embed (`.eq('teams.brilhante_ativo', true)`): o PostgREST filtra DEPOIS de juntar, então o select junta antes.
       const comEmbeds = (linhas) => linhas.map((l) => {
         let saida = l;
         for (const [nome, def] of Object.entries(relacoes[tabela] || {})) {
-          if (new RegExp(`\\b${nome}(!inner)?\\s*\\(`).test(e.cols || '')) saida = { ...saida, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null };
+          if (new RegExp(`\\b${nome}(!inner)?\\s*\\(`).test(e.cols || '')) saida = { ...saida, [nome]: juntar(def, l) };
         }
         return saida;
       });
@@ -145,7 +149,7 @@ function criarSupabaseFalso(inicial = {}, { unicos = UNICOS_PADRAO, semRpc = fal
         // `teams!inner(...)` é o embed com junção interna: o mesmo objeto, e a linha sem par some do resultado.
         const m = new RegExp(`\\b${nome}(!inner)?\\s*\\(`).exec(e.cols || '');
         if (m) {
-          alvo = alvo.map((l) => ({ ...l, [nome]: linhasDe(def.tabela).find((r) => r[def.remota] === l[def.local]) || null }));
+          alvo = alvo.map((l) => ({ ...l, [nome]: juntar(def, l) }));
           if (m[1]) alvo = alvo.filter((l) => l[nome] !== null);
         }
       }

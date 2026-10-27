@@ -6,7 +6,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, getTeamBySlug, ensureUserRow, getUserById, loadGame } = require('../utils/db');
 const { enviarNotificacao } = require('./push');
-const { removerFicheirosPorUrl } = require('../utils/storage');
+const { removerFicheirosPorUrl, urlGuardavelDeMidia } = require('../utils/storage');
 const { urlDeMidiaValida, midiaEhDe } = require('../utils/validarUrl');
 const { inteiroEmFaixa, ehUuid } = require('../utils/entrada');
 const { conjuntoMutuo } = require('../utils/blocksStore');
@@ -380,7 +380,8 @@ router.post(
       .map((m, i) => {
         const linha = {
           post_id: post.id,
-          url: String(m.url),
+          // Guarda bucket + caminho (a forma crua do Storage), nunca o token do proxy, que vence: a leitura assina de novo.
+          url: urlGuardavelDeMidia(String(m.url)),
           media_type: POST_MEDIA.includes(m.media_type) ? m.media_type : 'image',
           position: Number.isFinite(Number(m.position)) ? Number(m.position) : i,
         };
@@ -541,7 +542,7 @@ router.patch(
       if (b.campeao_foto_url && !urlDeMidiaValida(b.campeao_foto_url, req)) {
         throw new HttpError(400, 'URL de mídia inválida.');
       }
-      patch.campeao_foto_url = b.campeao_foto_url || null;
+      patch.campeao_foto_url = urlGuardavelDeMidia(b.campeao_foto_url) || null;
     }
     // Os prêmios do dia são de gente do time: um id de fora ia virar, na resposta, o nome de uma pessoa de outro time.
     // (O que já estava gravado continua valendo: quem saiu do time depois do jogo não trava a edição do resultado.)
@@ -568,7 +569,7 @@ router.patch(
       if (b.rodada_foto_url && !urlDeMidiaValida(b.rodada_foto_url, req)) {
         throw new HttpError(400, 'URL de mídia inválida.');
       }
-      patch.rodada_foto_url = b.rodada_foto_url || null;
+      patch.rodada_foto_url = urlGuardavelDeMidia(b.rodada_foto_url) || null;
     }
 
     if (!Object.keys(patch).length) throw new HttpError(400, 'Nada para atualizar.');

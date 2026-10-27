@@ -19,7 +19,7 @@ const { textoCurto, ehUuid } = require('../utils/entrada'); // o que a pessoa di
 const { round1 } = require('../utils/ajudaDoJogo');
 const { convidadosGuardados } = require('../utils/convidadosDoJogo'); // a lista de convidados sem app do jogo
 const { sorteioPadrao, sorteioDoJogo, sorteioEscolhido, sorteioAoMudarOJogo, listaAberta, chamadosDoJogo, foiChamado } = require('../utils/chamadaDoJogo');
-const { erroDaChamada, semColunasDaChamada } = require('../utils/colunasDaChamada');
+const { erroDaChamada, semColunasDaChamada, lerComChamada } = require('../utils/colunasDaChamada');
 const { avisarJogo } = require('../utils/avisosDoJogo');
 const { responderPresenca } = require('./rsvp');
 
@@ -138,41 +138,33 @@ router.get(
     const role = await getRole(team.id, req.user.id);
     if (!role) throw foraDoTime();
 
-    const { data: games, error } = await supabase
+    // A chamada (sorteio_em, chamados) vem junto; sem a migração 089 a leitura repete sem elas (utils/colunasDaChamada.js).
+    const { data: games, error } = await lerComChamada((extra) => supabase
       .from('games')
-      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, time_vencedor, cancelado, motivo_cancelamento, max_jogadores, rsvp_aberto, rsvp_fechado, created_at')
+      .select('id, data, local, status, resultado_nivel, num_times, jogadores_por_time, sorteio_realizado, campeao_time_index, time_vencedor, cancelado, motivo_cancelamento, max_jogadores, created_at' + extra)
       .eq('team_id', team.id)
-      .order('data', { ascending: false });
+      .order('data', { ascending: false }));
     if (error) throw new HttpError(500, error.message);
 
-    // Contagem de confirmados por jogo: enquanto o RSVP está aberto e ainda não
-    // fechado, a presença de verdade vive em rsvp_respostas — game_players só é sincronizado no
-    // "Fechar presença" (routes/rsvp.js). Fora disso (sem RSVP, ou já fechado), vale game_players,
-    // como sempre (o "Vou" simples de Jogo.jsx/Inicio.jsx escreve direto nele).
+    // Confirmados por jogo: a presença vive em game_players (a porta única da presença, routes/rsvp.js, grava lá e em rsvp_respostas).
     const ids = (games || []).map((g) => g.id);
-    const idsComRsvpAberto = new Set((games || []).filter((g) => g.rsvp_aberto && !g.rsvp_fechado).map((g) => g.id));
-    const idsSemRsvpAberto = ids.filter((id) => !idsComRsvpAberto.has(id));
     const counts = {};
-    const [gpResult, rsvpResult] = await Promise.all([
-      idsSemRsvpAberto.length
-        ? supabase.from('game_players').select('game_id, confirmado').in('game_id', idsSemRsvpAberto)
-        : Promise.resolve({ data: [] }),
-      idsComRsvpAberto.size
-        ? supabase.from('rsvp_respostas').select('game_id, status').in('game_id', [...idsComRsvpAberto])
-        : Promise.resolve({ data: [] }),
-    ]);
-    for (const row of gpResult.data || []) {
+    const { data: gp } = ids.length
+      ? await supabase.from('game_players').select('game_id, confirmado').in('game_id', ids)
+      : { data: [] };
+    for (const row of gp || []) {
       if (row.confirmado) counts[row.game_id] = (counts[row.game_id] || 0) + 1;
     }
-    for (const row of rsvpResult.data || []) {
-      if (row.status === 'confirmado') counts[row.game_id] = (counts[row.game_id] || 0) + 1;
-    }
 
-    const lista = (games || []).map((g) => ({
+    const lista = (games || []).map(({ chamados, ...g }) => ({
       ...g,
       status: statusEfetivoJogo(g),
       cancelado: !!g.cancelado || g.status === 'cancelado',
       confirmados: counts[g.id] || 0,
+      // A hora do sorteio (a lista fecha nela), se ainda dá para responder e quem foi chamado (null = o elenco inteiro). Só o admin vê quem.
+      sorteio_em: sorteioDoJogo(g),
+      lista_aberta: listaAberta(g),
+      ...(role === 'admin' ? { chamados: Array.isArray(chamados) ? chamados : null } : {}),
     }));
     res.json({ team: { ...team, fuso: fusoDoTime(team), role }, games: lista });
   })

@@ -5,6 +5,7 @@ const { requireAuth } = require('../middleware/auth');
 const { asyncHandler, HttpError, foraDoTime } = require('../utils/http');
 const { supabase, getRole, ensureUserRow, getUserById } = require('../utils/db');
 const { midiaEhDe } = require('../utils/validarUrl');
+const { urlGuardavelDeMidia } = require('../utils/storage');
 const { conjuntoMutuo } = require('../utils/blocksStore');
 const { parentTeamId, targetTeamId, reacoesParaTargets } = require('../utils/ajudaDaResenha');
 
@@ -208,7 +209,7 @@ router.post(
     const anexoRows = anexosPedidos
       .map((a, i) => ({
         comentario_id: c.id,
-        url: String(a.url),
+        url: urlGuardavelDeMidia(String(a.url)), // bucket + caminho, nunca o token (que vence)
         media_type: COMENTARIO_MEDIA.includes(a.media_type) ? a.media_type : 'image',
         position: i,
       }));

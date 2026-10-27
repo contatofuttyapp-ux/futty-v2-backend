@@ -164,9 +164,10 @@ function criarStorageFalso() {
 }
 
 // ─── 4. O cliente do Supabase de mentira: banco + Storage + Auth ───────────────────────────────────────────────────────────────
-// Os embeds do PostgREST (`teams ( id, nome )` dentro de um select de games…) que as rotas usam. Muitos-para-um: a linha ganha o objeto.
+// Os embeds do PostgREST (`teams ( id, nome )` dentro de um select de games…) que as rotas usam. Muitos-para-um: a linha ganha o objeto;
+// um-para-muitos (`muitos: true`): a lista (o Início lê o elenco de cada jogo assim).
 const RELACOES = {
-  games: { teams: { tabela: 'teams', local: 'team_id', remota: 'id' } },
+  games: { teams: { tabela: 'teams', local: 'team_id', remota: 'id' }, game_players: { tabela: 'game_players', local: 'id', remota: 'game_id', muitos: true } },
   team_members: { users: { tabela: 'users', local: 'user_id', remota: 'id' }, teams: { tabela: 'teams', local: 'team_id', remota: 'id' } },
   game_players: { users: { tabela: 'users', local: 'user_id', remota: 'id' } },
   comentarios: { users: { tabela: 'users', local: 'author_id', remota: 'id' } },

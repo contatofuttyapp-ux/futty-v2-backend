@@ -69,7 +69,8 @@ router.get(
       .from('convites')
       .select('id, token, expires_at')
       .eq('team_id', team.id)
-      .order('created_at', { ascending: false })
+      // O mais novo é o que vence por último (todo link nasce valendo 30 dias): não depende da coluna created_at.
+      .order('expires_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (error) throw new HttpError(500, error.message);

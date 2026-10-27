@@ -78,11 +78,9 @@ function parseUrlPublico(url) {
  * scripts/limpar-usuarios-teste.js), que recebe uma pilha de URLs de fontes
  * variadas (avatar, foto de campeão, mídia da Resenha…) sem saber de
  * antemão o bucket de cada uma. Diferente de propósito do parseUrlPublico:
- * aquele serve só o middleware de RESPOSTA (mediaUrls.js) e por isso casa só
- * com a forma crua — um valor já em forma de proxy não precisa reescrita
- * nenhuma, e se parseUrlPublico também casasse com ele, cada resposta
- * reassinaria à toa a mídia que já veio pronta do banco (feed_post_media.url
- * e comentario_anexos.url, que são proxy desde que foram gravados).
+ * aquele serve só o middleware de RESPOSTA (mediaUrls.js) e casa só com a
+ * forma crua; a forma de proxy guardada no banco tem o token renovado à parte
+ * (renovarUrlDeMidia), porque o token da época vence.
  */
 function bucketEcaminho(url) {
   for (const bucket of BUCKETS_PRIVADOS) {
@@ -90,6 +88,42 @@ function bucketEcaminho(url) {
     if (caminho) return { bucket, path: caminho };
   }
   return null;
+}
+
+// Uma URL do proxy de mídia, inteira (a string é só a URL — nunca um texto que a contém): origem opcional, o token e a query.
+const URL_DO_PROXY = /^(https?:\/\/[^/\s"'?#]+)?\/api\/media\/([^/?#\s"']+)(\?[^#\s"']*)?$/;
+
+/**
+ * A URL do proxy GUARDADA no banco com o token da época (feed_post_media.url, comentario_anexos.url, games.campeao_foto_url,
+ * games.rodada_foto_url, os avatares no JSON dos resultados) volta com um token NOVO, da janela de agora (utils/mediaToken.js).
+ * Sem isto, duas semanas depois o token vencia e a foto sumia (o proxy responde 403). O token velho é decodificado sem olhar a
+ * validade (decodificarToken), mas a ASSINATURA continua valendo: só renova o que fomos nós que assinamos, e só dos buckets privados.
+ * `base` = a origem do backend de agora (a URL pode ter sido guardada com o endereço de outro tempo); sem ela, fica a da própria URL.
+ * A query (`?rc=…`) segue igual. Qualquer outra coisa volta como veio.
+ */
+function renovarUrlDeMidia(url, base = null) {
+  if (typeof url !== 'string') return url;
+  const m = url.match(URL_DO_PROXY);
+  if (!m) return url;
+  const alvo = decodificarToken(m[2]);
+  if (!alvo || !BUCKETS_PRIVADOS.includes(alvo.bucket)) return url;
+  return `${base || m[1] || ''}/api/media/${assinarToken(alvo.bucket, alvo.path, { v: alvo.v })}${m[3] || ''}`;
+}
+
+/**
+ * A forma de GUARDAR uma mídia: o endereço cru do Storage (bucket + caminho, mais o `?v=`), nunca o token do proxy, que vence.
+ * Na leitura o middleware (mediaUrls.js) a transforma de novo em proxy, com token da hora. Quem chega aqui já passou pela validação
+ * (validarUrl.js); sem SUPABASE_URL, ou uma URL que não é do proxy, volta como veio.
+ */
+function urlGuardavelDeMidia(url) {
+  if (typeof url !== 'string') return url;
+  const m = url.match(URL_DO_PROXY);
+  const supabaseUrl = String(process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+  if (!m || !supabaseUrl) return url;
+  const alvo = decodificarToken(m[2]);
+  if (!alvo || !BUCKETS_PRIVADOS.includes(alvo.bucket)) return url;
+  const caminho = alvo.path.split('/').map(encodeURIComponent).join('/');
+  return `${supabaseUrl}/storage/v1/object/public/${alvo.bucket}/${caminho}${alvo.v ? `?v=${encodeURIComponent(alvo.v)}` : ''}`;
 }
 
 // Percorre o payload (objetos/arrays) e aplica fn a cada STRING; se fn devolver
@@ -163,14 +197,17 @@ function urlDoProxy(base, p) {
  * (`${base}/api/media/<token>`). O DOM não segura URLs assinados
  * de vida curta → sem expiração à vista; o bucket continua privado. `base` é a
  * origem do backend (ex. http://localhost:3001).
+ * As que já vêm em forma de proxy (guardadas assim) saem com o token renovado (renovarUrlDeMidia): o da época vence em ~2 semanas.
  */
 function proxificarPayload(payload, base) {
   try {
     if (!payload || typeof payload !== 'object' || !base) return payload;
     percorrer(payload, (s) => {
       const p = parseUrlPublico(s);
-      if (!p) return undefined;
-      return urlDoProxy(base, p);
+      if (p) return urlDoProxy(base, p);
+      if (!s.includes('/api/media/')) return undefined;
+      const nova = renovarUrlDeMidia(s, base);
+      return nova !== s ? nova : undefined;
     });
     return payload;
   } catch (e) {
@@ -215,6 +252,8 @@ module.exports = {
   assinarPayload,
   proxificarPayload,
   urlDoProxy,
+  renovarUrlDeMidia,
+  urlGuardavelDeMidia,
   despublicarPayload,
   privatizarBuckets,
   BUCKETS_PRIVADOS,
