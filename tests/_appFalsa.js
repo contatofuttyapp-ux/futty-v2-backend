@@ -14,6 +14,8 @@
 const Module = require('node:module');
 const http = require('node:http');
 const https = require('node:https');
+const dns = require('node:dns');
+const tls = require('node:tls');
 const { criarSupabaseFalso } = require('./_supabaseFalso');
 
 // ─── 1. O .env de verdade nunca entra ──────────────────────────────────────────────────────────────────────────────────────────
@@ -77,6 +79,25 @@ function fecharARede() {
       };
     }
   }
+  // O medidor do banco (utils/saudeBanco.js) resolve o host e abre um TLS direto, sem passar pelo fetch: fecham-se os dois também.
+  const dnsPromessas = dns.promises;
+  const lookupReal = dnsPromessas.lookup.bind(dnsPromessas);
+  dnsPromessas.lookup = (host, ...resto) => {
+    if (!ehLocal(host)) {
+      tentativasDeRede.push(`dns ${host}`);
+      return Promise.reject(Object.assign(new Error('dns recusado (rede fechada pela bancada)'), { code: 'EREDEFECHADA' }));
+    }
+    return lookupReal(host, ...resto);
+  };
+  const tlsReal = tls.connect;
+  tls.connect = function protegido(...args) {
+    const host = typeof args[0] === 'object' ? args[0]?.host : args[1];
+    if (!ehLocal(host || 'localhost')) {
+      tentativasDeRede.push(`tls ${host}`);
+      throw Object.assign(new Error('conexão recusada (rede fechada pela bancada)'), { code: 'EREDEFECHADA' });
+    }
+    return tlsReal.apply(this, args);
+  };
 }
 
 // ─── 3. Storage de mentira ─────────────────────────────────────────────────────────────────────────────────────────────────────

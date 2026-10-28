@@ -87,6 +87,7 @@ const comprasRoutes = require('./routes/compras');
 const aviseMeRoutes = require('./routes/aviseMe');
 const figurinhaJobRoutes = require('./routes/figurinhaJob');
 const mensalidadeRoutes = require('./routes/mensalidade');
+const saudeBancoRoutes = require('./routes/saudeBanco');
 const geracaoJobs = require('./utils/geracaoJobs');
 const tarefasPintura = require('./utils/tarefasPintura');
 const { marcarFigurinhaStatus } = require('./services/inicio');
@@ -256,6 +257,7 @@ app.use(aviseMeRoutes); // POST /api/avise-me — lista de quem quer ser avisado
 app.use(figurinhaJobRoutes); // GET /api/figurinha/job/:id — em que pé está a pintura da figurinha em segundo plano
 app.use(comprasRoutes); // /api/compras — webhook do RevenueCat (sem sessão, segredo no header) e compras do app
 app.use(mensalidadeRoutes); // /api/teams/:slug/mensalidade — pagou / não pagou (sem dinheiro) + "Traga seu histórico" + lembretes
+app.use(saudeBancoRoutes); // GET /api/saude/banco — o medidor do caminho até o Supabase (só super-admin, só leitura)
 
 // 404 para rotas /api não encontradas
 app.use((req, res) => {
@@ -332,7 +334,10 @@ if (require.main === module) {
       const inicioAquecimento = Date.now();
       Promise.all([plataformaStore.ler(), gabineteStore.ler()])
         .then(() => console.log(`[Futty] Caches aquecidos (suspensões, gabinete) em ${Date.now() - inicioAquecimento} ms`))
-        .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message));
+        .catch((e) => console.error('[Futty] aquecimento dos caches:', e.message))
+        // Uma linha [saude-banco] com o caminho até o Supabase medido por partes (utils/saudeBanco.js) — depois do aquecimento,
+        // para não disputar a rede com ele. Só leitura; nunca derruba o arranque.
+        .finally(() => require('./utils/saudeBanco').medirNoArranque({ supabase, url: process.env.SUPABASE_URL }));
       // Quem tem recorte de miniatura (users.avatar_recorte) — carrega agora e relê a cada 2 min.
       require('./utils/recortesAvatar').iniciar(supabase);
       // A pintura por Cloud Tasks só liga com as três variáveis — diz no log em que modo subiu.
