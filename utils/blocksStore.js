@@ -4,9 +4,12 @@
 // db/migrations/041_user_blocks.sql). Bloquear NUNCA notifica o bloqueado (silencioso).
 const { supabase } = require('./db');
 
-/** Conjunto mútuo: ids que NÃO se devem ver com `userId` (bloqueei OU fui bloqueado). */
-async function conjuntoMutuo(userId) {
-  const { data } = await supabase
+/**
+ * Conjunto mútuo: ids que NÃO se devem ver com `userId` (bloqueei OU fui bloqueado).
+ * `linhas`: as de user_blocks que a ida única da Resenha já trouxe ({ blocker_id, blocked_id }); sem elas, a consulta de sempre.
+ */
+async function conjuntoMutuo(userId, linhas = null) {
+  const { data } = linhas ? { data: linhas } : await supabase
     .from('user_blocks')
     .select('blocker_id, blocked_id')
     .or(`blocker_id.eq.${userId},blocked_id.eq.${userId}`);

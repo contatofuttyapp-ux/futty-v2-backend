@@ -15,8 +15,9 @@ const COLUNAS_JOGOS = 'id, times_resultado, resultado_nivel, campeao_time_index,
 /** Mapas {user_id: n} dos 4 eixos, para um time, mais empates e derrotas (o resto do desfecho). Devolve também os gameIds.
  * @param {object} [opts]
  * @param {object[]} [opts.jogos] linhas de `games` deste time já lidas (têm de
- *   trazer COLUNAS_JOGOS); com elas, não se repete a consulta. */
-async function agregadosDaEquipa(teamId, { jogos } = {}) {
+ *   trazer COLUNAS_JOGOS); com elas, não se repete a consulta.
+ * @param {object[]} [opts.gols] as linhas de gols_jogadores ({ user_id, gols }) desses jogos, já lidas (a ida única do Ranking). */
+async function agregadosDaEquipa(teamId, { jogos, gols } = {}) {
   const golsMap = {}; const vitoriasMap = {}; const artilhariaMap = {}; const destaquesMap = {};
   const empatesMap = {}; const derrotasMap = {};
   const gameRows = Array.isArray(jogos)
@@ -25,7 +26,7 @@ async function agregadosDaEquipa(teamId, { jogos } = {}) {
   const gameIds = (gameRows || []).map((g) => g.id);
   if (!gameIds.length) return { golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap, gameIds };
 
-  const { data: golsRows } = await supabase.from('gols_jogadores').select('user_id, gols').in('game_id', gameIds);
+  const { data: golsRows } = gols ? { data: gols } : await supabase.from('gols_jogadores').select('user_id, gols').in('game_id', gameIds);
   for (const g of golsRows || []) if (g.user_id) golsMap[g.user_id] = (golsMap[g.user_id] || 0) + (g.gols || 0);
   for (const g of gameRows || []) {
     if (g.artilheiro_user_id) artilhariaMap[g.artilheiro_user_id] = (artilhariaMap[g.artilheiro_user_id] || 0) + 1;

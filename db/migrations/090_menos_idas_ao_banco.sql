@@ -17,6 +17,36 @@
 -- linha de aviso no log); depois dela, passa a usar a função em até 1 minuto. Rodar de novo não estraga nada.
 -- =====================================================================
 
+-- Os vínculos da pessoa (team_members + o time embutido), por created_at — a mesma leitura que o Início e a Resenha dividem no motor.
+-- Todo "embutido" (o time do vínculo, o jogo da presença, a pessoa do elenco…) é uma subconsulta POR LINHA, como o PostgREST faz: a ordem
+-- das linhas é a da tabela de fora, nunca a que um join escolheria.
+create or replace function public.vinculos_da_pessoa_json(p_uid uuid)
+returns json
+language sql
+stable
+security definer
+set search_path = public
+as $fn$
+  select coalesce((
+    select json_agg(json_build_object(
+      'team_id', tm.team_id, 'role', tm.role, 'ausente_proximo', tm.ausente_proximo, 'created_at', tm.created_at,
+      'teams', (select json_build_object(
+        'id', t.id, 'nome', t.nome, 'slug', t.slug, 'cor', t.cor, 'cidade', t.cidade, 'criado_por', t.criado_por, 'created_at', t.created_at,
+        'logo_url', t.logo_url, 'cor_fundo', t.cor_fundo, 'modo_visibilidade', t.modo_visibilidade, 'brilhante_ativo', t.brilhante_ativo,
+        'brilhante_kit', t.brilhante_kit, 'brilhante_limite', t.brilhante_limite, 'manto_proprio', t.manto_proprio,
+        'revotar_pedido_em', t.revotar_pedido_em, 'fuso', t.fuso, 'escudo_cor2', t.escudo_cor2, 'escudo_padrao', t.escudo_padrao,
+        'jogadores_por_time', t.jogadores_por_time, 'presenca_fundador_ate', t.presenca_fundador_ate)
+        from teams t where t.id = tm.team_id))
+      order by tm.created_at)
+    from team_members tm
+    where tm.user_id = p_uid), '[]'::json)
+$fn$;
+
+alter function public.vinculos_da_pessoa_json(uuid) owner to postgres;
+revoke all on function public.vinculos_da_pessoa_json(uuid) from public;
+revoke all on function public.vinculos_da_pessoa_json(uuid) from anon, authenticated;
+grant execute on function public.vinculos_da_pessoa_json(uuid) to service_role;
+
 create or replace function public.inicio_da_pessoa(p_uid uuid, p_agora timestamptz default now())
 returns json
 language plpgsql
@@ -58,21 +88,7 @@ begin
   select json_build_object(
     'versao', 1,
     -- ── os vínculos (team_members + o time embutido), por created_at ──
-    -- Todo "embutido" (o time do vínculo, o jogo da presença, a pessoa do elenco…) é uma subconsulta POR LINHA, como o PostgREST faz: a
-    -- ordem das linhas é a da tabela de fora, nunca a que um join escolheria.
-    'vinculos', coalesce((
-      select json_agg(json_build_object(
-        'team_id', tm.team_id, 'role', tm.role, 'ausente_proximo', tm.ausente_proximo, 'created_at', tm.created_at,
-        'teams', (select json_build_object(
-          'id', t.id, 'nome', t.nome, 'slug', t.slug, 'cor', t.cor, 'cidade', t.cidade, 'criado_por', t.criado_por, 'created_at', t.created_at,
-          'logo_url', t.logo_url, 'cor_fundo', t.cor_fundo, 'modo_visibilidade', t.modo_visibilidade, 'brilhante_ativo', t.brilhante_ativo,
-          'brilhante_kit', t.brilhante_kit, 'brilhante_limite', t.brilhante_limite, 'manto_proprio', t.manto_proprio,
-          'revotar_pedido_em', t.revotar_pedido_em, 'fuso', t.fuso, 'escudo_cor2', t.escudo_cor2, 'escudo_padrao', t.escudo_padrao,
-          'jogadores_por_time', t.jogadores_por_time, 'presenca_fundador_ate', t.presenca_fundador_ate)
-          from teams t where t.id = tm.team_id))
-        order by tm.created_at)
-      from team_members tm
-      where tm.user_id = p_uid), '[]'::json),
+    'vinculos', public.vinculos_da_pessoa_json(p_uid),
     'so_organiza', coalesce((select json_agg(tm.team_id) from team_members tm where tm.user_id = p_uid and tm.joga = false), '[]'::json),
     -- ── o "me" ──
     'perfil', (select json_build_object(
@@ -217,7 +233,176 @@ revoke all on function public.inicio_da_pessoa(uuid, timestamptz) from public;
 revoke all on function public.inicio_da_pessoa(uuid, timestamptz) from anon, authenticated;
 grant execute on function public.inicio_da_pessoa(uuid, timestamptz) to service_role;
 
--- O PostgREST passa a enxergar a função nova sem esperar.
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- A Resenha (/api/feed) numa ida só: os times da pessoa, os bloqueios, a página de jogos e de posts (as mesmas consultas, com o
+-- mesmo filtro, a mesma ordem e o mesmo "um a mais" da paginação, mais os do instante do cursor) e, de TODOS esses candidatos, as
+-- mídias, os comentários, as reações e as pessoas citadas. O motor escolhe a página e monta os cartões como antes; o que veio a mais
+-- (candidato que não entrou na página) ele simplesmente não usa.
+-- p_team: o filtro de um time (null = todos); p_quantos: quantos de cada lista; p_cursor_em: o instante do cursor (null = a 1ª página);
+-- p_no_instante: o cursor diz qual foi o último item (lê também os do mesmo instante).
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.feed_da_pessoa(p_uid uuid, p_team uuid, p_quantos integer, p_cursor_em timestamptz, p_no_instante boolean)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $fn$
+declare
+  v_times uuid[];
+  v_jogos json;
+  v_posts json;
+  v_jogos_inst json;
+  v_posts_inst json;
+  v_ids_jogos uuid[];
+  v_ids_posts uuid[];
+  v_ids_jogos_inst uuid[];
+  v_ids_posts_inst uuid[];
+  v_resultado json;
+begin
+  select coalesce(array_agg(tm.team_id), '{}') into v_times
+    from team_members tm
+   where tm.user_id = p_uid and exists (select 1 from teams t where t.id = tm.team_id) and (p_team is null or tm.team_id = p_team);
+
+  -- Jogo que entra na Resenha: tem resultado (campeão ou empate) ou só a foto do campeão.
+  select coalesce(array_agg(x.id), '{}'), coalesce(json_agg(json_build_object('id', x.id, 'team_id', x.team_id, 'data', x.data, 'local', x.local,
+      'times_resultado', x.times_resultado, 'campeao_time_index', x.campeao_time_index, 'time_vencedor', x.time_vencedor, 'placar_a', x.placar_a,
+      'placar_b', x.placar_b, 'campeao_foto_url', x.campeao_foto_url, 'artilheiro_user_id', x.artilheiro_user_id, 'artilheiro_gols', x.artilheiro_gols,
+      'destaque_user_id', x.destaque_user_id, 'destaque_titulo', x.destaque_titulo, 'rodada_user_id', x.rodada_user_id,
+      'rodada_foto_url', x.rodada_foto_url, 'created_at', x.created_at) order by x.created_at desc, x.id desc), '[]'::json)
+    into v_ids_jogos, v_jogos
+    from (select g.* from games g
+           where g.team_id = any (v_times)
+             and (g.campeao_time_index >= 0 or g.time_vencedor = 'empate' or g.campeao_foto_url is not null)
+             and (p_cursor_em is null or g.created_at < p_cursor_em)
+           order by g.created_at desc, g.id desc limit p_quantos) x;
+
+  select coalesce(array_agg(x.id), '{}'), coalesce(json_agg(json_build_object('id', x.id, 'team_id', x.team_id, 'author_id', x.author_id,
+      'body', x.body, 'tipo', x.tipo, 'conteudo', x.conteudo, 'created_at', x.created_at) order by x.created_at desc, x.id desc), '[]'::json)
+    into v_ids_posts, v_posts
+    from (select p.* from feed_posts p
+           where p.team_id = any (v_times) and (p_cursor_em is null or p.created_at < p_cursor_em)
+           order by p.created_at desc, p.id desc limit p_quantos) x;
+
+  if p_no_instante and p_cursor_em is not null then
+    select coalesce(array_agg(g.id), '{}'), coalesce(json_agg(json_build_object('id', g.id, 'team_id', g.team_id, 'data', g.data, 'local', g.local,
+        'times_resultado', g.times_resultado, 'campeao_time_index', g.campeao_time_index, 'time_vencedor', g.time_vencedor, 'placar_a', g.placar_a,
+        'placar_b', g.placar_b, 'campeao_foto_url', g.campeao_foto_url, 'artilheiro_user_id', g.artilheiro_user_id, 'artilheiro_gols', g.artilheiro_gols,
+        'destaque_user_id', g.destaque_user_id, 'destaque_titulo', g.destaque_titulo, 'rodada_user_id', g.rodada_user_id,
+        'rodada_foto_url', g.rodada_foto_url, 'created_at', g.created_at)), '[]'::json)
+      into v_ids_jogos_inst, v_jogos_inst
+      from games g
+     where g.team_id = any (v_times)
+       and (g.campeao_time_index >= 0 or g.time_vencedor = 'empate' or g.campeao_foto_url is not null)
+       and g.created_at = p_cursor_em;
+    select coalesce(array_agg(p.id), '{}'), coalesce(json_agg(json_build_object('id', p.id, 'team_id', p.team_id, 'author_id', p.author_id,
+        'body', p.body, 'tipo', p.tipo, 'conteudo', p.conteudo, 'created_at', p.created_at)), '[]'::json)
+      into v_ids_posts_inst, v_posts_inst
+      from feed_posts p
+     where p.team_id = any (v_times) and p.created_at = p_cursor_em;
+    v_ids_jogos := v_ids_jogos || v_ids_jogos_inst;
+    v_ids_posts := v_ids_posts || v_ids_posts_inst;
+  end if;
+
+  select json_build_object(
+    'versao', 1,
+    'vinculos', public.vinculos_da_pessoa_json(p_uid),
+    'bloqueios', coalesce((select json_agg(json_build_object('blocker_id', b.blocker_id, 'blocked_id', b.blocked_id))
+      from user_blocks b where b.blocker_id = p_uid or b.blocked_id = p_uid), '[]'::json),
+    'jogos', v_jogos,
+    'posts', v_posts,
+    'jogos_no_instante', coalesce(v_jogos_inst, '[]'::json),
+    'posts_no_instante', coalesce(v_posts_inst, '[]'::json),
+    'media', coalesce((select json_agg(json_build_object('post_id', m.post_id, 'url', m.url, 'media_type', m.media_type, 'position', m.position)
+      order by m.position asc) from feed_post_media m where m.post_id = any (v_ids_posts)), '[]'::json),
+    'comentarios_jogos', coalesce((select json_agg(json_build_object('parent_id', c.parent_id, 'author_id', c.author_id, 'body', c.body,
+      'created_at', c.created_at, 'users', (select json_build_object('id', u.id, 'nome', u.nome, 'nome_jogador', u.nome_jogador, 'avatar_url', u.avatar_url)
+        from users u where u.id = c.author_id)) order by c.created_at desc)
+      from comentarios c where c.parent_type = 'game' and c.parent_id = any (v_ids_jogos) and c.deleted_at is null), '[]'::json),
+    'comentarios_posts', coalesce((select json_agg(json_build_object('parent_id', c.parent_id, 'author_id', c.author_id, 'body', c.body,
+      'created_at', c.created_at, 'users', (select json_build_object('id', u.id, 'nome', u.nome, 'nome_jogador', u.nome_jogador, 'avatar_url', u.avatar_url)
+        from users u where u.id = c.author_id)) order by c.created_at desc)
+      from comentarios c where c.parent_type = 'post' and c.parent_id = any (v_ids_posts) and c.deleted_at is null), '[]'::json),
+    'reacoes_jogos', coalesce((select json_agg(json_build_object('target_id', r.target_id, 'user_id', r.user_id, 'emoji', r.emoji))
+      from reacoes r where r.target_type = 'game' and r.target_id = any (v_ids_jogos)), '[]'::json),
+    'reacoes_posts', coalesce((select json_agg(json_build_object('target_id', r.target_id, 'user_id', r.user_id, 'emoji', r.emoji))
+      from reacoes r where r.target_type = 'post' and r.target_id = any (v_ids_posts)), '[]'::json),
+    -- As pessoas citadas pelos candidatos: os prêmios dos jogos, os autores dos posts e os jogadores do post do campeão.
+    'usuarios', coalesce((select json_agg(json_build_object('id', u.id, 'nome', u.nome, 'nome_jogador', u.nome_jogador, 'email', u.email,
+      'avatar_url', u.avatar_url))
+      from users u
+      where u.id in (
+        select unnest(array[g.artilheiro_user_id, g.destaque_user_id, g.rodada_user_id]) from games g where g.id = any (v_ids_jogos)
+        union select p.author_id from feed_posts p where p.id = any (v_ids_posts)
+        union select (j ->> 'user_id')::uuid
+                from feed_posts p, jsonb_array_elements(case when jsonb_typeof(p.conteudo -> 'campeao' -> 'jogadores') = 'array'
+                                                             then p.conteudo -> 'campeao' -> 'jogadores' else '[]'::jsonb end) j
+               where p.id = any (v_ids_posts) and p.conteudo ->> 'tipo' = 'campeao_campeonato'
+                 and (j ->> 'user_id') ~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')), '[]'::json)
+  ) into v_resultado;
+
+  return v_resultado;
+end
+$fn$;
+
+alter function public.feed_da_pessoa(uuid, uuid, integer, timestamptz, boolean) owner to postgres;
+revoke all on function public.feed_da_pessoa(uuid, uuid, integer, timestamptz, boolean) from public;
+revoke all on function public.feed_da_pessoa(uuid, uuid, integer, timestamptz, boolean) from anon, authenticated;
+grant execute on function public.feed_da_pessoa(uuid, uuid, integer, timestamptz, boolean) to service_role;
+
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+-- O Ranking (/api/teams/:slug/ranking) numa ida só: o time pelo slug, o papel da pessoa nele e, do time, os membros (com a pessoa
+-- embutida), os votos, os jogos, quem só organiza, os gols e as presenças confirmadas. O motor confere a suspensão do time, quem é membro
+-- e quais jogos já aconteceram, e calcula o ranking como antes.
+-- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+create or replace function public.ranking_do_time(p_uid uuid, p_slug text)
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $fn$
+declare
+  v_time uuid;
+  v_resultado json;
+begin
+  select t.id into v_time from teams t where t.slug = p_slug;
+
+  select json_build_object(
+    'versao', 1,
+    'time', (select json_build_object('id', t.id, 'slug', t.slug, 'nome', t.nome, 'cor', t.cor, 'fuso', t.fuso, 'escudo_cor2', t.escudo_cor2,
+        'escudo_padrao', t.escudo_padrao, 'jogadores_por_time', t.jogadores_por_time, 'presenca_fundador_ate', t.presenca_fundador_ate)
+      from teams t where t.id = v_time),
+    'papel', (select tm.role from team_members tm where tm.team_id = v_time and tm.user_id = p_uid limit 1),
+    'membros', coalesce((select json_agg(json_build_object('user_id', tm.user_id, 'categoria', tm.categoria, 'visivel_ranking', tm.visivel_ranking,
+        'ativo', tm.ativo, 'users', (select json_build_object('id', u.id, 'nome', u.nome, 'nome_jogador', u.nome_jogador, 'email', u.email,
+          'avatar_url', u.avatar_url, 'foto_url', u.foto_url, 'avatar_generico', u.avatar_generico, 'cor_frame', u.cor_frame)
+          from users u where u.id = tm.user_id)))
+      from team_members tm where tm.team_id = v_time), '[]'::json),
+    'votos', coalesce((select json_agg(json_build_object('para_user_id', v.para_user_id, 'de_user_id', v.de_user_id, 'nota10', v.nota10))
+      from votes v where v.team_id = v_time), '[]'::json),
+    'jogos', coalesce((select json_agg(json_build_object('id', g.id, 'times_resultado', g.times_resultado, 'resultado_nivel', g.resultado_nivel,
+        'campeao_time_index', g.campeao_time_index, 'time_vencedor', g.time_vencedor, 'artilheiro_user_id', g.artilheiro_user_id,
+        'destaque_user_id', g.destaque_user_id, 'data', g.data, 'status', g.status, 'cancelado', g.cancelado))
+      from games g where g.team_id = v_time), '[]'::json),
+    'organizam', coalesce((select json_agg(tm.user_id) from team_members tm where tm.team_id = v_time and tm.joga = false), '[]'::json),
+    'gols', coalesce((select json_agg(json_build_object('user_id', gj.user_id, 'gols', gj.gols))
+      from gols_jogadores gj where gj.game_id in (select g.id from games g where g.team_id = v_time)), '[]'::json),
+    -- As presenças confirmadas de TODOS os jogos do time: o motor fica com as dos jogos que já aconteceram.
+    'presencas', coalesce((select json_agg(json_build_object('game_id', gp.game_id, 'user_id', gp.user_id))
+      from game_players gp where gp.confirmado = true and gp.game_id in (select g.id from games g where g.team_id = v_time)), '[]'::json)
+  ) into v_resultado;
+
+  return v_resultado;
+end
+$fn$;
+
+alter function public.ranking_do_time(uuid, text) owner to postgres;
+revoke all on function public.ranking_do_time(uuid, text) from public;
+revoke all on function public.ranking_do_time(uuid, text) from anon, authenticated;
+grant execute on function public.ranking_do_time(uuid, text) to service_role;
+
+-- O PostgREST passa a enxergar as funções novas sem esperar.
 notify pgrst, 'reload schema';
 
 -- =====================================================================

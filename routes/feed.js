@@ -17,8 +17,13 @@ const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado, resultadoJaA
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 const { STORAGE_BUCKET, reacoesParaTargets } = require('../utils/ajudaDaResenha');
 const { obterVinculosDaPessoa } = require('../services/inicio'); // os times da pessoa, do mesmo cache do Início
+const { criarIdaUnica } = require('../utils/idaUnica');
 
 const router = express.Router();
+
+// A Resenha numa ida só (utils/idaUnica.js, migração 090): a função do banco devolve as linhas das ~10 consultas da página. Sem ela
+// (antes da migração, ou se falhar), o caminho antigo, igual a antes.
+const idaDaResenha = criarIdaUnica('feed_da_pessoa', { cliente: supabase });
 
 // Tipos de média aceites por contexto.
 const POST_MEDIA = ['image', 'gif', 'video'];
@@ -41,8 +46,9 @@ const PAGINA_FEED_MAX = 50;
  * Para um conjunto de parents do mesmo tipo, devolve um mapa
  * parentId -> { recentes: [comentario...], total } com os 2 comentários mais
  * recentes de cada. UMA query por tipo (ordenada DESC), agrupada em memória — não N+1.
+ * `linhas`: as que a ida única da Resenha já trouxe (de todos os candidatos, na mesma ordem; as de fora de `parentIds` não contam).
  */
-async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados) {
+async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados, linhas = null) {
   const map = {};
   for (const id of parentIds) map[id] = { recentes: [], total: 0 };
   if (!parentIds.length) return map;
@@ -50,7 +56,7 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
   // O autor vem EMBUTIDO: assim a query de `users` cobre só os jogos e os posts, que já se conhecem, e as
   // duas correm na mesma onda. Se os ids dos autores dos comentários só se soubessem depois desta query,
   // a de `users` teria de esperar por ela — uma ida em série a mais.
-  const { data } = await supabase
+  const { data } = linhas ? { data: linhas } : await supabase
     .from('comentarios')
     .select('parent_id, author_id, body, created_at, users ( id, nome, nome_jogador, avatar_url )')
     .eq('parent_type', parentType)
@@ -131,39 +137,50 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
+    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (ver lerCursor).
+    const paginado = req.query.limite != null;
+    const limite = paginado ? Math.min(PAGINA_FEED_MAX, Math.max(1, parseInt(req.query.limite, 10) || PAGINA_FEED)) : LIMITE_FEED;
+    const cursor = paginado ? lerCursor(req.query.antes) : null;
+    const quantos = paginado ? limite + 1 : LIMITE_FEED;
+    const filtro = req.query.team_id;
+
+    // A ida única: os vínculos, os bloqueios, os candidatos da página e os detalhes de todos eles, de uma vez (fases `rpc` e
+    // `montagem`). Sem ela (`lote` null), as consultas de sempre, em 3 ondas — o mesmo código monta a página nos dois casos.
+    const lote = await idaDaResenha.chamar({
+      p_uid: req.user.id, p_team: ehUuid(filtro) ? filtro : null, p_quantos: quantos, p_cursor_em: cursor?.em ?? null, p_no_instante: !!cursor?.tipo,
+    });
+    if (lote) marcarFase(res, 'rpc');
+
     // Times do usuário, do cache dos times da pessoa (o mesmo do Início: 60 s, esvaziado a cada escrita em times/vínculos —
     // utils/vinculosDaPessoa.js); o time vem com o fuso (o jogo da Resenha é lido no relógio do campo). Se o cache falhar, a leitura
     // própria de sempre.
     let memberships;
-    try {
-      ({ vinculos: memberships } = await obterVinculosDaPessoa(req.user.id));
-    } catch {
-      ({ data: memberships } = await lerComFuso((novas) => supabase
-        .from('team_members')
-        .select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
-        .eq('user_id', req.user.id)));
+    if (lote) {
+      memberships = lote.vinculos;
+    } else {
+      try {
+        ({ vinculos: memberships } = await obterVinculosDaPessoa(req.user.id));
+      } catch {
+        ({ data: memberships } = await lerComFuso((novas) => supabase
+          .from('team_members')
+          .select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
+          .eq('user_id', req.user.id)));
+      }
+      marcarFase(res, 'equipas');
     }
-    marcarFase(res, 'equipas');
     const teamMap = {};
     for (const m of memberships || []) {
       if (m.teams) teamMap[m.team_id] = m.teams;
     }
 
     let teamIds = Object.keys(teamMap);
-    const filtro = req.query.team_id;
     if (filtro) {
       if (!teamMap[filtro]) throw foraDoTime();
       teamIds = [filtro];
     }
     if (!teamIds.length) return res.json({ items: [] });
 
-    // As idas ao banco saem em 3 ondas, não EM SÉRIE.
-    //
-    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (ver lerCursor).
-    const paginado = req.query.limite != null;
-    const limite = paginado ? Math.min(PAGINA_FEED_MAX, Math.max(1, parseInt(req.query.limite, 10) || PAGINA_FEED)) : LIMITE_FEED;
-    const cursor = paginado ? lerCursor(req.query.antes) : null;
-    const quantos = paginado ? limite + 1 : LIMITE_FEED;
+    // As idas ao banco saem em 3 ondas, não EM SÉRIE (sem a ida única).
     const jogosDaResenha = () => supabase
       .from('games')
       .select(
@@ -181,13 +198,14 @@ router.get(
       .in('team_id', teamIds);
     // A ordem é a mesma de compararItens (instante, e no empate o id), para o "um a mais" de cada lista cortar no lugar certo.
     const emOrdem = (q) => q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(quantos);
-    let consultaJogos = emOrdem(jogosDaResenha());
-    let consultaPosts = emOrdem(postsDaResenha());
+    // Com a ida única nada disto é montado (as linhas já vieram).
+    let consultaJogos = lote ? null : emOrdem(jogosDaResenha());
+    let consultaPosts = lote ? null : emOrdem(postsDaResenha());
     // Os itens do MESMO instante do cursor (só quando o cursor diz qual foi o último): lidos à parte, na mesma onda, e deles fica o
     // que vem depois do cursor na ordem. Quase sempre volta vazio.
     let noInstanteJogos = Promise.resolve({ data: [] });
     let noInstantePosts = Promise.resolve({ data: [] });
-    if (cursor) {
+    if (cursor && !lote) {
       consultaJogos = consultaJogos.lt('created_at', cursor.em);
       consultaPosts = consultaPosts.lt('created_at', cursor.em);
       if (cursor.tipo) {
@@ -201,13 +219,13 @@ router.get(
     const [bloqueados, jogosRes, postsRes, empJogos, empPosts] = await Promise.all([
       // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
       // este usuário não aparece na Resenha dele — nem posts nem comentários.
-      conjuntoMutuo(req.user.id),
-      consultaJogos,
-      consultaPosts,
-      noInstanteJogos,
-      noInstantePosts,
+      conjuntoMutuo(req.user.id, lote ? lote.bloqueios : null),
+      lote ? { data: lote.jogos } : consultaJogos,
+      lote ? { data: lote.posts } : consultaPosts,
+      lote ? { data: lote.jogos_no_instante } : noInstanteJogos,
+      lote ? { data: lote.posts_no_instante } : noInstantePosts,
     ]);
-    marcarFase(res, 'jogos+posts');
+    if (!lote) marcarFase(res, 'jogos+posts');
     if (jogosRes.error) throw new HttpError(500, jogosRes.error.message);
     if (postsRes.error) throw new HttpError(500, postsRes.error.message);
     const depoisDoCursor = (tipo) => (r) => !cursor?.tipo || compararItens({ tipo, r }, { tipo: cursor.tipo, r: { created_at: cursor.em, id: cursor.id } }) > 0;
@@ -245,20 +263,21 @@ router.get(
 
     // Onda 3: tudo o que depende dos ids acima, de uma vez só — média, os 2
     // comentários recentes de cada lado, as reações de cada lado e os users.
+    // Com a ida única, os detalhes vieram de TODOS os candidatos: só os da página são lidos abaixo (os mapas são por id).
     const [mediaRes, comGames, comPosts, reacGames, reacPosts, usersRes] = await Promise.all([
-      postIds.length
+      lote ? { data: lote.media } : postIds.length
         ? supabase.from('feed_post_media').select('post_id, url, media_type, position').in('post_id', postIds).order('position', { ascending: true })
         : Promise.resolve({ data: [] }),
-      comentariosRecentesParaTargets('game', gameIds, bloqueados),
-      comentariosRecentesParaTargets('post', postIds, bloqueados),
-      reacoesParaTargets('game', gameIds, req.user.id),
-      reacoesParaTargets('post', postIds, req.user.id),
-      idsConhecidos.size
+      comentariosRecentesParaTargets('game', gameIds, bloqueados, lote ? lote.comentarios_jogos : null),
+      comentariosRecentesParaTargets('post', postIds, bloqueados, lote ? lote.comentarios_posts : null),
+      reacoesParaTargets('game', gameIds, req.user.id, lote ? lote.reacoes_jogos : null),
+      reacoesParaTargets('post', postIds, req.user.id, lote ? lote.reacoes_posts : null),
+      lote ? { data: lote.usuarios } : idsConhecidos.size
         ? supabase.from('users').select('id, nome, nome_jogador, email, avatar_url').in('id', [...idsConhecidos])
         : Promise.resolve({ data: [] }),
     ]);
 
-    marcarFase(res, 'detalhes');
+    marcarFase(res, lote ? 'montagem' : 'detalhes');
 
     const mediaByPost = {};
     for (const m of mediaRes.data || []) {
@@ -353,6 +372,8 @@ router.get(
     res.json(paginado ? { items, proximo } : { items });
   })
 );
+// A prova de equivalência (a bancada de Postgres da rodada) liga e desliga a função entre um pedido e outro.
+router.idaDaResenha = idaDaResenha;
 
 // =====================================================================
 // POSTS EDITORIAIS

@@ -38,13 +38,14 @@ async function targetTeamId(targetType, targetId) {
 /**
  * Para um conjunto de targets do mesmo tipo, devolve um mapa
  * id -> { contagem: { emoji: N }, minha: emoji|null } com a reação do user.
+ * `linhas`: as de `reacoes` que a ida única da Resenha já trouxe (as de todos os candidatos; as de fora de `targetIds` não contam).
  */
-async function reacoesParaTargets(targetType, targetIds, userId) {
+async function reacoesParaTargets(targetType, targetIds, userId, linhas = null) {
   const map = {};
   for (const id of targetIds) map[id] = { contagem: {}, minha: null };
   if (!targetIds.length) return map;
 
-  const { data } = await supabase
+  const { data } = linhas ? { data: linhas } : await supabase
     .from('reacoes')
     .select('target_id, user_id, emoji')
     .eq('target_type', targetType)

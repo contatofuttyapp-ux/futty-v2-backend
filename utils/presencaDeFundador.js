@@ -76,13 +76,16 @@ function presencasPorPessoa(linhas) {
 }
 
 /** Os jogos de fundador de UM time (ids). Sem data de corte, [] com uma leitura só. */
-async function jogosDeFundadorDoTime(teamId, { agora = Date.now() } = {}) {
+// `time` ({ presenca_fundador_ate, fuso }) e `jogos` (os do time, com id, data, status e cancelado): o que a ida única do Ranking já trouxe.
+async function jogosDeFundadorDoTime(teamId, { agora = Date.now(), time: timeLido = null, jogos: jogosLidos = null } = {}) {
   if (!teamId) return [];
-  const { data: time, error } = await supabase.from('teams').select('presenca_fundador_ate, fuso').eq('id', teamId).maybeSingle();
+  const { data: time, error } = timeLido
+    ? { data: timeLido, error: null }
+    : await supabase.from('teams').select('presenca_fundador_ate, fuso').eq('id', teamId).maybeSingle();
   if (error) { avisar(error.message); return []; }
   const corte = corteDaLinha(time);
   if (!corte) return [];
-  const { data: jogos } = await supabase.from('games').select('id, data, status, cancelado').eq('team_id', teamId);
+  const { data: jogos } = jogosLidos ? { data: jogosLidos } : await supabase.from('games').select('id, data, status, cancelado').eq('team_id', teamId);
   return jogosDeFundador(jogos, corte, agora);
 }
 

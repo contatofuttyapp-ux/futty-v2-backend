@@ -18,7 +18,14 @@ const { jogadoresDoCampeao, resultadoDoJogador } = require('../utils/resultadoDo
 const { jogosDeFundadorDoTime, comPresencaDeFundador, presencasPorPessoa } = require('../utils/presencaDeFundador');
 const { jogoAconteceu, idsDosJogosQueAconteceram } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 
+const plataformaStore = require('../utils/plataformaStore'); // time suspenso some do ranking, como no getTeamBySlug
+const { criarIdaUnica } = require('../utils/idaUnica');
+
 const router = express.Router();
+
+// O Ranking numa ida só (utils/idaUnica.js, migração 090): a função do banco devolve as linhas das ~9 consultas, em até 5 ondas, do
+// ranking. Sem ela (antes da migração, ou se falhar), o caminho antigo, igual a antes.
+const idaDoRanking = criarIdaUnica('ranking_do_time', { cliente: supabase });
 
 // Mínimo de votos para a nota aparecer.
 const MIN_VOTOS = 3;
@@ -31,10 +38,12 @@ const MIN_VOTOS = 3;
  *   em vez de mandar ler a mesma tabela outra vez.
  * @param {Promise<string[]>} [opts.jogosFundadorPromessa] os jogos de presença de fundador
  *   (utils/presencaDeFundador.js) já em voo, pelo mesmo motivo.
+ * @param {object} [opts.lido] o que a ida única do Ranking já trouxe do time (membros, votos, jogos, organizam, time, gols, presencas):
+ *   as contas abaixo são as mesmas, só não perguntam ao banco.
  * @returns {Promise<object[]>} ranking ordenado por score DESC com posicao.
  */
-async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorPromessa } = {}) {
-  const colunaNota = await colunaDaNota();
+async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorPromessa, lido = null } = {}) {
+  const colunaNota = lido ? null : await colunaDaNota();
   // Membros, votos e jogos só dependem de teamId — nenhum depende do resultado dos outros, então saem
   // juntos em vez de awaits em série.
   const [{ data: membros }, { data: votos }, { data: jogos }, organizam, jogosFundador] = await Promise.all([
@@ -42,27 +51,30 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
     // JÁ NÃO se leem de team_members (colunas legado, seed de testes, nunca alimentadas) —
     // são calculados na hora a partir da FONTE (gols_jogadores + resultados + artilheiro/
     // destaque), mais abaixo. Zero drift, zero DDL, sempre verdadeiro.
-    supabase
+    lido ? { data: lido.membros } : supabase
       .from('team_members')
       .select('user_id, categoria, visivel_ranking, ativo, users ( id, nome, nome_jogador, email, avatar_url, foto_url, avatar_generico, cor_frame )')
       .eq('team_id', teamId),
     // Votos do time (todos) — média + o meu voto por jogador.
-    supabase.from('votes').select(`para_user_id, de_user_id, ${colunaNota}`).eq('team_id', teamId),
-    jogosPromessa || supabase.from('games').select(`${COLUNAS_JOGOS}, data, status, cancelado`).eq('team_id', teamId),
-    idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
-    jogosFundadorPromessa || jogosDeFundadorDoTime(teamId), // presença de fundador: todo membro presente nos jogos até a data de corte do time
+    lido ? { data: lido.votos } : supabase.from('votes').select(`para_user_id, de_user_id, ${colunaNota}`).eq('team_id', teamId),
+    lido ? { data: lido.jogos } : jogosPromessa || supabase.from('games').select(`${COLUNAS_JOGOS}, data, status, cancelado`).eq('team_id', teamId),
+    lido ? new Set((lido.organizam || []).filter(Boolean)) : idsQueSoOrganizam(teamId), // quem só organiza o time não aparece no ranking
+    // presença de fundador: todo membro presente nos jogos até a data de corte do time
+    lido ? jogosDeFundadorDoTime(teamId, { time: lido.time, jogos: lido.jogos }) : jogosFundadorPromessa || jogosDeFundadorDoTime(teamId),
   ]);
   // A presença só conta em jogo que já aconteceu: confirmar num jogo de amanhã ainda não é ter jogado.
   const gameIds = idsDosJogosQueAconteceram(jogos);
+  const aconteceram = new Set(gameIds);
 
   // Os gols (dentro dos agregados) e os jogos por jogador só precisam dos gameIds, então saem juntos em
   // vez de em série.
   const [{ golsMap, vitoriasMap, artilhariaMap, destaquesMap, empatesMap, derrotasMap }, { data: gps }] = await Promise.all([
     // ── RANKING VIVO — os 4 eixos calculados da FONTE (helper compartilhado; uma verdade). ──
-    agregadosDaEquipa(teamId, { jogos: jogos || [] }),
+    agregadosDaEquipa(teamId, { jogos: jogos || [], gols: lido ? lido.gols : undefined }),
     // Jogos TOTAIS por jogador (all-time, confirmados) — base dos RÁCIOS por jogo e da
-    // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.)
-    gameIds.length
+    // FIDELIDADE. (Ranking v2: tudo por jogo, sem janela de 30 dias.) A ida única trouxe as de todos os jogos do time: ficam as
+    // dos que já aconteceram, como na consulta.
+    lido ? { data: (lido.presencas || []).filter((gp) => aconteceram.has(gp.game_id)) } : gameIds.length
       ? supabase.from('game_players').select('game_id, user_id').in('game_id', gameIds).eq('confirmado', true)
       : { data: [] },
   ]);
@@ -167,6 +179,17 @@ async function buildRanking(teamId, meUserId, { jogosPromessa, jogosFundadorProm
   return base.map((b, i) => ({ ...b, posicao: i + 1 }));
 }
 
+/**
+ * O mesmo que o requireTeamMember (utils/db.js), a partir do que a ida única trouxe: time suspenso ou inexistente → 404; quem não é do
+ * time → 403 (FORA_DO_TIME). O time sai com as mesmas colunas e na mesma ordem do getTeamBySlug.
+ */
+async function membroPeloLote(lote, userId) {
+  const team = lote.time && !(await plataformaStore.equipaSuspensa(lote.time.id)) ? lote.time : null;
+  if (!team) throw new HttpError(404, 'Time não encontrado.');
+  if (!lote.papel) throw foraDoTime();
+  return { team, role: lote.papel };
+}
+
 /** O jogador esteve no time campeão deste jogo? (times_resultado + campeao_time_index) */
 function noTimeCampeao(g, userId) {
   return jogadoresDoCampeao(g).some((j) => j.user_id === userId);
@@ -222,10 +245,13 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
-    const { team, role } = await requireTeamMember(req.params.slug, req.user.id);
-    marcarFase(res, 'time');
-    const ranking = await buildRanking(team.id, req.user.id);
-    marcarFase(res, 'ranking');
+    // A ida única (fases `rpc` e `montagem`): o time, o papel e tudo o que o ranking lê, de uma vez. Sem ela, as consultas de sempre.
+    const lote = await idaDoRanking.chamar({ p_uid: req.user.id, p_slug: String(req.params.slug) });
+    if (lote) marcarFase(res, 'rpc');
+    const { team, role } = lote ? await membroPeloLote(lote, req.user.id) : await requireTeamMember(req.params.slug, req.user.id);
+    if (!lote) marcarFase(res, 'time');
+    const ranking = await buildRanking(team.id, req.user.id, { lido: lote });
+    marcarFase(res, lote ? 'montagem' : 'ranking');
     // O voto que a pessoa deu volta na régua do app dela (estrelas para as telas antigas); a média é a mesma para todos.
     res.json({ team: { ...team, role }, ranking: ranking.map((r) => ({ ...r, minha_nota: notaParaOPedido(req, r.minha_nota) })) });
   })
@@ -599,4 +625,6 @@ router.delete(
 );
 
 module.exports = router;
+// A prova de equivalência (a bancada de Postgres da rodada) liga e desliga a função entre um pedido e outro.
+router.idaDoRanking = idaDoRanking;
 module.exports.buildRanking = buildRanking;
