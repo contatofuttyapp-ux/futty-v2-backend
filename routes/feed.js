@@ -74,6 +74,46 @@ async function comentariosRecentesParaTargets(parentType, parentIds, bloqueados)
 // FEED
 // =====================================================================
 
+// ─── A ordem da Resenha e o cursor da página seguinte ─────────────────────────────────────────────────────────────────────
+// A ordem é TOTAL: o instante de criação (mais novo primeiro), e no empate o tipo (jogo antes de post) e o id. Só o instante não
+// bastava como cursor: linhas nascidas na mesma transação têm o MESMO created_at, e "antes do instante do último" pulava as que
+// ficaram do outro lado da página. O cursor é "instante|tipo|id" do último item mandado; o antigo (só o instante, que um app já
+// publicado pode ter guardado) continua valendo do jeito de antes.
+const ORDEM_DO_TIPO = { jogo: 0, post: 1 };
+const INSTANTE_DO_BANCO = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}(:?\d{2})?)?$/;
+
+/** O instante em MICROssegundos (o Postgres guarda 6 casas; o Date do JS, 3): dois do mesmo milissegundo ainda se ordenam. */
+function instante(iso) {
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return -Infinity;
+  const fracao = /\.(\d+)/.exec(String(iso))?.[1] || '';
+  return ms * 1000 + Number(`${fracao}000000`.slice(3, 6));
+}
+
+/** Negativo = `a` vem antes (é mais novo). `a` e `b`: { tipo: 'jogo'|'post', r: { created_at, id } }. */
+function compararItens(a, b) {
+  const d = instante(b.r.created_at) - instante(a.r.created_at);
+  if (d) return d;
+  const t = ORDEM_DO_TIPO[a.tipo] - ORDEM_DO_TIPO[b.tipo];
+  if (t) return t;
+  const [x, y] = [String(a.r.id), String(b.r.id)];
+  return x > y ? -1 : x < y ? 1 : 0;
+}
+
+const escreverCursor = (item) => `${item.r.created_at}|${item.tipo}|${item.r.id}`;
+
+/** { em, tipo, id } do cursor novo; { em, tipo: null, id: null } do antigo; null se não for cursor nenhum. */
+function lerCursor(bruto) {
+  if (bruto == null || bruto === '') return null;
+  const [em, tipo, id] = String(bruto).split('|');
+  if (tipo != null) {
+    if (INSTANTE_DO_BANCO.test(em) && ORDEM_DO_TIPO[tipo] != null && /^[\w-]{1,64}$/.test(id || '')) return { em, tipo, id };
+    return null;
+  }
+  const ms = Date.parse(em);
+  return Number.isNaN(ms) ? null : { em: new Date(ms).toISOString(), tipo: null, id: null };
+}
+
 // O post do campeão do campeonato (utils/postDoCampeao.js): linha de tipo 'post' com o retrato em `conteudo`.
 const ehPostDoCampeao = (p) => p.conteudo?.tipo === 'campeao_campeonato';
 const conteudoDoCampeaoComAvatares = (conteudo, avatarOf) => ({
@@ -119,14 +159,12 @@ router.get(
 
     // As idas ao banco saem em 3 ondas, não EM SÉRIE.
     //
-    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais;
-    // `antes` é o cursor (created_at).
+    // Paginação (opt-in): cada lista pede UM a mais que a página, para saber se há mais; `antes` é o cursor (ver lerCursor).
     const paginado = req.query.limite != null;
     const limite = paginado ? Math.min(PAGINA_FEED_MAX, Math.max(1, parseInt(req.query.limite, 10) || PAGINA_FEED)) : LIMITE_FEED;
-    const antesBruto = paginado && req.query.antes ? Date.parse(String(req.query.antes)) : NaN;
-    const antes = Number.isNaN(antesBruto) ? null : new Date(antesBruto).toISOString();
+    const cursor = paginado ? lerCursor(req.query.antes) : null;
     const quantos = paginado ? limite + 1 : LIMITE_FEED;
-    let consultaJogos = supabase
+    const jogosDaResenha = () => supabase
       .from('games')
       .select(
         'id, team_id, data, local, times_resultado, campeao_time_index, time_vencedor, placar_a, placar_b, campeao_foto_url, ' +
@@ -136,45 +174,55 @@ router.get(
       .in('team_id', teamIds)
       // Entra na Resenha o jogo que tem resultado (campeão marcado OU empate explícito; `>= 0` é "não nulo" para o índice) e também o
       // jogo antigo que só tem a foto do campeão: o cartão mostra a foto sem dizer quem ganhou, e o ranking não ganha vitória nenhuma.
-      .or('campeao_time_index.gte.0,time_vencedor.eq.empate,campeao_foto_url.not.is.null')
-      .order('created_at', { ascending: false })
-      .limit(quantos);
-    let consultaPosts = supabase
+      .or('campeao_time_index.gte.0,time_vencedor.eq.empate,campeao_foto_url.not.is.null');
+    const postsDaResenha = () => supabase
       .from('feed_posts')
       .select('id, team_id, author_id, body, tipo, conteudo, created_at')
-      .in('team_id', teamIds)
-      .order('created_at', { ascending: false })
-      .limit(quantos);
-    if (antes) {
-      consultaJogos = consultaJogos.lt('created_at', antes);
-      consultaPosts = consultaPosts.lt('created_at', antes);
+      .in('team_id', teamIds);
+    // A ordem é a mesma de compararItens (instante, e no empate o id), para o "um a mais" de cada lista cortar no lugar certo.
+    const emOrdem = (q) => q.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(quantos);
+    let consultaJogos = emOrdem(jogosDaResenha());
+    let consultaPosts = emOrdem(postsDaResenha());
+    // Os itens do MESMO instante do cursor (só quando o cursor diz qual foi o último): lidos à parte, na mesma onda, e deles fica o
+    // que vem depois do cursor na ordem. Quase sempre volta vazio.
+    let noInstanteJogos = Promise.resolve({ data: [] });
+    let noInstantePosts = Promise.resolve({ data: [] });
+    if (cursor) {
+      consultaJogos = consultaJogos.lt('created_at', cursor.em);
+      consultaPosts = consultaPosts.lt('created_at', cursor.em);
+      if (cursor.tipo) {
+        noInstanteJogos = jogosDaResenha().eq('created_at', cursor.em);
+        noInstantePosts = postsDaResenha().eq('created_at', cursor.em);
+      }
     }
 
     // Onda 2: o bloqueio, os jogos e os posts não dependem uns dos outros — só
     // de teamIds. (A filtragem por bloqueio é feita em memória logo a seguir.)
-    const [bloqueados, jogosRes, postsRes] = await Promise.all([
+    const [bloqueados, jogosRes, postsRes, empJogos, empPosts] = await Promise.all([
       // Bloqueio entre jogadores (Apple UGC 1.2): quem bloqueou/foi bloqueado por
       // este usuário não aparece na Resenha dele — nem posts nem comentários.
       conjuntoMutuo(req.user.id),
       consultaJogos,
       consultaPosts,
+      noInstanteJogos,
+      noInstantePosts,
     ]);
     marcarFase(res, 'jogos+posts');
     if (jogosRes.error) throw new HttpError(500, jogosRes.error.message);
     if (postsRes.error) throw new HttpError(500, postsRes.error.message);
-    let games = jogosRes.data || [];
-    let posts = (postsRes.data || []).filter((p) => !bloqueados.has(p.author_id));
+    const depoisDoCursor = (tipo) => (r) => !cursor?.tipo || compararItens({ tipo, r }, { tipo: cursor.tipo, r: { created_at: cursor.em, id: cursor.id } }) > 0;
+    let games = [...(empJogos.data || []).filter(depoisDoCursor('jogo')), ...(jogosRes.data || [])];
+    let posts = [...(empPosts.data || []).filter(depoisDoCursor('post')), ...(postsRes.data || [])].filter((p) => !bloqueados.has(p.author_id));
 
     // Página (só no modo paginado): os `limite` mais recentes dos dois tipos JUNTOS. Cada lista trouxe até limite+1, então o
     // top-`limite` da mistura está inteiro dentro delas. Daqui para baixo (comentários, reações, mídias) só trabalha a página —
     // é onde o feed pesava. `proximo` é o cursor da página seguinte (null = acabou).
     let proximo = null;
     if (paginado) {
-      const todos = [...games.map((r) => ({ tipo: 'jogo', r })), ...posts.map((r) => ({ tipo: 'post', r }))]
-        .sort((a, b) => new Date(b.r.created_at).getTime() - new Date(a.r.created_at).getTime());
+      const todos = [...games.map((r) => ({ tipo: 'jogo', r })), ...posts.map((r) => ({ tipo: 'post', r }))].sort(compararItens);
       const pagina = todos.slice(0, limite);
       const temMais = todos.length > limite || (jogosRes.data || []).length > limite || (postsRes.data || []).length > limite;
-      if (temMais && pagina.length) proximo = pagina[pagina.length - 1].r.created_at;
+      if (temMais && pagina.length) proximo = escreverCursor(pagina[pagina.length - 1]);
       games = pagina.filter((x) => x.tipo === 'jogo').map((x) => x.r);
       posts = pagina.filter((x) => x.tipo === 'post').map((x) => x.r);
     }
@@ -300,10 +348,8 @@ router.get(
       };
     });
 
-    // Mistura jogos + posts e ordena por created_at DESC
-    const items = [...jogoItems, ...postItems].sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    // Mistura jogos + posts na ordem da Resenha (compararItens: a mesma do cursor).
+    const items = [...jogoItems, ...postItems].sort((a, b) => compararItens({ tipo: a.kind, r: a }, { tipo: b.kind, r: b }));
     res.json(paginado ? { items, proximo } : { items });
   })
 );

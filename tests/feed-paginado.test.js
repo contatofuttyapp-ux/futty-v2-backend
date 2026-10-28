@@ -58,7 +58,8 @@ test('a 1ª página traz os 20 mais recentes de jogos e posts JUNTOS, em ordem, 
   const datas = r.json.items.map((i) => new Date(i.created_at).getTime());
   assert.deepEqual(datas, [...datas].sort((a, b) => b - a), 'mais recente primeiro');
   assert.ok(r.json.items.some((i) => i.kind === 'jogo') && r.json.items.some((i) => i.kind === 'post'), 'os dois tipos misturados');
-  assert.equal(r.json.proximo, r.json.items[19].created_at, 'o cursor é o created_at do último da página');
+  const ultimo = r.json.items[19];
+  assert.equal(r.json.proximo, `${ultimo.created_at}|${ultimo.kind}|${ultimo.id}`, 'o cursor é o instante, o tipo e o id do último da página');
   // O post bloqueado (post-3, do CHATO) só some se houver bloqueio: aqui ninguém bloqueou ninguém.
   assert.ok(chaves(r.json.items).includes('post:post-3'));
 });
@@ -131,4 +132,39 @@ test('sem time nenhum: lista vazia, sem erro', async (t) => {
   const { pedir } = cenario(t, tabelas({ extra: { team_members: [] } }));
   const r = await pedir('GET', '/api/feed?limite=20', null, EU);
   assert.deepEqual(r.json, { items: [] });
+});
+
+test('itens do MESMO instante na fronteira da página não somem nem repetem (o cursor leva o tipo e o id)', async (t) => {
+  // 7 jogos e 5 posts todos criados no mesmo instante (uma transação só), no meio de outros: com páginas de 4, a fronteira cai no empate.
+  const mesmo = quando(100);
+  const tabs = tabelas({ posts: 6, jogos: 3 });
+  for (let i = 0; i < 7; i += 1) tabs.games.push({ id: `empate-jogo-${i}`, team_id: TIME, data: mesmo, local: 'Quadra', campeao_time_index: 0, times_resultado: null, created_at: mesmo });
+  for (let i = 0; i < 5; i += 1) tabs.feed_posts.push({ id: `empate-post-${i}`, team_id: TIME, author_id: AUTOR, body: `Empate ${i}`, tipo: 'post', created_at: mesmo });
+  const { pedir } = cenario(t, tabs);
+  const vistos = [];
+  let cursor = null;
+  for (let p = 0; p < 20; p += 1) {
+    const r = await pedir('GET', `/api/feed?limite=4${cursor ? `&antes=${encodeURIComponent(cursor)}` : ''}`, null, EU);
+    assert.equal(r.status, 200);
+    vistos.push(...chaves(r.json.items));
+    cursor = r.json.proximo;
+    if (!cursor) break;
+  }
+  assert.equal(vistos.length, 21, '6 posts + 3 jogos + 12 do mesmo instante');
+  assert.equal(new Set(vistos).size, 21, 'nenhum repetido');
+  const { pedir: pedirTudo } = cenario(t, tabs);
+  assert.deepEqual(vistos, chaves((await pedirTudo('GET', '/api/feed', null, EU)).json.items), 'na mesma ordem da lista inteira');
+});
+
+test('o cursor antigo (só o instante, guardado por um app já publicado) continua valendo', async (t) => {
+  const { pedir } = cenario(t, tabelas());
+  const primeira = await pedir('GET', '/api/feed?limite=20', null, EU);
+  const instanteDoUltimo = primeira.json.items[19].created_at;
+  const r = await pedir('GET', `/api/feed?limite=20&antes=${encodeURIComponent(instanteDoUltimo)}`, null, EU);
+  assert.equal(r.status, 200);
+  assert.equal(r.json.items.length, 15);
+  assert.ok(r.json.items.every((i) => i.created_at < instanteDoUltimo));
+  const torto = await pedir('GET', `/api/feed?limite=20&antes=${encodeURIComponent('2026-09-30|jogo|x,y(z)')}`, null, EU);
+  assert.equal(torto.status, 200);
+  assert.equal(torto.json.items.length, 20, 'cursor novo torto é ignorado (1ª página)');
 });

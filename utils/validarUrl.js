@@ -19,14 +19,20 @@ const PREFIXO_PROXY = '/api/media/';
  * outro bucket também não. `req` só é usado para saber o host do backend (mesmo padrão de middleware/mediaUrls.js).
  * Só https. Qualquer outro endereço — outro host, outro bucket, `javascript:` — é null.
  */
+// O proxy de mídia também é servido pelo SITE (a Cloudflare guarda as fotos na borda: o app pede futtyapp.com.br/api/media/…), então uma
+// URL do proxy pode chegar com o host do site e não com o do motor. Quem manda é o token assinado; o host só diz que é um endereço nosso.
+const HOSTS_DO_SITE = ['futtyapp.com.br', 'www.futtyapp.com.br'];
+// Em dev e nas provas o motor roda em http://127.0.0.1 ou localhost; em produção, só https.
+const ehLocal = (u) => u.protocol === 'http:' && /^(127\.0\.0\.1|localhost)$/.test(u.hostname) && process.env.NODE_ENV !== 'production';
+
 function caminhoNoBucket(url, bucket, req) {
   let u;
   try { u = new URL(String(url)); } catch { return null; }
-  if (u.protocol !== 'https:') return null;
+  if (u.protocol !== 'https:' && !ehLocal(u)) return null;
   if (SUPABASE_HOST && u.host === SUPABASE_HOST && u.pathname.startsWith(`${PREFIXO_CRU}${bucket}/`)) {
     try { return decodeURIComponent(u.pathname.slice(`${PREFIXO_CRU}${bucket}/`.length)) || null; } catch { return null; }
   }
-  if (req && u.host === req.get('host') && u.pathname.startsWith(PREFIXO_PROXY)) {
+  if (req && (u.host === req.get('host') || HOSTS_DO_SITE.includes(u.host)) && u.pathname.startsWith(PREFIXO_PROXY)) {
     const alvo = verificarToken(u.pathname.slice(PREFIXO_PROXY.length));
     return alvo && alvo.bucket === bucket ? alvo.path : null;
   }
