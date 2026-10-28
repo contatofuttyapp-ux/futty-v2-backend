@@ -1,15 +1,16 @@
 -- =====================================================================
--- Futty v2.0 — Migração 090: o Início numa ida só ao banco.
+-- Futty v2.0 — Migração 090: o Início, a Resenha e o Ranking numa ida só ao banco.
 -- Idempotente (create or replace). ⚠️ Rodar à mão no SQL Editor do Supabase (o DDL é do dono).
 --
 -- POR QUÊ: medido em produção, cada consulta ao Supabase custa ~32 ms dentro dele + ~30 ms de ida e volta, e o dobro quando várias
 -- chegam juntas. O caminho até o banco está limpo (DNS 1 ms, TLS 8 ms, datacenter GRU, ligação quente valendo); o que pesa é o NÚMERO
--- de perguntas: o /api/inicio fazia ~28, em ondas, e levava ~1 s. Esta função faz as mesmas leituras DENTRO do banco e devolve tudo
--- num JSON só — uma ida em vez de 28.
+-- de perguntas: o /api/inicio fazia ~28, em ondas, e levava ~1 s; a Resenha ~12 e o Ranking ~10. Estas funções fazem as mesmas
+-- leituras DENTRO do banco e devolvem tudo num JSON só — uma ida por tela.
 --
--- O QUE FAZ: cria public.inicio_da_pessoa(uid, agora). Ela devolve as MESMAS linhas que o motor lia uma a uma (mesmas colunas, mesmos
--- filtros, mesma ordem), cada grupo numa chave; a montagem da resposta continua no motor, com as regras de sempre (estado do jogo, lista
--- aberta, nome público, fuso…) — nenhuma regra do app mora aqui. Só lê: não grava nada.
+-- O QUE FAZ: cria public.inicio_da_pessoa(uid, agora), public.feed_da_pessoa(uid, time, quantos, cursor, no_instante),
+-- public.ranking_do_time(uid, slug) e a auxiliar public.vinculos_da_pessoa_json(uid). Elas devolvem as MESMAS linhas que o motor lia uma a
+-- uma (mesmas colunas, mesmos filtros, mesma ordem), cada grupo numa chave; a montagem da resposta continua no motor, com as regras de
+-- sempre (estado do jogo, lista aberta, nome público, fuso, pontos do ranking…) — nenhuma regra do app mora aqui. Só leem: não gravam nada.
 -- Segurança: security definer com search_path fixo, dona postgres, e só o service_role (a chave do motor) executa; anon e
 -- authenticated não.
 --
@@ -407,12 +408,17 @@ notify pgrst, 'reload schema';
 
 -- =====================================================================
 -- CONFERIR DEPOIS DE RODAR
--- select r, has_function_privilege(r, 'public.inicio_da_pessoa(uuid, timestamptz)', 'execute') as executa
---   from unnest(array['service_role', 'authenticated', 'anon']) r;
--- → service_role: true · authenticated: false · anon: false
--- select prosecdef, proconfig from pg_proc where proname = 'inicio_da_pessoa';
--- → true · {search_path=public}
+-- select p.oid::regprocedure as funcao, p.prosecdef as definer, p.proconfig,
+--        has_function_privilege('service_role', p.oid, 'execute') as service_role,
+--        has_function_privilege('authenticated', p.oid, 'execute') as authenticated,
+--        has_function_privilege('anon', p.oid, 'execute') as anon
+--   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+--  where n.nspname = 'public' and p.proname in ('inicio_da_pessoa', 'feed_da_pessoa', 'ranking_do_time', 'vinculos_da_pessoa_json');
+-- → 4 linhas · definer true · {search_path=public} · service_role true · authenticated false · anon false
 --
 -- DESFAZER (o motor volta sozinho para o caminho antigo):
 -- drop function if exists public.inicio_da_pessoa(uuid, timestamptz);
+-- drop function if exists public.feed_da_pessoa(uuid, uuid, integer, timestamptz, boolean);
+-- drop function if exists public.ranking_do_time(uuid, text);
+-- drop function if exists public.vinculos_da_pessoa_json(uuid);
 -- =====================================================================
