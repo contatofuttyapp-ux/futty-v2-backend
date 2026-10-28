@@ -92,7 +92,7 @@ async function jogosDeFundadorDoTime(teamId, { agora = Date.now() } = {}) {
  * (com o time e as colunas novas dele) e quem só organiza: passa os dois e a leitura de team_members não se repete.
  * @param {{ vinculos?: Array<{ team_id: string, teams: object }>, soOrganiza?: Set<string>, agora?: number }} [opts]
  */
-async function jogosDeFundadorDaPessoa(userId, { vinculos = null, soOrganiza = null, agora = Date.now() } = {}) {
+async function jogosDeFundadorDaPessoa(userId, { vinculos = null, soOrganiza = null, agora = Date.now(), jogos: jogosLidos = null } = {}) {
   if (!userId) return [];
   let minhas = vinculos ? vinculos.map((v) => ({ team_id: v.team_id, joga: !soOrganiza?.has(v.team_id), teams: v.teams })) : null;
   if (!minhas) {
@@ -108,7 +108,10 @@ async function jogosDeFundadorDaPessoa(userId, { vinculos = null, soOrganiza = n
     .map((m) => ({ id: m.team_id, corte: corteDaLinha(m.teams) }))
     .filter((t) => t.corte);
   if (!meus.length) return [];
-  const { data: jogos } = await supabase.from('games').select('id, team_id, data, status, cancelado').in('team_id', meus.map((t) => t.id));
+  // `jogos`: os da ida única do Início (os dos times com presença de fundador; o filtro por time abaixo fica com os que contam).
+  const { data: jogos } = jogosLidos
+    ? { data: jogosLidos }
+    : await supabase.from('games').select('id, team_id, data, status, cancelado').in('team_id', meus.map((t) => t.id));
   return meus.flatMap((t) => jogosDeFundador((jogos || []).filter((g) => g.team_id === t.id), t.corte, agora));
 }
 

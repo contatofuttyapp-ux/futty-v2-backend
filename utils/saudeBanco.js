@@ -20,6 +20,8 @@ const { escutarIdas, agenteQuente } = require('./ligacaoQuente');
 const { comPrazo } = require('./comPrazo');
 
 const PRAZO_MS = 5000;
+// O medidor inteiro no arranque (dns, tls e 10 consultas em fila e em paralelo): com ~65 ms por consulta em produção ele não cabia em 5 s.
+const PRAZO_DO_ARRANQUE_MS = 15000;
 const PINGS = 5;
 const SIMBOLO_DO_DESPACHANTE = Symbol.for('undici.globalDispatcher.1');
 // O undici fecha a ligação ociosa aos 4 s quando o servidor não diz outro prazo — é o valor do despachante global sem opção.
@@ -214,7 +216,7 @@ function linhaDoArranque(r) {
  * Roda o medidor uma vez (sem a consulta real: no arranque não há pessoa) e escreve a linha. Nunca derruba o arranque e nunca
  * espera mais que `prazoMs` no total: um banco que não responde vira "não mediu", não uma medição pendurada no processo.
  */
-async function medirNoArranque({ supabase, url, log = console.log, prazoMs = PRAZO_MS }) {
+async function medirNoArranque({ supabase, url, log = console.log, prazoMs = PRAZO_DO_ARRANQUE_MS }) {
   try {
     log(linhaDoArranque(await comPrazo(medirBanco({ supabase, url }), prazoMs, 'medidor do arranque')));
   } catch (e) {

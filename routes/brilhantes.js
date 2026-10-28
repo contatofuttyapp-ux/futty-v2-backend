@@ -167,7 +167,8 @@ router.post(
  * repetir a query nem o tratamento de erro. Nunca lança: sem as migrações,
  * devolve lista vazia e a tela simplesmente não mostra recado nenhum.
  */
-async function pedidosVivos(userId, dias = 30) {
+async function pedidosVivos(userId, dias = 30, { linhas = null } = {}) {
+  if (linhas) return linhas; // as que a ida única do Início já trouxe (mesmas colunas, mesmo filtro, mesma ordem)
   const desdeISO = new Date(Date.now() - dias * 86400000).toISOString();
   try {
     return await lerPedidos(userId, desdeISO, true);

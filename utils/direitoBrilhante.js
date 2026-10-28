@@ -37,6 +37,9 @@ function ehMigracaoEmFalta(mensagem = '') {
  * existe linha — trata-se então como "já usou a única que se sabia dar" (o
  * comportamento de antes da 059), nunca inventando um número.
  */
+/** Quantas gerações a linha de brilhantes_time ({ geracoes }) diz que já foram usadas — sem linha, 0; sem a coluna (antes da 059), 1. */
+const usadasDaLinha = (linha) => (linha ? (linha.geracoes == null ? 1 : Number(linha.geracoes)) : 0);
+
 async function geracoesNoTime(teamId, userId) {
   const { data, error } = await supabase
     .from('brilhantes_time')
@@ -47,7 +50,7 @@ async function geracoesNoTime(teamId, userId) {
   if (!error) {
     return {
       existe: !!data,
-      usadas: data ? (data.geracoes == null ? 1 : Number(data.geracoes)) : 0,
+      usadas: usadasDaLinha(data),
       // O custo JÁ gasto nesta linha — a geração nova SOMA a ele (ver debitar).
       custoCents: data?.custo_cents ?? null,
       colunaExiste: true,
@@ -99,14 +102,18 @@ function somarCusto(anteriorCents, destaCents) {
  * primeiro): o direito do time é grátis para a pessoa, está limitado a 25 e
  * morre com o pacote; o crédito é dela, foi pago e escolhe uniforme. Gastar
  * primeiro o que não é dela é o lado generoso do erro.
+ *
+ * `lido` ({ creditos, membros, soOrganiza, porTime }): o que a ida única do Início já trouxe — os créditos, os vínculos com os times de
+ * pacote ativo e, por time com uniforme, a minha linha em brilhantes_time, as vagas ocupadas, quem só organiza e quantas vagas são de
+ * quem só organiza. As contas abaixo são as mesmas; só não perguntam ao banco.
  */
-async function temDireito(userId) {
+async function temDireito(userId, { lido = null } = {}) {
   const vazio = { fonte: null, teamId: null, kitId: null, creditos: 0, restantes: 0, total: 0, opcoes: [] };
   if (!userId) return vazio;
 
   let creditos = 0;
   try {
-    const { data, error } = await supabase
+    const { data, error } = lido ? { data: { brilhante_creditos: lido.creditos }, error: null } : await supabase
       .from('users')
       .select('brilhante_creditos')
       .eq('id', userId)
@@ -122,7 +129,7 @@ async function temDireito(userId) {
   const opcoes = [];
   try {
     // Os times ATIVOS de que a pessoa é membro, com o uniforme e o tecto.
-    const { data: membros, error: erroMembros } = await supabase
+    const { data: membros, error: erroMembros } = lido ? { data: lido.membros, error: null } : await supabase
       .from('team_members')
       .select('team_id, teams!inner(id, brilhante_ativo, brilhante_kit, brilhante_limite, brilhante_por_jogador)')
       .eq('user_id', userId)
@@ -130,13 +137,14 @@ async function temDireito(userId) {
     if (erroMembros) throw new Error(erroMembros.message);
 
     // Quem só organiza o time não joga — não usa o pacote (nem as gerações, nem uma das 25 vagas).
-    const soOrganiza = membros?.length ? await timesEmQueSoOrganiza(userId) : new Set();
+    const soOrganiza = membros?.length ? (lido ? lido.soOrganiza : await timesEmQueSoOrganiza(userId)) : new Set();
     for (const m of membros || []) {
       const time = m.teams;
       if (!time?.brilhante_kit) continue; // pacote ativo sem uniforme escolhido: não dá para gerar
       if (soOrganiza.has(time.id)) continue;
+      const doTime = lido ? (lido.porTime || {})[time.id] || {} : null;
       // Quantas gerações já usou neste time, das que o pacote dá?
-      const { usadas } = await geracoesNoTime(time.id, userId);
+      const { usadas } = doTime ? { usadas: usadasDaLinha(doTime.minha) } : await geracoesNoTime(time.id, userId);
       // Fail-safe: `brilhante_por_jogador` também some se a 059 não rodou —
       // 1 mantém o comportamento de antes dela (uma geração por jogador).
       const porJogador = Number(time.brilhante_por_jogador) || 1;
@@ -145,7 +153,7 @@ async function temDireito(userId) {
       if (usadas >= porJogador) continue;
       // O time ainda cabe no tecto de JOGADORES (25), não de gerações: uma
       // pessoa que já gerou conta 1 só, mesmo tendo refeito 2 vezes.
-      const { count, error: erroConta } = await supabase
+      const { count, error: erroConta } = doTime ? { count: doTime.ocupadas, error: null } : await supabase
         .from('brilhantes_time')
         .select('user_id', { count: 'exact', head: true })
         .eq('team_id', time.id);
@@ -154,9 +162,9 @@ async function temDireito(userId) {
       // As 25 vagas são de JOGADORES: a linha de quem hoje só organiza (gerou antes de mudar de papel) não conta.
       let ocupadas = count || 0;
       if (ocupadas >= limite && usadas === 0) {
-        const organizam = await idsQueSoOrganizam(time.id);
+        const organizam = doTime ? new Set((doTime.organizam || []).filter(Boolean)) : await idsQueSoOrganizam(time.id);
         if (organizam.size) {
-          const { count: doOrganizador } = await supabase
+          const { count: doOrganizador } = doTime ? { count: doTime.do_organizador } : await supabase
             .from('brilhantes_time')
             .select('user_id', { count: 'exact', head: true })
             .eq('team_id', time.id)

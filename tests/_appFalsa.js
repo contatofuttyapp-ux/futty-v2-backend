@@ -235,8 +235,9 @@ let appCarregado = false;
  * dados; no fim do arquivo, `after(() => app.fechar())`.
  * @param {object} [o]
  * @param {boolean} [o.producao]  NODE_ENV=production (tetos de produção, sem CORS de dev)
+ * @param {boolean} [o.projetar]   cada leitura devolve SÓ as colunas do select, como o PostgREST (apelidos e `coluna->campo` inclusive)
  */
-async function subirApp({ producao = false } = {}) {
+async function subirApp({ producao = false, projetar = false } = {}) {
   if (appCarregado) throw new Error('subirApp: o app só carrega uma vez por processo (cada arquivo de teste roda no seu). Use app.reiniciar() entre os testes.');
   appCarregado = true;
   prepararAmbiente({ producao });
@@ -244,7 +245,7 @@ async function subirApp({ producao = false } = {}) {
 
   // `app.falhar(fn)`: um teste faz uma tabela responder erro (fn(tabela, op) → { message } | null), ex.: "a migração ainda não rodou".
   let falharAgora = null;
-  const falso = criarClienteFalso({}, { falso: { falhar: (...a) => (falharAgora ? falharAgora(...a) : null) } });
+  const falso = criarClienteFalso({}, { falso: { projetar, falhar: (...a) => (falharAgora ? falharAgora(...a) : null) } });
 
   // O @supabase/supabase-js de mentira: o createClient devolve o falso; o resto do módulo (isAuthRetryableFetchError…) é o de verdade.
   const real = require('@supabase/supabase-js');

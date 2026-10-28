@@ -43,7 +43,10 @@ async function agregadosDaEquipa(teamId, { jogos } = {}) {
 /** Total de gols de um jogador — todos os jogos, todos os times (para o /api/me). */
 async function golosDoJogador(userId) {
   const { data } = await supabase.from('gols_jogadores').select('gols').eq('user_id', userId);
-  return (data || []).reduce((s, r) => s + (r.gols || 0), 0);
+  return somaDosGols(data);
 }
 
-module.exports = { agregadosDaEquipa, golosDoJogador, COLUNAS_JOGOS };
+/** A soma das linhas de gols_jogadores ({ gols }) — a mesma conta, venham elas desta consulta ou da ida única do Início. */
+const somaDosGols = (linhas) => (linhas || []).reduce((s, r) => s + (r.gols || 0), 0);
+
+module.exports = { agregadosDaEquipa, golosDoJogador, somaDosGols, COLUNAS_JOGOS };

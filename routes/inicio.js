@@ -21,8 +21,14 @@ const { temDireito } = require('../utils/direitoBrilhante');
 const { pedidosVivos } = require('./brilhantes');
 const { lojaProntaDoPedido } = require('../utils/lojaPronta');
 const { talvezEnviarLembretes } = require('../utils/lembretesMensalidade');
+const { criarIdaUnica } = require('../utils/idaUnica');
+const { supabase } = require('../utils/db');
 
 const router = express.Router();
+
+// O Início numa ida só (utils/idaUnica.js, migração 090): a função do banco devolve as linhas que as ~28 consultas de antes liam. Sem ela
+// (antes da migração, ou se falhar), o caminho antigo, igual a antes.
+const idaDoInicio = criarIdaUnica('inicio_da_pessoa', { cliente: supabase });
 
 async function seguro(promessa) {
   try {
@@ -45,6 +51,13 @@ router.get(
     // consultas da carona disputavam o pool do banco com as do próprio Início, justamente no pedido que a pessoa está esperando.
     res.once('finish', () => setImmediate(talvezEnviarLembretes));
 
+    // A ida única: com ela, tudo abaixo monta a resposta a partir das linhas que vieram (fases `rpc` e `montagem`); sem ela (`lote`
+    // null), cada parte faz as suas consultas, como sempre (fases por parte). As duas montagens são o MESMO código.
+    const lote = await idaDoInicio.chamar({ p_uid: userId, p_agora: new Date().toISOString() });
+    if (lote) marcarFase(res, 'rpc');
+    // Com a ida única, as partes não vão ao banco: cronometrar cada uma só encheria o Server-Timing de zeros.
+    const fase = lote ? (_nome, promessa) => promessa : (nome, promessa) => medir(res, nome, promessa);
+
     // O que pesava no /api/inicio era a FILA de idas ao banco, não o volume: medido com a conta pesada (super-admin,
     // 2 times) e a leve (1 time), com 4 idas em série levava ~990 ms de motor e 31 consultas nas DUAS.
     // Hoje: UMA consulta de vínculos no instante zero, repartida entre todas as partes (11 consultas de team_members viram 1);
@@ -54,12 +67,13 @@ router.get(
     // histórico (ver obterConvites: os que vão acontecer + os 3 últimos de cada time, que é o que a tela mostra).
     // Os vínculos e o "só organizo" saem do cache dos times da pessoa (60 s, esvaziado a cada escrita em times/vínculos —
     // utils/vinculosDaPessoa.js): na maioria das aberturas a fila começa já nos jogos.
-    const baseP = medir(res, 'vinculos', seguro(inicioService.obterVinculosDaPessoa(userId)))
-      .then((b) => [b?.vinculos || null, b?.soOrganiza || null]);
+    const baseP = lote
+      ? Promise.resolve([lote.vinculos, new Set((lote.so_organiza || []).filter(Boolean))])
+      : medir(res, 'vinculos', seguro(inicioService.obterVinculosDaPessoa(userId))).then((b) => [b?.vinculos || null, b?.soOrganiza || null]);
     const vinculosP = baseP.then(([vinculos]) => vinculos);
 
     // Os times: montados na hora a partir dos vínculos. Se a leitura deles falhou, o caminho antigo (cada parte lê o seu).
-    const teamsP = medir(res, 'teams', baseP.then(([vinculos, soOrganiza]) => (
+    const teamsP = fase('teams', baseP.then(([vinculos, soOrganiza]) => (
       vinculos ? { teams: inicioService.montarTeams(vinculos, soOrganiza || new Set()) } : seguro(inicioService.obterTeams(userId))
     )));
     // Leituras que DUAS partes faziam iguais saem uma vez e são divididas (cada parte, se a divisão falhar, lê a sua):
@@ -68,22 +82,27 @@ router.get(
     //   · os meus votos em todos os times — a votação pendente e o status da votação do time principal;
     //   · os jogos crus da lista do Início — o "Seu time" lê deles os próximos e os últimos de cada time.
     const ehAdmin = (t) => t?.teams?.some((x) => x.role === 'admin');
-    const pedidosAdminP = teamsP.then((t) => (ehAdmin(t) ? inicioService.lerPedidosPendentes(t.teams) : null)).catch(() => null);
-    const perfilP = inicioService.lerPerfil(userId).catch(() => null);
-    const meusVotosP = vinculosP.then((v) => (v ? inicioService.lerMeusVotos(userId, [...new Set(v.map((m) => m.team_id))]) : null)).catch(() => null);
+    const pedidosAdminP = teamsP.then((t) => (ehAdmin(t)
+      ? (lote ? { data: lote.pedidos_pendentes_admin, error: null } : inicioService.lerPedidosPendentes(t.teams))
+      : null)).catch(() => null);
+    const perfilP = lote ? Promise.resolve(lote.perfil) : inicioService.lerPerfil(userId).catch(() => null);
+    const meusVotosP = vinculosP.then((v) => (v
+      ? (lote ? { data: lote.meus_votos, error: null } : inicioService.lerMeusVotos(userId, [...new Set(v.map((m) => m.team_id))]))
+      : null)).catch(() => null);
     let entregarJogos;
     const jogosBrutosP = new Promise((resolve) => { entregarJogos = resolve; });
 
     // O contador de pedidos pendentes (badge do chip de quem administra) sai ao lado: ninguém espera por ele, só a resposta.
     const pendentesP = teamsP.then((t) => (ehAdmin(t) ? seguro(inicioService.contarPedidosPendentes(t.teams, { pedidos: pedidosAdminP })) : null));
 
-    const convitesP = medir(res, 'convites', baseP.then(([vinculos, soOrganiza]) => (
-      seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true, aoLerJogos: entregarJogos }))
+    const jogosLidos = lote ? { proximos: lote.jogos_proximos, recentes: lote.jogos_recentes, minhaFila: lote.minha_fila } : null;
+    const convitesP = fase('convites', baseP.then(([vinculos, soOrganiza]) => (
+      seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true, aoLerJogos: entregarJogos, lido: jogosLidos }))
     )));
     convitesP.finally(() => entregarJogos(null)); // a lista falhou (ou a pessoa não tem time): o "Seu time" lê os seus
 
     // As pendências do card "Seu time" (só quem administra algum time) — ao lado, ninguém espera por elas.
-    const seuTimeP = medir(res, 'seu_time', teamsP.then((t) => (
+    const seuTimeP = fase('seu_time', teamsP.then((t) => (
       ehAdmin(t) ? seguro(inicioService.obterSeuTime(t.teams, { pedidos: pedidosAdminP, jogos: jogosBrutosP })) : []
     )));
 
@@ -96,44 +115,57 @@ router.get(
       const linha = (vinculos || []).find((m) => m.teams?.id === principal.id);
       return linha ? { revotarPedidoEm: linha.teams.revotar_pedido_em ?? null } : {};
     };
-    const onda2P = medir(res, 'onda2', Promise.all([
+    // O que a ida única leu para o time principal e para o próximo jogo só vale se o motor chegar ao MESMO time e ao MESMO jogo (a
+    // regra de quem é o principal e de qual é o próximo continua sendo esta, aqui); se não, a parte faz as suas consultas.
+    const doPrincipal = (principal) => (lote && lote.principal === principal.id ? lote : null);
+    const onda2P = fase('onda2', Promise.all([
       Promise.all([principalP, vinculosP]).then(([principal, vinculos]) => (principal
-        ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal, { meusVotos: meusVotosP, ...revotarDoPrincipal(vinculos, principal) }))
+        ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal, {
+          meusVotos: meusVotosP, ...revotarDoPrincipal(vinculos, principal), ...(doPrincipal(principal) ? { membros: lote.membros_principal } : {}),
+        }))
         : null)),
-      principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal)) : null)),
+      principalP.then((principal) => (principal
+        ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal, doPrincipal(principal) ? lote.campeonato : null))
+        : null)),
       Promise.all([convitesP, teamsP]).then(([convites, teams]) => {
         const proximo = (convites?.games || []).find((g) => g.status !== 'finished');
         // O meu papel no time do próximo jogo já está nos vínculos: o RSVP não precisa perguntar ao banco.
         const role = (teams?.teams || []).find((x) => x.id === proximo?.team_id)?.role || null;
-        return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id, role })) : null;
+        const lido = lote?.rsvp && lote.rsvp.game_id === proximo?.id ? lote.rsvp : null;
+        return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id, role, lido })) : null;
       }),
       // O campeonato novo do time principal (todo membro vê): em andamento ou o campeão da última semana.
       principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonatoNovo(principal, userId)) : null)),
     ]));
 
     const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2, seu_time] = await Promise.all([
-      medir(res, 'me', seguro(inicioService.obterMe(req.user, { base: baseP, perfil: perfilP }))),
+      fase('me', seguro(inicioService.obterMe(req.user, { base: baseP, perfil: perfilP, lido: lote }))),
       teamsP,
       pendentesP,
       convitesP,
-      medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
-      medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos, meusVotos: meusVotosP })))),
-      medir(res, 'denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
+      fase('pedidos', seguro(inicioService.obterPedidos(userId, { linhas: lote ? lote.pedidos : null }))),
+      fase('votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, {
+        vinculos, meusVotos: meusVotosP, jogos: lote ? lote.jogos_votacao : null,
+      })))),
+      fase('denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
       // Vêm os slots de TODAS as páginas, não só o do Início. A
       // conta de servidor é a mesma (uma leitura do store, uma do usuário) e
       // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do
       // percurso que o dono mediu, ~500 ms cada, de Lisboa.
-      medir(res, 'ad', seguro(inicioService.obterAdsSessao(userId, { perfil: perfilP }))),
+      fase('ad', seguro(inicioService.obterAdsSessao(userId, { perfil: perfilP }))),
       // O direito de gerar Brilhante vem JUNTO (SPEC-FIGURINHA-3 §7): o Início
       // mostra o cartão dourado "Você tem uma Brilhante para gerar" e dispara a
       // geração preguiçosa do pacote do time. Um pedido à parte só para isto
       // seria mais um round-trip numa tela que já junta tudo num só.
-      medir(res, 'brilhante', seguro(temDireito(userId))),
+      fase('brilhante', seguro(temDireito(userId, { lido: lote ? {
+        creditos: lote.brilhante_creditos, membros: lote.brilhante_membros, soOrganiza: new Set((lote.so_organiza || []).filter(Boolean)),
+        porTime: lote.brilhante_times,
+      } : null }))),
       // Os pedidos de ativação vivos (pendente/recusado recente) — bloco 2. O
       // Início tem de saber dizer "a gente ativa e avisa" e o motivo de uma
       // recusa; sem isto a pessoa pedia e a tela ficava igual a antes de pedir.
       // Query indexada por user_id, na mesma leva das outras.
-      medir(res, 'pedidos_brilhante', seguro(pedidosVivos(userId))),
+      fase('pedidos_brilhante', seguro(pedidosVivos(userId, 30, { linhas: lote ? lote.pedidos_brilhante : null }))),
       onda2P,
       seuTimeP,
     ]);
@@ -141,7 +173,7 @@ router.get(
     // 'dados' = o tempo real de espera de TODAS as partes juntas. As medidas por
     // parte acima sobrepõem-se entre si (correm em paralelo): servem para ver
     // qual é a lenta, não para somar.
-    marcarFase(res, 'dados');
+    marcarFase(res, lote ? 'montagem' : 'dados');
 
     res.json({
       me, teams, convites, pedidos, votacoes_pendentes, denuncias_desfechos, votacao_status, campeonato, rsvp,
@@ -169,4 +201,6 @@ router.get(
   })
 );
 
+// A prova de equivalência (a bancada de Postgres da rodada) liga e desliga a função entre um pedido e outro: esquece a falta lembrada.
+router.idaDoInicio = idaDoInicio;
 module.exports = router;

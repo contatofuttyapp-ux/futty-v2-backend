@@ -7,7 +7,7 @@
 // qualquer dado chegar. GET /api/inicio junta tudo num round-trip só.
 const { supabase, getTeamBySlug, getRole, getUserById, ensureUserRow, requireTeamMember, loadGame } = require('../utils/db');
 const { HttpError } = require('../utils/http');
-const { golosDoJogador } = require('../utils/agregados');
+const { golosDoJogador, somaDosGols } = require('../utils/agregados');
 const { colunaDaNota, notaDoVoto, mediaDasNotas } = require('../utils/notaDoVoto');
 const { ehAdulto } = require('../utils/rostoPublico');
 const { temMaioridade } = require('../utils/idade');
@@ -104,8 +104,10 @@ function calcFigurinhaStatus(status, statusEm) {
  * Usuário autenticado + stats agregadas. Garante a linha em public.users.
  * @param {{ base?: Promise<[object[]|null, Set<string>|null]>, perfil?: Promise<object|null> }} [opts] os vínculos e quem só organiza
  *   que o /api/inicio já leu, e a leitura do perfil (lerPerfil) que ele divide com o anúncio
+ * @param {object} [opts.lido] as linhas que a ida única do Início já trouxe (me_presencas, gols, votos_recebidos, slots, brilhante_um,
+ *   historico_um, fundador_jogos — ver utils/idaUnica.js); sem ela, cada uma é a consulta de sempre
  */
-async function obterMe(user, { base = null, perfil: perfilP = null } = {}) {
+async function obterMe(user, { base = null, perfil: perfilP = null, lido = null } = {}) {
   const userId = user.id;
   // Garantir a linha (um upsert a cada 10 min por pessoa) corre AO LADO das leituras, não antes delas: era uma ida inteira na
   // fila do Início, paga justamente por quem volta ao app depois de um tempo. Só na primeira entrada da vida a linha ainda não
@@ -113,23 +115,25 @@ async function obterMe(user, { base = null, perfil: perfilP = null } = {}) {
   const garantirP = ensureUserRow(user);
   const [perfilLido, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows, jogosFundador] = await Promise.all([
     perfilP || obterPerfilResiliente(userId),
-    supabase
+    lido ? lido.me_presencas : supabase
       .from('game_players')
       .select('game_id, games ( data, status, cancelado )')
       .eq('user_id', userId)
       .eq('confirmado', true)
       .then((r) => r.data),
-    golosDoJogador(userId),
-    colunaDaNota().then((colunaNota) => supabase.from('votes').select(colunaNota).eq('para_user_id', userId)).then((r) => r.data),
-    supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
+    lido ? somaDosGols(lido.gols) : golosDoJogador(userId),
+    lido ? lido.votos_recebidos : colunaDaNota().then((colunaNota) => supabase.from('votes').select(colunaNota).eq('para_user_id', userId)).then((r) => r.data),
+    lido ? lido.slots : supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
     // tem_figurinha (abaixo): existência basta, .limit(1). r.data
     // vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
     // nenhum", nunca erro (mesmo padrão de slotRows acima).
-    supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(1).then((r) => r.data),
-    supabase.from('user_avatar_historico').select('id').eq('user_id', userId).limit(1).then((r) => r.data),
+    lido ? lido.brilhante_um : supabase.from('brilhantes_time').select('user_id').eq('user_id', userId).limit(1).then((r) => r.data),
+    lido ? lido.historico_um : supabase.from('user_avatar_historico').select('id').eq('user_id', userId).limit(1).then((r) => r.data),
     // Presença de fundador: conta como jogo, igual ao ranking. Com os vínculos do /api/inicio, sem ler team_members de novo.
     base
-      ? base.then(([vinculos, soOrganiza]) => jogosDeFundadorDaPessoa(userId, vinculos ? { vinculos, soOrganiza: soOrganiza || new Set() } : {}))
+      ? base.then(([vinculos, soOrganiza]) => jogosDeFundadorDaPessoa(userId, vinculos
+        ? { vinculos, soOrganiza: soOrganiza || new Set(), jogos: lido ? lido.fundador_jogos : null }
+        : {}))
       : jogosDeFundadorDaPessoa(userId),
     garantirP,
   ]);
@@ -373,9 +377,14 @@ async function jogosDoInicio(teamIds, cols = JOGO_COLS) {
     ...teamIds.map((id) => supabase.from('games').select(cols).eq('team_id', id).lt('data', agoraIso).order('data', { ascending: false }).limit(MARGEM_ULTIMOS)),
   ]);
   for (const r of [proximos, ...recentes]) if (r.error) return { error: r.error };
+  return { data: juntarJogos(proximos.data, recentes.map((r) => r.data)) };
+}
+
+/** Os que vão acontecer + os últimos de cada time (na ordem dos times), sem repetir jogo. */
+function juntarJogos(proximos, recentesPorTime) {
   const porId = new Map();
-  for (const g of [...(proximos.data || []), ...recentes.flatMap((r) => r.data || [])]) porId.set(g.id, g);
-  return { data: [...porId.values()] };
+  for (const g of [...(proximos || []), ...recentesPorTime.flatMap((r) => r || [])]) porId.set(g.id, g);
+  return [...porId.values()];
 }
 
 /**
@@ -399,7 +408,9 @@ function aparar(listaFormatada) {
 
 // `aoLerJogos(games)`: no modo `limitar` (o /api/inicio), recebe os jogos crus assim que chegam — o "Seu time" lê deles em vez de ir
 // ao banco de novo (ver jogosDaPendencia).
-async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false, aoLerJogos = null } = {}) {
+// `lido` ({ proximos, recentes: { [team_id]: jogos }, minhaFila }): os jogos e a minha fila que a ida única do Início já trouxe, com as
+// mesmas colunas de JOGO_COLS e da chamada; no lugar das consultas de jogosDoInicio e da fila (só no modo `limitar`).
+async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false, aoLerJogos = null, lido = null } = {}) {
   // `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
   // O /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
   const [memberships, soOrganiza] = vinculos
@@ -422,7 +433,10 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
 
   // A chamada (sorteio_em, chamados) vem junto; sem a migração 089 a leitura repete sem elas (utils/colunasDaChamada.js). A minha fila de
   // espera (jogo com lotação: "Você está em 2º na espera") sai na MESMA ida: é por pessoa, não depende dos jogos.
-  const [{ data: games, error }, { data: minhaFila }] = await Promise.all([
+  const [{ data: games, error }, { data: minhaFila }] = limitar && lido ? [
+    { data: juntarJogos(lido.proximos, teamIds.map((id) => (lido.recentes || {})[id])), error: null },
+    { data: lido.minhaFila },
+  ] : await Promise.all([
     lerComChamada((extra) => (limitar
       ? jogosDoInicio(teamIds, JOGO_COLS + extra)
       : supabase
@@ -484,8 +498,9 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
 }
 
 // ─── GET /api/me/pedidos ──────────────────────────────────────────────────────
-async function obterPedidos(userId) {
-  const { data, error } = await supabase
+// `linhas`: as que a ida única do Início já trouxe (mesmas colunas, mesma ordem).
+async function obterPedidos(userId, { linhas = null } = {}) {
+  const { data, error } = linhas ? { data: linhas, error: null } : await supabase
     .from('team_join_requests')
     .select('id, status, updated_at, teams ( id, nome, slug, cor, logo_url )')
     .eq('user_id', userId)
@@ -515,7 +530,8 @@ function lerMeusVotos(userId, teamIds) {
 }
 
 // `meusVotos`: a leitura de lerMeusVotos que o /api/inicio já fez (uma ida para as duas partes que falam de votação).
-async function obterVotacoesPendentes(userId, { vinculos = null, meusVotos = null } = {}) {
+// `jogos`: os jogos dos meus times em que estive confirmado, com as presenças (a ida única do Início) — os outros não pedem voto nenhum.
+async function obterVotacoesPendentes(userId, { vinculos = null, meusVotos = null, jogos = null } = {}) {
   // O /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
   const minhas = vinculos || (await supabase
     .from('team_members')
@@ -530,7 +546,7 @@ async function obterVotacoesPendentes(userId, { vinculos = null, meusVotos = nul
     Promise.resolve(meusVotos).catch(() => null).then((r) => (r && !r.error ? r : lerMeusVotos(userId, teamIds))),
     // Só pede avaliação de quem o usuário REALMENTE jogou junto — jogos já
     // ENCERRADOS em que ambos estiveram confirmados.
-    supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
+    jogos ? { data: jogos } : supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
   ]);
   // Primeiro os jogos encerrados em que EU estive; depois, nesses mesmos jogos,
   // quem mais esteve — é essa gente que fica por avaliar.
@@ -596,14 +612,14 @@ async function obterDesfechosDenuncias(userId, { vinculos = null } = {}) {
 // papel — o /api/inicio sabe, veio do obterTeams — salta o requireTeamMember,
 // que é mais uma ida ao banco para confirmar o que já se sabe. A rota solta
 // continua a chamar sem ele e a validar como sempre.
-// `ja`: o que o /api/inicio já leu — `meusVotos` (lerMeusVotos de todos os times) e `revotarPedidoEm` (veio nos vínculos). Cada um
-// que vier poupa uma ida; a rota solta não passa nada e lê tudo.
+// `ja`: o que o /api/inicio já leu — `meusVotos` (lerMeusVotos de todos os times), `revotarPedidoEm` (veio nos vínculos) e `membros`
+// (os user_id do time, da ida única). Cada um que vier poupa uma ida; a rota solta não passa nada e lê tudo.
 async function obterVotacaoStatus(slug, userId, conhecido = null, ja = {}) {
   const team = conhecido?.id && conhecido?.role ? conhecido : (await requireTeamMember(slug, userId)).team;
 
   // Independentes entre si depois de `team` resolvido: saem em paralelo, não em 3 awaits em série.
   const [{ data: membros }, { data: meus }, { data: teamRow }] = await Promise.all([
-    supabase.from('team_members').select('user_id').eq('team_id', team.id),
+    ja.membros ? { data: ja.membros } : supabase.from('team_members').select('user_id').eq('team_id', team.id),
     Promise.resolve(ja.meusVotos).catch(() => null).then((r) => (r && !r.error
       ? { data: (r.data || []).filter((v) => v.team_id === team.id) }
       : supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId))),
@@ -624,7 +640,8 @@ async function obterVotacaoStatus(slug, userId, conhecido = null, ja = {}) {
 // `conhecido`: o /api/inicio já tem o time e o papel do
 // obterTeams — passá-los aqui poupa o getTeamBySlug E o getRole, duas idas ao
 // banco só para reconfirmar o que já veio. A rota solta continua a validar.
-async function obterCampeonato(slug, userId, conhecido = null) {
+// `lido` ({ campeonato, jornadas }): o que a ida única do Início já trouxe para este time (só vale com `conhecido`).
+async function obterCampeonato(slug, userId, conhecido = null, lido = null) {
   const jaSabido = conhecido?.id && conhecido?.role ? conhecido : null;
   const team = jaSabido || (await getTeamBySlug(slug, 'id, slug'));
   if (!team) throw new HttpError(404, 'Time não encontrado.');
@@ -632,14 +649,17 @@ async function obterCampeonato(slug, userId, conhecido = null) {
   // role e campeonato só dependem de team.id, não um do outro (saem em paralelo, não
   // sequenciais). O acesso só é confirmado depois —
   // se `role` vier vazio o resultado de campeonato é descartado a seguir.
+  const doLote = jaSabido && lido;
   const [role, { data: campeonato }] = await Promise.all([
     jaSabido ? jaSabido.role : getRole(team.id, userId),
-    supabase.from('campeonatos').select('*').eq('team_id', team.id).order('criado_em', { ascending: false }).limit(1).maybeSingle(),
+    doLote
+      ? { data: lido.campeonato }
+      : supabase.from('campeonatos').select('*').eq('team_id', team.id).order('criado_em', { ascending: false }).limit(1).maybeSingle(),
   ]);
   if (!role) throw new HttpError(403, 'Não é membro deste time.');
   if (!campeonato) return { campeonato: null };
 
-  const { data: jornadas } = await supabase
+  const { data: jornadas } = doLote ? { data: lido.jornadas } : await supabase
     .from('campeonato_jornadas')
     .select('*')
     .eq('campeonato_id', campeonato.id)
@@ -662,7 +682,9 @@ async function obterCampeonatoNovo(principal, userId) {
 // que só precisa do time e do jogo saem NA MESMA ida ao banco — em fila seriam duas (loadGame, e só depois o resto). Se o jogo
 // disser outro time, volta ao caminho de sempre.
 // `role`: o meu papel no time `teamId`, que o /api/inicio já sabe pelos vínculos (poupa o getRole).
-async function obterRsvp(gameId, userId, { teamId = null, role: papelSabido = null } = {}) {
+// `lido` ({ game, membros, respostas, espera, organizam, elenco }): o jogo e as cinco leituras do time que a ida única do Início já
+// trouxe para ESTE jogo (com `teamId`). Se o jogo disser outro time, volta ao caminho de sempre, como abaixo.
+async function obterRsvp(gameId, userId, { teamId = null, role: papelSabido = null, lido = null } = {}) {
   const consultasDoTime = (tid) => [
     papelSabido && tid === teamId ? papelSabido : getRole(tid, userId),
     supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', tid),
@@ -673,7 +695,16 @@ async function obterRsvp(gameId, userId, { teamId = null, role: papelSabido = nu
   ];
   let game;
   let resto;
-  if (teamId) {
+  if (teamId && lido) {
+    game = lido.game || null;
+    resto = await Promise.all([
+      papelSabido || getRole(teamId, userId),
+      { data: lido.membros }, { data: lido.respostas }, { data: lido.espera },
+      new Set((lido.organizam || []).filter(Boolean)),
+      { data: lido.elenco },
+    ]);
+    if (game && game.teams?.id !== teamId) resto = null;
+  } else if (teamId) {
     // Nenhum depende dos outros: o jogo e as cinco consultas do time correm juntos.
     [game, ...resto] = await Promise.all([loadGame(gameId), ...consultasDoTime(teamId)]);
     if (game && game.teams?.id !== teamId) resto = null; // o jogo é de outro time: refaz abaixo

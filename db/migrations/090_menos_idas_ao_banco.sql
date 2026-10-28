@@ -1,0 +1,233 @@
+-- =====================================================================
+-- Futty v2.0 — Migração 090: o Início numa ida só ao banco.
+-- Idempotente (create or replace). ⚠️ Rodar à mão no SQL Editor do Supabase (o DDL é do dono).
+--
+-- POR QUÊ: medido em produção, cada consulta ao Supabase custa ~32 ms dentro dele + ~30 ms de ida e volta, e o dobro quando várias
+-- chegam juntas. O caminho até o banco está limpo (DNS 1 ms, TLS 8 ms, datacenter GRU, ligação quente valendo); o que pesa é o NÚMERO
+-- de perguntas: o /api/inicio fazia ~28, em ondas, e levava ~1 s. Esta função faz as mesmas leituras DENTRO do banco e devolve tudo
+-- num JSON só — uma ida em vez de 28.
+--
+-- O QUE FAZ: cria public.inicio_da_pessoa(uid, agora). Ela devolve as MESMAS linhas que o motor lia uma a uma (mesmas colunas, mesmos
+-- filtros, mesma ordem), cada grupo numa chave; a montagem da resposta continua no motor, com as regras de sempre (estado do jogo, lista
+-- aberta, nome público, fuso…) — nenhuma regra do app mora aqui. Só lê: não grava nada.
+-- Segurança: security definer com search_path fixo, dona postgres, e só o service_role (a chave do motor) executa; anon e
+-- authenticated não.
+--
+-- A ORDEM NÃO QUEBRA NADA: o motor publicado antes desta migração percebe que a função não existe e segue pelo caminho antigo (uma
+-- linha de aviso no log); depois dela, passa a usar a função em até 1 minuto. Rodar de novo não estraga nada.
+-- =====================================================================
+
+create or replace function public.inicio_da_pessoa(p_uid uuid, p_agora timestamptz default now())
+returns json
+language plpgsql
+stable
+security definer
+set search_path = public
+as $fn$
+declare
+  v_times uuid[];          -- os times da pessoa que existem (os vínculos com time), na ordem dos vínculos
+  v_principal uuid;        -- o 1º deles: o time principal do Início
+  v_proximo_id uuid;       -- o próximo jogo (o 1º que ainda não acabou, por data)
+  v_proximo_time uuid;
+  v_campeonato uuid;
+  v_slots json;
+  v_resultado json;
+begin
+  select coalesce(array_agg(tm.team_id order by tm.created_at), '{}'), (array_agg(tm.team_id order by tm.created_at))[1]
+    into v_times, v_principal
+    from team_members tm join teams t on t.id = tm.team_id
+   where tm.user_id = p_uid;
+
+  select g.id, g.team_id into v_proximo_id, v_proximo_time
+    from games g
+   where g.team_id = any (v_times)
+     and (g.data >= p_agora or g.data is null)
+     and not coalesce(g.cancelado, false)
+     and coalesce(g.status, '') not in ('terminado', 'cancelado')
+   order by g.data asc nulls last
+   limit 1;
+
+  select c.id into v_campeonato from campeonatos c where c.team_id = v_principal order by c.criado_em desc limit 1;
+
+  -- As figurinhas pagas antigas: a tabela não nasceu numa migração e pode não existir; sem ela, o motor também lia "nada".
+  if to_regclass('public.user_avatar_slots') is not null then
+    execute 'select coalesce(json_agg(json_build_object(''kit_id'', s.kit_id)), ''[]''::json) from public.user_avatar_slots s where s.user_id = $1'
+      into v_slots using p_uid;
+  end if;
+
+  select json_build_object(
+    'versao', 1,
+    -- ── os vínculos (team_members + o time embutido), por created_at ──
+    -- Todo "embutido" (o time do vínculo, o jogo da presença, a pessoa do elenco…) é uma subconsulta POR LINHA, como o PostgREST faz: a
+    -- ordem das linhas é a da tabela de fora, nunca a que um join escolheria.
+    'vinculos', coalesce((
+      select json_agg(json_build_object(
+        'team_id', tm.team_id, 'role', tm.role, 'ausente_proximo', tm.ausente_proximo, 'created_at', tm.created_at,
+        'teams', (select json_build_object(
+          'id', t.id, 'nome', t.nome, 'slug', t.slug, 'cor', t.cor, 'cidade', t.cidade, 'criado_por', t.criado_por, 'created_at', t.created_at,
+          'logo_url', t.logo_url, 'cor_fundo', t.cor_fundo, 'modo_visibilidade', t.modo_visibilidade, 'brilhante_ativo', t.brilhante_ativo,
+          'brilhante_kit', t.brilhante_kit, 'brilhante_limite', t.brilhante_limite, 'manto_proprio', t.manto_proprio,
+          'revotar_pedido_em', t.revotar_pedido_em, 'fuso', t.fuso, 'escudo_cor2', t.escudo_cor2, 'escudo_padrao', t.escudo_padrao,
+          'jogadores_por_time', t.jogadores_por_time, 'presenca_fundador_ate', t.presenca_fundador_ate)
+          from teams t where t.id = tm.team_id))
+        order by tm.created_at)
+      from team_members tm
+      where tm.user_id = p_uid), '[]'::json),
+    'so_organiza', coalesce((select json_agg(tm.team_id) from team_members tm where tm.user_id = p_uid and tm.joga = false), '[]'::json),
+    -- ── o "me" ──
+    'perfil', (select json_build_object(
+        'id', u.id, 'nome', u.nome, 'email', u.email, 'avatar_url', u.avatar_url, 'foto_url', u.foto_url, 'nome_jogador', u.nome_jogador,
+        'cor_preferida', u.cor_preferida, 'telefone', u.telefone, 'avatar_ia_creditos', u.avatar_ia_creditos, 'cor_frame', u.cor_frame,
+        'fundo_figurinha', u.fundo_figurinha, 'plan', u.plan, 'avatar_ia_mes', u.avatar_ia_mes, 'avatar_ia_reset', u.avatar_ia_reset,
+        'is_super_admin', u.is_super_admin, 'birthdate', u.birthdate, 'kit_ativo', u.kit_ativo, 'mostrar_rosto_publico', u.mostrar_rosto_publico,
+        'avatar_generico', u.avatar_generico, 'figurinha_status', u.figurinha_status, 'figurinha_status_em', u.figurinha_status_em,
+        'foto_original_url', u.foto_original_url)
+      from users u where u.id = p_uid),
+    'me_presencas', coalesce((
+      select json_agg(json_build_object('game_id', gp.game_id,
+        'games', (select json_build_object('data', g.data, 'status', g.status, 'cancelado', g.cancelado) from games g where g.id = gp.game_id)))
+      from game_players gp
+      where gp.user_id = p_uid and gp.confirmado = true), '[]'::json),
+    'gols', coalesce((select json_agg(json_build_object('gols', gj.gols)) from gols_jogadores gj where gj.user_id = p_uid), '[]'::json),
+    'votos_recebidos', coalesce((select json_agg(json_build_object('nota10', v.nota10)) from votes v where v.para_user_id = p_uid), '[]'::json),
+    'slots', v_slots,
+    'brilhante_um', coalesce((select json_agg(json_build_object('user_id', b.user_id))
+      from (select b0.user_id from brilhantes_time b0 where b0.user_id = p_uid limit 1) b), '[]'::json),
+    'historico_um', coalesce((select json_agg(json_build_object('id', h.id))
+      from (select h0.id from user_avatar_historico h0 where h0.user_id = p_uid limit 1) h), '[]'::json),
+    -- Os jogos dos times com presença de fundador (o motor filtra quais contam).
+    'fundador_jogos', coalesce((
+      select json_agg(json_build_object('id', g.id, 'team_id', g.team_id, 'data', g.data, 'status', g.status, 'cancelado', g.cancelado))
+      from games g
+      where g.team_id in (select tm.team_id from team_members tm join teams t on t.id = tm.team_id
+                           where tm.user_id = p_uid and t.presenca_fundador_ate is not null)), '[]'::json),
+    -- ── os times: o badge de pedidos e o "Seu time" ──
+    'pedidos_pendentes_admin', coalesce((
+      select json_agg(json_build_object('team_id', r.team_id))
+      from team_join_requests r
+      where r.status = 'pending'
+        and r.team_id in (select tm.team_id from team_members tm join teams t on t.id = tm.team_id where tm.user_id = p_uid and tm.role = 'admin')), '[]'::json),
+    -- ── a votação ──
+    'meus_votos', coalesce((
+      select json_agg(json_build_object('team_id', v.team_id, 'para_user_id', v.para_user_id, 'updated_at', v.updated_at))
+      from votes v
+      where v.de_user_id = p_uid and v.team_id in (select tm.team_id from team_members tm where tm.user_id = p_uid)), '[]'::json),
+    -- Os jogos dos times em que a pessoa esteve confirmada (o motor confere quais já aconteceram e quem jogou junto).
+    'jogos_votacao', coalesce((
+      select json_agg(json_build_object('id', g.id, 'team_id', g.team_id, 'data', g.data, 'status', g.status, 'cancelado', g.cancelado,
+        'game_players', coalesce((select json_agg(json_build_object('user_id', gp.user_id, 'confirmado', gp.confirmado))
+                                  from game_players gp where gp.game_id = g.id), '[]'::json)))
+      from games g
+      where g.team_id = any (v_times)
+        and exists (select 1 from game_players eu where eu.game_id = g.id and eu.user_id = p_uid and eu.confirmado = true)), '[]'::json),
+    -- ── os jogos do Início: os que vão acontecer (por data) + os 8 últimos de cada time ──
+    'jogos_proximos', coalesce((
+      select json_agg(json_build_object('id', g.id, 'team_id', g.team_id, 'data', g.data, 'local', g.local, 'status', g.status,
+        'sorteio_realizado', g.sorteio_realizado, 'cancelado', g.cancelado, 'campeao_time_index', g.campeao_time_index,
+        'time_vencedor', g.time_vencedor, 'seed', g.times_resultado -> 'seed',
+        'game_players', coalesce((select json_agg(json_build_object('user_id', gp.user_id, 'confirmado', gp.confirmado))
+                                  from game_players gp where gp.game_id = g.id), '[]'::json),
+        'sorteio_em', g.sorteio_em, 'chamados', g.chamados)
+        order by g.data asc nulls last)
+      from games g
+      where g.team_id = any (v_times) and (g.data >= p_agora or g.data is null)), '[]'::json),
+    'jogos_recentes', coalesce((
+      select json_object_agg(x.team_id, x.jogos)
+      from (
+        select tid as team_id, coalesce((
+          select json_agg(json_build_object('id', g.id, 'team_id', g.team_id, 'data', g.data, 'local', g.local, 'status', g.status,
+            'sorteio_realizado', g.sorteio_realizado, 'cancelado', g.cancelado, 'campeao_time_index', g.campeao_time_index,
+            'time_vencedor', g.time_vencedor, 'seed', g.times_resultado -> 'seed',
+            'game_players', coalesce((select json_agg(json_build_object('user_id', gp.user_id, 'confirmado', gp.confirmado))
+                                      from game_players gp where gp.game_id = g.id), '[]'::json),
+            'sorteio_em', g.sorteio_em, 'chamados', g.chamados)
+            order by g.data desc)
+          from (select * from games g0 where g0.team_id = tid and g0.data < p_agora order by g0.data desc limit 8) g), '[]'::json) as jogos
+        from (select distinct unnest(v_times) as tid) ts
+      ) x), '{}'::json),
+    'minha_fila', coalesce((select json_agg(json_build_object('game_id', e.game_id, 'posicao', e.posicao)) from rsvp_espera e where e.user_id = p_uid), '[]'::json),
+    -- ── os pedidos de entrada da pessoa ──
+    'pedidos', coalesce((
+      select json_agg(json_build_object('id', r.id, 'status', r.status, 'updated_at', r.updated_at,
+        'teams', (select json_build_object('id', t.id, 'nome', t.nome, 'slug', t.slug, 'cor', t.cor, 'logo_url', t.logo_url) from teams t where t.id = r.team_id))
+        order by r.updated_at desc)
+      from team_join_requests r
+      where r.user_id = p_uid and r.status in ('approved', 'rejected', 'pending')), '[]'::json),
+    -- ── o time principal: a votação dele e o campeonato antigo ──
+    'principal', v_principal,
+    'membros_principal', case when v_principal is null then null else coalesce((
+      select json_agg(json_build_object('user_id', tm.user_id)) from team_members tm where tm.team_id = v_principal), '[]'::json) end,
+    'campeonato', case when v_principal is null then null else json_build_object(
+      'campeonato', (select to_json(c) from campeonatos c where c.id = v_campeonato),
+      'jornadas', case when v_campeonato is null then null else coalesce((
+        select json_agg(to_json(j) order by j.numero asc) from campeonato_jornadas j where j.campeonato_id = v_campeonato), '[]'::json) end) end,
+    -- ── a presença do próximo jogo ──
+    'rsvp', case when v_proximo_id is null then null else json_build_object(
+      'game_id', v_proximo_id,
+      'game', (select (to_jsonb(g) || jsonb_build_object('teams', (
+          select jsonb_build_object('id', t.id, 'slug', t.slug, 'nome', t.nome, 'cor', t.cor, 'cidade', t.cidade, 'logo_url', t.logo_url,
+            'fuso', t.fuso, 'escudo_cor2', t.escudo_cor2, 'escudo_padrao', t.escudo_padrao, 'jogadores_por_time', t.jogadores_por_time,
+            'presenca_fundador_ate', t.presenca_fundador_ate)
+          from teams t where t.id = g.team_id)))::json
+        from games g where g.id = v_proximo_id),
+      'membros', coalesce((
+        select json_agg(json_build_object('users', (select json_build_object(
+          'id', u.id, 'nome', u.nome, 'nome_jogador', u.nome_jogador, 'avatar_url', u.avatar_url, 'avatar_generico', u.avatar_generico)
+          from users u where u.id = tm.user_id)))
+        from team_members tm where tm.team_id = v_proximo_time), '[]'::json),
+      'respostas', coalesce((select json_agg(json_build_object('user_id', r.user_id, 'status', r.status)) from rsvp_respostas r where r.game_id = v_proximo_id), '[]'::json),
+      'espera', coalesce((select json_agg(json_build_object('user_id', e.user_id, 'posicao', e.posicao) order by e.posicao asc)
+        from rsvp_espera e where e.game_id = v_proximo_id), '[]'::json),
+      'organizam', coalesce((select json_agg(tm.user_id) from team_members tm where tm.team_id = v_proximo_time and tm.joga = false), '[]'::json),
+      'elenco', coalesce((select json_agg(json_build_object('user_id', gp.user_id, 'confirmado', gp.confirmado)) from game_players gp where gp.game_id = v_proximo_id), '[]'::json)
+    ) end,
+    -- ── o direito à figurinha ──
+    'brilhante_creditos', (select u.brilhante_creditos from users u where u.id = p_uid),
+    'brilhante_membros', coalesce((
+      select json_agg(json_build_object('team_id', tm.team_id, 'teams', (select json_build_object('id', t.id, 'brilhante_ativo', t.brilhante_ativo,
+        'brilhante_kit', t.brilhante_kit, 'brilhante_limite', t.brilhante_limite, 'brilhante_por_jogador', t.brilhante_por_jogador)
+        from teams t where t.id = tm.team_id)))
+      from team_members tm
+      where tm.user_id = p_uid and exists (select 1 from teams t where t.id = tm.team_id and t.brilhante_ativo = true)), '[]'::json),
+    'brilhante_times', coalesce((
+      select json_object_agg(t.id, json_build_object(
+        'minha', (select json_build_object('user_id', b.user_id, 'geracoes', b.geracoes, 'custo_cents', b.custo_cents)
+                  from brilhantes_time b where b.team_id = t.id and b.user_id = p_uid),
+        'ocupadas', (select count(*) from brilhantes_time b where b.team_id = t.id),
+        'organizam', coalesce((select json_agg(o.user_id) from team_members o where o.team_id = t.id and o.joga = false), '[]'::json),
+        'do_organizador', (select count(*) from brilhantes_time b where b.team_id = t.id
+                             and b.user_id in (select o.user_id from team_members o where o.team_id = t.id and o.joga = false))))
+      from teams t
+      where t.brilhante_ativo = true and t.brilhante_kit is not null
+        and t.id in (select tm.team_id from team_members tm where tm.user_id = p_uid)), '{}'::json),
+    'pedidos_brilhante', coalesce((
+      select json_agg(json_build_object('id', p.id, 'team_id', p.team_id, 'produto', p.produto, 'estado', p.estado,
+        'criado_em', p.criado_em, 'resolvido_em', p.resolvido_em, 'motivo', p.motivo) order by p.criado_em desc)
+      from pedidos_ativacao p
+      where p.user_id = p_uid and p.estado in ('pendente', 'recusado')
+        and (p.estado = 'pendente' or p.resolvido_em >= p_agora - interval '720 hours')), '[]'::json)
+  ) into v_resultado;
+
+  return v_resultado;
+end
+$fn$;
+
+alter function public.inicio_da_pessoa(uuid, timestamptz) owner to postgres;
+revoke all on function public.inicio_da_pessoa(uuid, timestamptz) from public;
+revoke all on function public.inicio_da_pessoa(uuid, timestamptz) from anon, authenticated;
+grant execute on function public.inicio_da_pessoa(uuid, timestamptz) to service_role;
+
+-- O PostgREST passa a enxergar a função nova sem esperar.
+notify pgrst, 'reload schema';
+
+-- =====================================================================
+-- CONFERIR DEPOIS DE RODAR
+-- select r, has_function_privilege(r, 'public.inicio_da_pessoa(uuid, timestamptz)', 'execute') as executa
+--   from unnest(array['service_role', 'authenticated', 'anon']) r;
+-- → service_role: true · authenticated: false · anon: false
+-- select prosecdef, proconfig from pg_proc where proname = 'inicio_da_pessoa';
+-- → true · {search_path=public}
+--
+-- DESFAZER (o motor volta sozinho para o caminho antigo):
+-- drop function if exists public.inicio_da_pessoa(uuid, timestamptz);
+-- =====================================================================
