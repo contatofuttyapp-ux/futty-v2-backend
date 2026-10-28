@@ -16,6 +16,7 @@ const { fusoDoTime, horaNoFuso, lerComFuso, temColuna } = require('../utils/fuso
 const { quantosTimes, escolhaDoCorpo, somaDeGols, decidirResultado, resultadoJaAbriu } = require('../utils/resultadoDoJogo'); // quem ganhou: uma verdade só
 const { anunciarResultado } = require('../utils/avisoDoResultado');
 const { STORAGE_BUCKET, reacoesParaTargets } = require('../utils/ajudaDaResenha');
+const { obterVinculosDaPessoa } = require('../services/inicio'); // os times da pessoa, do mesmo cache do Início
 
 const router = express.Router();
 
@@ -90,12 +91,18 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     marcarFase(res, 'auth');
-    // Times do usuário
-    // O fuso do time vem junto (mesma consulta) — o jogo da Resenha é lido no relógio do campo.
-    const { data: memberships } = await lerComFuso((novas) => supabase
-      .from('team_members')
-      .select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
-      .eq('user_id', req.user.id));
+    // Times do usuário, do cache dos times da pessoa (o mesmo do Início: 60 s, esvaziado a cada escrita em times/vínculos —
+    // utils/vinculosDaPessoa.js); o time vem com o fuso (o jogo da Resenha é lido no relógio do campo). Se o cache falhar, a leitura
+    // própria de sempre.
+    let memberships;
+    try {
+      ({ vinculos: memberships } = await obterVinculosDaPessoa(req.user.id));
+    } catch {
+      ({ data: memberships } = await lerComFuso((novas) => supabase
+        .from('team_members')
+        .select(temColuna(novas, 'fuso') ? 'team_id, teams ( id, nome, slug, cidade, fuso )' : 'team_id, teams ( id, nome, slug, cidade )')
+        .eq('user_id', req.user.id)));
+    }
     marcarFase(res, 'equipas');
     const teamMap = {};
     for (const m of memberships || []) {

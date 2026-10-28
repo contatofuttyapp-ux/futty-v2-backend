@@ -5,7 +5,7 @@
 // função de services/inicio.js que a rota antiga (nunca diverge do JSON que
 // outras telas já dependem — as rotas antigas continuam de pé).
 //
-// Fila de idas ao banco: vínculos → jogos → RSVP = 3. Tudo o que não depende de ninguém arranca
+// Fila de idas ao banco: vínculos (quase sempre do cache) → jogos → RSVP = 2 a 3. Tudo o que não depende de ninguém arranca
 // no instante zero; o que depende do time principal (votação, campeonato) ou do próximo jogo (RSVP) arranca assim que a
 // sua dependência chega — não quando uma onda inteira acaba.
 //
@@ -18,7 +18,6 @@ const { marcarFase, medir } = require('../middleware/tempo');
 const { asyncHandler } = require('../utils/http');
 const inicioService = require('../services/inicio');
 const { temDireito } = require('../utils/direitoBrilhante');
-const { timesEmQueSoOrganiza } = require('../utils/soOrganiza');
 const { pedidosVivos } = require('./brilhantes');
 const { lojaProntaDoPedido } = require('../utils/lojaPronta');
 const { talvezEnviarLembretes } = require('../utils/lembretesMensalidade');
@@ -41,9 +40,10 @@ router.get(
     const userId = req.user.id;
     // O requireAuth já correu: tudo até aqui foi autenticação.
     marcarFase(res, 'auth');
-    // Os lembretes de vencimento da mensalidade pegam carona aqui (o pedido mais comum do app): sem esperar e no máximo a cada
-    // 10 min por instância — o agendador é o caminho principal (utils/lembretesMensalidade.js).
-    talvezEnviarLembretes();
+    // Os lembretes de vencimento da mensalidade pegam carona aqui (o pedido mais comum do app), no máximo a cada 10 min por
+    // instância — o agendador é o caminho principal (utils/lembretesMensalidade.js). Só DEPOIS de a resposta sair: antes, as ~6
+    // consultas da carona disputavam o pool do banco com as do próprio Início, justamente no pedido que a pessoa está esperando.
+    res.once('finish', () => setImmediate(talvezEnviarLembretes));
 
     // O que pesava no /api/inicio era a FILA de idas ao banco, não o volume: medido com a conta pesada (super-admin,
     // 2 times) e a leve (1 time), com 4 idas em série levava ~990 ms de motor e 31 consultas nas DUAS.
@@ -52,54 +52,78 @@ router.get(
     // arrancam assim que o principal é conhecido (sem esperar os jogos); e o RSVP do próximo jogo sai numa ida só (o time dele
     // já vem na lista de jogos). Fila: vínculos → jogos → RSVP = 3 idas. A lista de jogos também não cresce com o
     // histórico (ver obterConvites: os que vão acontecer + os 3 últimos de cada time, que é o que a tela mostra).
-    const vinculosP = medir(res, 'vinculos', seguro(inicioService.obterVinculos(userId)));
-    const soOrganizaP = seguro(timesEmQueSoOrganiza(userId));
-    const baseP = Promise.all([vinculosP, soOrganizaP]);
+    // Os vínculos e o "só organizo" saem do cache dos times da pessoa (60 s, esvaziado a cada escrita em times/vínculos —
+    // utils/vinculosDaPessoa.js): na maioria das aberturas a fila começa já nos jogos.
+    const baseP = medir(res, 'vinculos', seguro(inicioService.obterVinculosDaPessoa(userId)))
+      .then((b) => [b?.vinculos || null, b?.soOrganiza || null]);
+    const vinculosP = baseP.then(([vinculos]) => vinculos);
 
     // Os times: montados na hora a partir dos vínculos. Se a leitura deles falhou, o caminho antigo (cada parte lê o seu).
     const teamsP = medir(res, 'teams', baseP.then(([vinculos, soOrganiza]) => (
       vinculos ? { teams: inicioService.montarTeams(vinculos, soOrganiza || new Set()) } : seguro(inicioService.obterTeams(userId))
     )));
+    // Leituras que DUAS partes faziam iguais saem uma vez e são divididas (cada parte, se a divisão falhar, lê a sua):
+    //   · os pedidos de entrada pendentes dos meus times de admin — o badge do chip e o "Seu time";
+    //   · o perfil — o "me" e o anúncio (idade e plano);
+    //   · os meus votos em todos os times — a votação pendente e o status da votação do time principal;
+    //   · os jogos crus da lista do Início — o "Seu time" lê deles os próximos e os últimos de cada time.
+    const ehAdmin = (t) => t?.teams?.some((x) => x.role === 'admin');
+    const pedidosAdminP = teamsP.then((t) => (ehAdmin(t) ? inicioService.lerPedidosPendentes(t.teams) : null)).catch(() => null);
+    const perfilP = inicioService.lerPerfil(userId).catch(() => null);
+    const meusVotosP = vinculosP.then((v) => (v ? inicioService.lerMeusVotos(userId, [...new Set(v.map((m) => m.team_id))]) : null)).catch(() => null);
+    let entregarJogos;
+    const jogosBrutosP = new Promise((resolve) => { entregarJogos = resolve; });
+
     // O contador de pedidos pendentes (badge do chip de quem administra) sai ao lado: ninguém espera por ele, só a resposta.
-    const pendentesP = teamsP.then((t) => (t?.teams && t.teams.some((x) => x.role === 'admin') ? seguro(inicioService.contarPedidosPendentes(t.teams)) : null));
+    const pendentesP = teamsP.then((t) => (ehAdmin(t) ? seguro(inicioService.contarPedidosPendentes(t.teams, { pedidos: pedidosAdminP })) : null));
+
+    const convitesP = medir(res, 'convites', baseP.then(([vinculos, soOrganiza]) => (
+      seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true, aoLerJogos: entregarJogos }))
+    )));
+    convitesP.finally(() => entregarJogos(null)); // a lista falhou (ou a pessoa não tem time): o "Seu time" lê os seus
 
     // As pendências do card "Seu time" (só quem administra algum time) — ao lado, ninguém espera por elas.
     const seuTimeP = medir(res, 'seu_time', teamsP.then((t) => (
-      t?.teams?.some((x) => x.role === 'admin') ? seguro(inicioService.obterSeuTime(t.teams)) : []
-    )));
-
-    const convitesP = medir(res, 'convites', baseP.then(([vinculos, soOrganiza]) => (
-      seguro(inicioService.obterConvites(userId, { vinculos, soOrganiza, limitar: true }))
+      ehAdmin(t) ? seguro(inicioService.obterSeuTime(t.teams, { pedidos: pedidosAdminP, jogos: jogosBrutosP })) : []
     )));
 
     // Time principal = a 1ª equipa (os vínculos vêm por created_at ASC — o mesmo critério que o Início já usava). Próximo
     // jogo = o 1º não-encerrado (a lista vem por data ASC — idem). Votação e campeonato só precisam do principal; o RSVP,
     // do próximo jogo. Tudo arranca no instante em que a sua dependência chega, não quando a onda anterior inteira acaba.
     const principalP = teamsP.then((teams) => teams?.teams?.[0] || null);
+    // O `revotar_pedido_em` do principal veio nos vínculos (o status da votação não precisa reler o time).
+    const revotarDoPrincipal = (vinculos, principal) => {
+      const linha = (vinculos || []).find((m) => m.teams?.id === principal.id);
+      return linha ? { revotarPedidoEm: linha.teams.revotar_pedido_em ?? null } : {};
+    };
     const onda2P = medir(res, 'onda2', Promise.all([
-      principalP.then((principal) => (principal ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal)) : null)),
+      Promise.all([principalP, vinculosP]).then(([principal, vinculos]) => (principal
+        ? seguro(inicioService.obterVotacaoStatus(principal.slug, userId, principal, { meusVotos: meusVotosP, ...revotarDoPrincipal(vinculos, principal) }))
+        : null)),
       principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonato(principal.slug, userId, principal)) : null)),
-      convitesP.then((convites) => {
+      Promise.all([convitesP, teamsP]).then(([convites, teams]) => {
         const proximo = (convites?.games || []).find((g) => g.status !== 'finished');
-        return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id })) : null;
+        // O meu papel no time do próximo jogo já está nos vínculos: o RSVP não precisa perguntar ao banco.
+        const role = (teams?.teams || []).find((x) => x.id === proximo?.team_id)?.role || null;
+        return proximo ? seguro(inicioService.obterRsvp(proximo.id, userId, { teamId: proximo.team_id, role })) : null;
       }),
       // O campeonato novo do time principal (todo membro vê): em andamento ou o campeão da última semana.
       principalP.then((principal) => (principal ? seguro(inicioService.obterCampeonatoNovo(principal, userId)) : null)),
     ]));
 
     const [me, teams, , convites, pedidos, votacoes_pendentes, denuncias_desfechos, ads, brilhante, pedidos_brilhante, onda2, seu_time] = await Promise.all([
-      medir(res, 'me', seguro(inicioService.obterMe(req.user, { base: baseP }))),
+      medir(res, 'me', seguro(inicioService.obterMe(req.user, { base: baseP, perfil: perfilP }))),
       teamsP,
       pendentesP,
       convitesP,
       medir(res, 'pedidos', seguro(inicioService.obterPedidos(userId))),
-      medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos })))),
+      medir(res, 'votacoes', vinculosP.then((vinculos) => seguro(inicioService.obterVotacoesPendentes(userId, { vinculos, meusVotos: meusVotosP })))),
       medir(res, 'denuncias', vinculosP.then((vinculos) => seguro(inicioService.obterDesfechosDenuncias(userId, { vinculos })))),
       // Vêm os slots de TODAS as páginas, não só o do Início. A
       // conta de servidor é a mesma (uma leitura do store, uma do usuário) e
       // poupa um `GET /api/ads?pagina=…` por tela — eram 4 dos 22 pedidos do
       // percurso que o dono mediu, ~500 ms cada, de Lisboa.
-      medir(res, 'ad', seguro(inicioService.obterAdsSessao(userId))),
+      medir(res, 'ad', seguro(inicioService.obterAdsSessao(userId, { perfil: perfilP }))),
       // O direito de gerar Brilhante vem JUNTO (SPEC-FIGURINHA-3 §7): o Início
       // mostra o cartão dourado "Você tem uma Brilhante para gerar" e dispara a
       // geração preguiçosa do pacote do time. Um pedido à parte só para isto

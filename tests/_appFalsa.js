@@ -261,6 +261,8 @@ async function subirApp({ producao = false } = {}) {
     falso.storage.operacoes.length = 0;
     falso.sessoes.clear();
     falso.chamadasAdmin.length = 0;
+    // Os times da pessoa ficam 60 s no cache do motor e só se esvaziam numa escrita PELO motor; aqui os dados mudam por baixo dele.
+    require('../utils/vinculosDaPessoa').esquecerVinculos(); // eslint-disable-line global-require
     for (const u of usuarios) falso.sessoes.set(jwtDe(u.id), { id: u.id, email: u.email, email_confirmed_at: '2026-01-01T00:00:00Z', app_metadata: {}, user_metadata: {} });
   }
 

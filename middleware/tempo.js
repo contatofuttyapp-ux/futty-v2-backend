@@ -94,7 +94,7 @@ function tempoPorRota(req, res, next) {
   const inicio = AGORA();
   const logar = process.env.NODE_ENV !== 'production';
 
-  res.locals._tempo = { inicio, fases: {}, faseDesde: inicio, marcou: false, consultouCache: false, cacheFrio: false };
+  res.locals._tempo = { inicio, inicioMs: performance.now(), fases: {}, faseDesde: inicio, marcou: false, consultouCache: false, cacheFrio: false };
 
   // res.end é o ponto comum de saída (res.json/res.send/res.redirect chamam-no
   // por baixo) — intercetado para poder pôr o header ANTES dos headers saírem
@@ -118,6 +118,22 @@ function tempoPorRota(req, res, next) {
       if (!logar && total > 300 && partes.length > 1) {
         console.log(`[tempo] ${ondeBateu(req)} ${Math.round(total)}ms — ${partes.join(' ')}`);
       }
+
+      // MEDIR_CONSULTAS=1 (dev e prova, utils/medirConsultas.js): as idas ao banco deste pedido, no log e num cabeçalho que a prova lê.
+      if (t.consultas) {
+        // eslint-disable-next-line global-require
+        const { resumir } = require('../utils/medirConsultas');
+        const r = resumir(t.consultas);
+        res.setHeader('X-Futty-Consultas', `idas=${r.idas}; fila=${r.fila}`);
+        const porAlvo = Object.entries(r.porAlvo).sort((a, b) => b[1] - a[1]).map(([alvo, n]) => `${alvo} ${n}`).join(' · ');
+        if (process.env.MEDIR_CONSULTAS_SILENCIO !== '1') console.log(`[consultas] ${ondeBateu(req)} ${Math.round(total)}ms · ${r.idas} idas · fila ${r.fila} · ${porAlvo}`);
+        // Uma linha por ida (saída → volta, em ms desde a chegada do pedido): o tempo de cada consulta, para achar a que segura a fila.
+        if (process.env.MEDIR_CONSULTAS_DETALHE === '1') {
+          for (const c of [...t.consultas].sort((a, b) => a.de - b.de)) {
+            console.log(`[consultas]   +${Math.round(c.de)} → ${c.ate == null ? 'depois da resposta' : `+${Math.round(c.ate)}`}  ${c.tipo} ${c.alvo}`);
+          }
+        }
+      }
     }
     return enviarOriginal.apply(res, args);
   };
@@ -131,4 +147,7 @@ function tempoPorRota(req, res, next) {
   pedidoAtual.run(res.locals._tempo, next);
 }
 
-module.exports = { tempoPorRota, marcarFase, medir, registrarCache, ondeBateu };
+/** O registro de tempo do pedido em curso (undefined fora de um pedido) — o medidor de consultas anota nele. */
+const pedidoDoMomento = () => pedidoAtual.getStore();
+
+module.exports = { tempoPorRota, marcarFase, medir, registrarCache, ondeBateu, pedidoDoMomento };

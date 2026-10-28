@@ -52,6 +52,8 @@ const { ensureCampeonatosBucket } = require('./utils/campeonatoStore');
 const { carregarModelo } = require('./utils/nsfwFilter');
 const { mediaUrls } = require('./middleware/mediaUrls');
 const { tempoPorRota } = require('./middleware/tempo');
+// As idas ao banco de cada pedido, no log (MEDIR_CONSULTAS=1, só fora de produção): ver utils/medirConsultas.js.
+if (process.env.MEDIR_CONSULTAS === '1' && process.env.NODE_ENV !== 'production') require('./utils/medirConsultas').ligar(supabase);
 const { privatizarBuckets } = require('./utils/storage');
 const adsStore = require('./utils/adsStore');
 const plataformaStore = require('./utils/plataformaStore');

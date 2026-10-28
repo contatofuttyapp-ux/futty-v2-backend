@@ -18,6 +18,7 @@ const denunciaStore = require('../utils/denunciaStore');
 const { pendenciasDoTime } = require('../utils/pendenciasAdmin'); // o card "Seu time"
 const { criarCache } = require('../utils/cacheQuente');
 const { idsQueSoOrganizam, timesEmQueSoOrganiza } = require('../utils/soOrganiza');
+const { vinculosDaPessoa } = require('../utils/vinculosDaPessoa'); // os times da pessoa, 60 s por instância
 const { jogosDeFundadorDaPessoa } = require('../utils/presencaDeFundador'); // os jogos do "N jogos" do Início
 const { jogoAconteceu } = require('../utils/jogoAconteceu'); // presença só conta depois do horário do jogo
 const { normalizarFuso, lerComFuso, temColuna } = require('../utils/fuso');
@@ -101,15 +102,17 @@ function calcFigurinhaStatus(status, statusEm) {
 
 /**
  * Usuário autenticado + stats agregadas. Garante a linha em public.users.
- * @param {{ base?: Promise<[object[]|null, Set<string>|null]> }} [opts] os vínculos e quem só organiza que o /api/inicio já leu
+ * @param {{ base?: Promise<[object[]|null, Set<string>|null]>, perfil?: Promise<object|null> }} [opts] os vínculos e quem só organiza
+ *   que o /api/inicio já leu, e a leitura do perfil (lerPerfil) que ele divide com o anúncio
  */
-async function obterMe(user, { base = null } = {}) {
+async function obterMe(user, { base = null, perfil: perfilP = null } = {}) {
   const userId = user.id;
-  await ensureUserRow(user);
-
-  const colunaNota = await colunaDaNota();
-  const [perfil, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows, jogosFundador] = await Promise.all([
-    obterPerfilResiliente(userId),
+  // Garantir a linha (um upsert a cada 10 min por pessoa) corre AO LADO das leituras, não antes delas: era uma ida inteira na
+  // fila do Início, paga justamente por quem volta ao app depois de um tempo. Só na primeira entrada da vida a linha ainda não
+  // existe quando o perfil é lido — aí o perfil é lido de novo depois do upsert (abaixo).
+  const garantirP = ensureUserRow(user);
+  const [perfilLido, jogosRows, gols, voteRows, slotRows, brilhanteRows, historicoRows, jogosFundador] = await Promise.all([
+    perfilP || obterPerfilResiliente(userId),
     supabase
       .from('game_players')
       .select('game_id, games ( data, status, cancelado )')
@@ -117,7 +120,7 @@ async function obterMe(user, { base = null } = {}) {
       .eq('confirmado', true)
       .then((r) => r.data),
     golosDoJogador(userId),
-    supabase.from('votes').select(colunaNota).eq('para_user_id', userId).then((r) => r.data),
+    colunaDaNota().then((colunaNota) => supabase.from('votes').select(colunaNota).eq('para_user_id', userId)).then((r) => r.data),
     supabase.from('user_avatar_slots').select('kit_id').eq('user_id', userId).then((r) => r.data),
     // tem_figurinha (abaixo): existência basta, .limit(1). r.data
     // vem null (não []) se a tabela/coluna faltar — tratado como "sem sinal
@@ -128,7 +131,9 @@ async function obterMe(user, { base = null } = {}) {
     base
       ? base.then(([vinculos, soOrganiza]) => jogosDeFundadorDaPessoa(userId, vinculos ? { vinculos, soOrganiza: soOrganiza || new Set() } : {}))
       : jogosDeFundadorDaPessoa(userId),
+    garantirP,
   ]);
+  const perfil = perfilLido || (await obterPerfilResiliente(userId));
 
   const jogados = (jogosRows || []).filter((r) => jogoAconteceu(r.games)).map((r) => r.game_id);
   // Jogos diferentes: a presença confirmada e a de fundador do mesmo jogo contam uma vez.
@@ -212,6 +217,14 @@ async function obterVinculos(userId) {
   return data || [];
 }
 
+/** Os vínculos e os times em que a pessoa só organiza, do cache dos times da pessoa (utils/vinculosDaPessoa.js). */
+function obterVinculosDaPessoa(userId) {
+  return vinculosDaPessoa(userId, async () => {
+    const [vinculos, soOrganiza] = await Promise.all([obterVinculos(userId), timesEmQueSoOrganiza(userId)]);
+    return { vinculos, soOrganiza };
+  });
+}
+
 // ─── GET /api/teams ───────────────────────────────────────────────────────────
 /** Os times da pessoa, com o papel, o `joga` e o que a Figurinha precisa do pacote — a partir dos vínculos já lidos. */
 function montarTeams(vinculos, soOrganiza) {
@@ -224,11 +237,24 @@ function montarTeams(vinculos, soOrganiza) {
     });
 }
 
-/** Pedidos de entrada pendentes por time (só onde sou admin) → badge no chip. Muda os objetos de `teams`. */
-async function contarPedidosPendentes(teams) {
+/** Os pedidos de entrada pendentes dos times que a pessoa administra ({ data: [{ team_id }] }). Uma leitura para o badge e o "Seu time". */
+function lerPedidosPendentes(teams) {
+  const adminIds = (teams || []).filter((t) => t.role === 'admin').map((t) => t.id);
+  if (!adminIds.length) return Promise.resolve({ data: [] });
+  return supabase.from('team_join_requests').select('team_id').in('team_id', adminIds).eq('status', 'pending');
+}
+
+/** A leitura dividida dos pedidos, se veio e deu certo; senão a própria. */
+const pedidosOuLer = (pedidos, teams) => Promise.resolve(pedidos).catch(() => null).then((r) => (r && !r.error ? r : lerPedidosPendentes(teams)));
+
+/**
+ * Pedidos de entrada pendentes por time (só onde sou admin) → badge no chip. Muda os objetos de `teams`.
+ * `pedidos`: a leitura de lerPedidosPendentes que o /api/inicio já fez (o "Seu time" usa a mesma).
+ */
+async function contarPedidosPendentes(teams, { pedidos = null } = {}) {
   const adminIds = teams.filter((t) => t.role === 'admin').map((t) => t.id);
   if (!adminIds.length) return teams;
-  const { data: peds } = await supabase.from('team_join_requests').select('team_id').in('team_id', adminIds).eq('status', 'pending');
+  const { data: peds } = await pedidosOuLer(pedidos, teams);
   const contagem = {};
   for (const p of peds || []) contagem[p.team_id] = (contagem[p.team_id] || 0) + 1;
   for (const t of teams) if (t.role === 'admin') t.pedidos_pendentes = contagem[t.id] || 0;
@@ -242,16 +268,43 @@ async function contarPedidosPendentes(teams) {
 const JOGO_PENDENCIA_COLS = 'id, team_id, data, status, cancelado, campeao_time_index, time_vencedor, sorteio_realizado, rsvp_aberto, rsvp_fechado, local';
 const ULTIMOS_PARA_PENDENCIA = 4; // o último que aconteceu, com folga para os cancelados
 
-async function obterSeuTime(teams) {
+/**
+ * Os jogos que o "Seu time" lê, tirados da lista que o Início JÁ trouxe (jogosDoInicio: todos os que vão acontecer + os últimos
+ * MARGEM_ULTIMOS de cada time): dá exatamente o que as consultas próprias davam — os próximos dos times de admin (até 4 por time, por
+ * data) e os ULTIMOS_PARA_PENDENCIA mais recentes de cada um —, sem ir ao banco de novo.
+ */
+function jogosDaPendencia(ids, brutos, agoraIso) {
+  const doTime = new Set(ids);
+  const proximos = brutos.filter((g) => doTime.has(g.team_id) && g.data && g.data >= agoraIso)
+    .sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : 0)).slice(0, ids.length * 4);
+  const passados = ids.map((id) => brutos.filter((g) => g.team_id === id && g.data && g.data < agoraIso)
+    .sort((a, b) => (a.data > b.data ? -1 : a.data < b.data ? 1 : 0)).slice(0, ULTIMOS_PARA_PENDENCIA));
+  return { proximos: { data: proximos }, passados: passados.map((data) => ({ data })) };
+}
+
+/**
+ * @param {object[]} teams os times da pessoa (montarTeams)
+ * @param {{ pedidos?: Promise, jogos?: Promise<object[]|null> }} [opts] o que o /api/inicio já leu: os pedidos pendentes
+ *   (lerPedidosPendentes) e os jogos crus da lista do Início. Sem eles (ou se a lista falhou), as consultas próprias.
+ */
+async function obterSeuTime(teams, { pedidos: pedidosLidos = null, jogos: jogosLidos = null } = {}) {
   const admin = (teams || []).filter((t) => t.role === 'admin');
   if (!admin.length) return [];
   const ids = admin.map((t) => t.id);
   const agoraIso = new Date().toISOString();
-  const [pedidos, proximos, passados, denuncias] = await Promise.all([
-    supabase.from('team_join_requests').select('team_id').in('team_id', ids).eq('status', 'pending'),
-    supabase.from('games').select(JOGO_PENDENCIA_COLS).in('team_id', ids).gte('data', agoraIso).order('data', { ascending: true }).limit(ids.length * 4),
-    Promise.all(ids.map((id) => supabase.from('games').select(JOGO_PENDENCIA_COLS).eq('team_id', id).lt('data', agoraIso)
-      .order('data', { ascending: false }).limit(ULTIMOS_PARA_PENDENCIA))),
+  const lerJogos = async () => {
+    const brutos = jogosLidos ? await jogosLidos : null;
+    if (brutos) return jogosDaPendencia(ids, brutos, agoraIso);
+    const [proximos, passados] = await Promise.all([
+      supabase.from('games').select(JOGO_PENDENCIA_COLS).in('team_id', ids).gte('data', agoraIso).order('data', { ascending: true }).limit(ids.length * 4),
+      Promise.all(ids.map((id) => supabase.from('games').select(JOGO_PENDENCIA_COLS).eq('team_id', id).lt('data', agoraIso)
+        .order('data', { ascending: false }).limit(ULTIMOS_PARA_PENDENCIA))),
+    ]);
+    return { proximos, passados };
+  };
+  const [pedidos, { proximos, passados }, denuncias] = await Promise.all([
+    pedidosOuLer(pedidosLidos, admin),
+    lerJogos(),
     Promise.all(ids.map((id) => Promise.resolve().then(() => casosDaEquipaComCache(id)).catch(() => []))),
   ]);
   const pedidosPorTime = {};
@@ -344,7 +397,9 @@ function aparar(listaFormatada) {
   return mantidos.sort((a, b) => cmp(quando(a), quando(b)));
 }
 
-async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false } = {}) {
+// `aoLerJogos(games)`: no modo `limitar` (o /api/inicio), recebe os jogos crus assim que chegam — o "Seu time" lê deles em vez de ir
+// ao banco de novo (ver jogosDaPendencia).
+async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDado = null, limitar = false, aoLerJogos = null } = {}) {
   // `eu_jogo` por jogo — quem só organiza o time não responde presença (a tela esconde o "Vou / Não vou").
   // O /api/inicio já leu os vínculos e o `joga` uma vez e os passa; sozinha (rota antiga) a função lê os seus.
   const [memberships, soOrganiza] = vinculos
@@ -378,6 +433,7 @@ async function obterConvites(userId, { vinculos = null, soOrganiza: soOrganizaDa
     supabase.from('rsvp_espera').select('game_id, posicao').eq('user_id', userId),
   ]);
   if (error) throw new HttpError(500, error.message);
+  if (limitar && aoLerJogos) aoLerJogos(games || []);
   const filaPorJogo = new Map((minhaFila || []).map((r) => [r.game_id, r.posicao]));
 
   const counts = {};
@@ -452,7 +508,14 @@ async function obterPedidos(userId) {
 //   · os dados das equipas vêm embutidos no team_members (mata a query `teams`);
 //   · as presenças vêm embutidas nos jogos, e as minhas e as dos colegas saem
 //     do mesmo conjunto (matam as duas idas a game_players).
-async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
+/** Os meus votos nos times dados ({ data: [{ team_id, para_user_id, updated_at }] }): a votação pendente e o status da votação leem daqui. */
+function lerMeusVotos(userId, teamIds) {
+  if (!teamIds?.length) return Promise.resolve({ data: [] });
+  return supabase.from('votes').select('team_id, para_user_id, updated_at').eq('de_user_id', userId).in('team_id', teamIds);
+}
+
+// `meusVotos`: a leitura de lerMeusVotos que o /api/inicio já fez (uma ida para as duas partes que falam de votação).
+async function obterVotacoesPendentes(userId, { vinculos = null, meusVotos = null } = {}) {
   // O /api/inicio passa os vínculos que já leu (uma consulta a menos, e uma ida a menos na fila).
   const minhas = vinculos || (await supabase
     .from('team_members')
@@ -463,7 +526,8 @@ async function obterVotacoesPendentes(userId, { vinculos = null } = {}) {
   if (!teamIds.length) return { pendentes: [] };
 
   const [{ data: votos }, { data: jogosDasEquipas }] = await Promise.all([
-    supabase.from('votes').select('team_id, para_user_id, updated_at').eq('de_user_id', userId).in('team_id', teamIds),
+    // A leitura dividida, se veio e deu certo; senão a própria.
+    Promise.resolve(meusVotos).catch(() => null).then((r) => (r && !r.error ? r : lerMeusVotos(userId, teamIds))),
     // Só pede avaliação de quem o usuário REALMENTE jogou junto — jogos já
     // ENCERRADOS em que ambos estiveram confirmados.
     supabase.from('games').select('id, team_id, data, status, cancelado, game_players ( user_id, confirmado )').in('team_id', teamIds),
@@ -532,14 +596,20 @@ async function obterDesfechosDenuncias(userId, { vinculos = null } = {}) {
 // papel — o /api/inicio sabe, veio do obterTeams — salta o requireTeamMember,
 // que é mais uma ida ao banco para confirmar o que já se sabe. A rota solta
 // continua a chamar sem ele e a validar como sempre.
-async function obterVotacaoStatus(slug, userId, conhecido = null) {
+// `ja`: o que o /api/inicio já leu — `meusVotos` (lerMeusVotos de todos os times) e `revotarPedidoEm` (veio nos vínculos). Cada um
+// que vier poupa uma ida; a rota solta não passa nada e lê tudo.
+async function obterVotacaoStatus(slug, userId, conhecido = null, ja = {}) {
   const team = conhecido?.id && conhecido?.role ? conhecido : (await requireTeamMember(slug, userId)).team;
 
   // Independentes entre si depois de `team` resolvido: saem em paralelo, não em 3 awaits em série.
   const [{ data: membros }, { data: meus }, { data: teamRow }] = await Promise.all([
     supabase.from('team_members').select('user_id').eq('team_id', team.id),
-    supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId),
-    supabase.from('teams').select('revotar_pedido_em').eq('id', team.id).maybeSingle(),
+    Promise.resolve(ja.meusVotos).catch(() => null).then((r) => (r && !r.error
+      ? { data: (r.data || []).filter((v) => v.team_id === team.id) }
+      : supabase.from('votes').select('para_user_id, updated_at').eq('team_id', team.id).eq('de_user_id', userId))),
+    'revotarPedidoEm' in ja
+      ? { data: { revotar_pedido_em: ja.revotarPedidoEm } }
+      : supabase.from('teams').select('revotar_pedido_em').eq('id', team.id).maybeSingle(),
   ]);
   const total = (membros || []).filter((m) => m.user_id !== userId).length;
   const votados = new Set((meus || []).map((v) => v.para_user_id)).size;
@@ -591,9 +661,10 @@ async function obterCampeonatoNovo(principal, userId) {
 // `teamId`: o /api/inicio já sabe de que time é o próximo jogo (veio na lista de jogos). Com ele, o jogo e tudo o
 // que só precisa do time e do jogo saem NA MESMA ida ao banco — em fila seriam duas (loadGame, e só depois o resto). Se o jogo
 // disser outro time, volta ao caminho de sempre.
-async function obterRsvp(gameId, userId, { teamId = null } = {}) {
+// `role`: o meu papel no time `teamId`, que o /api/inicio já sabe pelos vínculos (poupa o getRole).
+async function obterRsvp(gameId, userId, { teamId = null, role: papelSabido = null } = {}) {
   const consultasDoTime = (tid) => [
-    getRole(tid, userId),
+    papelSabido && tid === teamId ? papelSabido : getRole(tid, userId),
     supabase.from('team_members').select('users ( id, nome, nome_jogador, avatar_url, avatar_generico )').eq('team_id', tid),
     supabase.from('rsvp_respostas').select('user_id, status').eq('game_id', gameId),
     supabase.from('rsvp_espera').select('user_id, posicao').eq('game_id', gameId).order('posicao', { ascending: true }),
@@ -704,12 +775,14 @@ function metadeDasVezes(userId, hoje) {
  * idade e o plano de quem pede. Lido UMA vez (em vez de cinco leituras iguais à
  * tabela `users`, uma por página servida numa sessão).
  */
-async function contextoDoAnuncio(userId) {
+// `perfil`: a leitura do perfil que o /api/inicio já fez (lerPerfil traz birthdate e plan); sem ela, a consulta própria.
+async function contextoDoAnuncio(userId, { perfil = null } = {}) {
   const store = await gabineteStore.ler();
   let adulto = false;
   let plano = 'free';
   if (userId && store.ads_ativo !== false) {
-    const { data: u } = await supabase.from('users').select('birthdate, plan').eq('id', userId).maybeSingle();
+    const lido = perfil ? await perfil.catch(() => null) : null;
+    const u = lido || (await supabase.from('users').select('birthdate, plan').eq('id', userId).maybeSingle()).data;
     adulto = ehAdulto(u && u.birthdate);
     plano = u?.plan || 'free';
   }
@@ -761,8 +834,8 @@ const PAGINAS_COM_AD = ['inicio', 'resenha', 'ranking', 'figurinha', 'sorteio', 
  * As campanhas não mudam no meio de uma sessão (a rotação é por minuto), por
  * isso vêm todas juntas e o app guarda-as por alguns minutos.
  */
-async function obterAdsSessao(userId) {
-  const contexto = await contextoDoAnuncio(userId);
+async function obterAdsSessao(userId, { perfil = null } = {}) {
+  const contexto = await contextoDoAnuncio(userId, { perfil });
   const paginas = {};
   for (const p of PAGINAS_COM_AD) paginas[p] = escolherAd(p, contexto, userId).ad;
   return { paginas, validadeMs: VALIDADE_ADS_MS };
@@ -776,9 +849,13 @@ const VALIDADE_ADS_MS = 4 * 60 * 1000;
 module.exports = {
   obterSeuTime,
   obterMe,
+  lerPerfil: obterPerfilResiliente,
+  lerMeusVotos,
   obterVinculos,
+  obterVinculosDaPessoa,
   montarTeams,
   contarPedidosPendentes,
+  lerPedidosPendentes,
   obterTeams,
   obterConvites,
   obterPedidos,

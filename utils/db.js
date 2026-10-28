@@ -8,6 +8,7 @@ const { HttpError, foraDoTime } = require('./http');
 const { RATING_DEFAULT } = require('./helpers');
 const { chaveSecreta } = require('./chavesSupabase');
 const { lerComFuso } = require('./fuso');
+const { fetchComLigacaoQuente } = require('./ligacaoQuente');
 
 // Só a chave secreta (SUPABASE_SECRET_KEY, sb_secret_…). Ver utils/chavesSupabase.js.
 const { SUPABASE_URL } = process.env;
@@ -18,8 +19,10 @@ if (!SUPABASE_URL || !CHAVE_SECRETA) {
 }
 
 // Cliente admin (chave secreta) — uso exclusivo no servidor, ignora RLS.
+// O fetch segura a ligação ociosa por 30 s em vez dos 4 s do padrão (utils/ligacaoQuente.js).
 const supabase = createClient(SUPABASE_URL, CHAVE_SECRETA, {
   auth: { autoRefreshToken: false, persistSession: false },
+  global: { fetch: fetchComLigacaoQuente },
 });
 
 /** Procura um time pelo slug. Devolve null se não existir OU se estiver
