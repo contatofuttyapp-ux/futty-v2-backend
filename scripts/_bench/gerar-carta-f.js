@@ -8,8 +8,8 @@ const { supabase } = require('../../utils/db');
 fal.config({ credentials: process.env.FAL_KEY });
 
 const SCR = 'C:/Users/phfer/AppData/Local/Temp/claude/C--Users-phfer/e6d3f9a7-8e16-4cba-95ea-1c38c8ef7b1b/scratchpad';
-const PLATE = 'c:/Users/phfer/Desktop/FUT/FUTTY-V2/frontend/public/golden-plate.jpg';
-const LOGO  = 'c:/Users/phfer/Desktop/FUT/FUTTY-V2/frontend/public/futty-logo-flat.png';
+const PLATE = 'c:/Users/phfer/Desktop/FUT/APP/codigo/frontend/public/golden-plate.jpg';
+const LOGO  = 'c:/Users/phfer/Desktop/FUT/APP/codigo/frontend/public/futty-logo-flat.png';
 
 const PROMPT = `Create ONE luxury playing card, portrait orientation, filling the ENTIRE frame edge-to-edge (the card IS the image, no background around it).
 

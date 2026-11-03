@@ -1,7 +1,7 @@
 # FUTTY — Constituição (backend)
 
 Node + Express + Supabase (service_role em `utils/db.js`; PostgREST). Porta 3001,
-`node --watch`. Par do frontend canónico `FUTTY-V2/frontend` (ver a CLAUDE.md de lá
+`node --watch`. Par do frontend canónico `APP/codigo/frontend` (ver a CLAUDE.md de lá
 para o processo completo: mockup-first, look do utilizador, selo só após aprovação).
 
 ## Regras deste repo

@@ -31,7 +31,7 @@
 // Todas: birefnet e moldura Dark Gold, como o app entrega.
 //
 // CORRER (a fal só resolve na máquina do Pedro):
-//   cd FUTTY-V2/backend && node scripts/_bench/testar-prompt.js
+//   cd APP/codigo/backend && node scripts/_bench/testar-prompt.js
 //   --fotos <pasta>     omissão: C:\Users\phfer\Desktop\FUT\BANCADA-FOTOS
 //   --teto 1.00         recusa antes de gastar se a estimativa passar
 //   --so Gui,Renato     só estas fotos (prefixo do nome)

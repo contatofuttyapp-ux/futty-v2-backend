@@ -20,7 +20,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const ARQUIVO_PADRAO = path.join(__dirname, '..', '..', '..', 'CONTAS.md');
+const ARQUIVO_PADRAO = path.join(__dirname, '..', '..', '..', '..', 'EMPRESA', 'CONTAS.md');
 
 // Os serviços conhecidos: o id (o mesmo do SEED do gabineteStore, para casar com a linha que já existe)
 // e o site, que o CONTAS.md não tem. A chave é o começo do nome do serviço no arquivo, sem acento.

@@ -27,7 +27,7 @@ const { supabase } = require('../../utils/db');
 
 const SAIDA = path.join(__dirname, 'saida-producao');
 const EMAIL = 'demo-loja@futtymock.com';
-const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-senha.txt');
+const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', '..', 'EMPRESA', 'LOJA', 'demo-senha.txt');
 const arg = (n, o) => { const i = process.argv.indexOf(`--${n}`); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : o; };
 
 /** Achatamento da coroa (CLAUDE.md): ~0 cúpula normal; > 0,5 cabeça comida. */

@@ -372,10 +372,10 @@ async function imagemDebug(res) {
 module.exports = { medirUniforme, lerReferenciaKit, mascaraKit, imagemDebug, REGRAS, pct, num };
 
 // ── linha de comando ─────────────────────────────────────────────────────────
-const FUT = path.join(__dirname, '..', '..', '..', '..');
-const DEMO = path.join(FUT, 'LOJA', 'demo-avatares');
+const FUT = path.join(__dirname, '..', '..', '..', '..', '..');
+const DEMO = path.join(FUT, 'EMPRESA', 'LOJA', 'demo-avatares');
 // As imagens dos kits (cópia do bucket público `kits`) vivem fora do repositório, com a saída da bancada.
-const KITS = path.join(FUT, 'LOJA', 'uniforme-bancada', 'kits');
+const KITS = path.join(FUT, 'EMPRESA', 'LOJA', 'uniforme-bancada', 'kits');
 
 // O gabarito: as 9 V6 geradas, pela ordem em que foram geradas. Fiel em 4 de 9:
 // dono t1/t2 errados (faixa), t3 certo; Zé Gordo 2 de 3 com a manga preta

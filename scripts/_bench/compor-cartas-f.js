@@ -6,7 +6,7 @@ const path = require('path');
 const sharp = require('sharp');
 
 const SCR = 'C:/Users/phfer/AppData/Local/Temp/claude/C--Users-phfer/e6d3f9a7-8e16-4cba-95ea-1c38c8ef7b1b/scratchpad';
-const LOGO = 'c:/Users/phfer/Desktop/FUT/FUTTY-V2/frontend/public/futty-logo-flat.png';
+const LOGO = 'c:/Users/phfer/Desktop/FUT/APP/codigo/frontend/public/futty-logo-flat.png';
 
 async function silhueta(logoBuf, cor, mul) {
   const meta = await sharp(logoBuf).metadata();

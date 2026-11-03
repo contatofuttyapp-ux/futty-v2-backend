@@ -20,7 +20,7 @@ const SLUG = 'prova-convite-r20';
 const SENHA = 'Prova!Rodada20-2026';
 const PASTA_CAPTURAS = path.join(__dirname, '..', '..', '..', 'frontend', 'scripts', 'capturas');
 const EMAIL_DEMO = 'demo-loja@futtymock.com';
-const ARQ_SENHA_DEMO = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-senha.txt');
+const ARQ_SENHA_DEMO = path.join(__dirname, '..', '..', '..', '..', '..', 'EMPRESA', 'LOJA', 'demo-senha.txt');
 
 const PAPEIS = {
   capitao: 'prova-r20-capitao@futtymock.com',

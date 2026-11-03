@@ -27,7 +27,7 @@ const SORTEAR = args.includes('--sortear');
 const REAGENDAR = args.includes('--reagendar');
 const SEM_FIGURINHA = args.includes('--sem-figurinha');
 
-const LOJA = path.resolve(__dirname, '..', '..', '..', 'LOJA');
+const LOJA = path.resolve(__dirname, '..', '..', '..', '..', 'EMPRESA', 'LOJA');
 const ARQ_SENHA = path.join(LOJA, 'demo-senha.txt');
 const ARQ_ESTADO = path.join(LOJA, 'demo-estado.json');
 const FOTO_RESENHA = path.resolve(__dirname, '..', '..', 'frontend', 'public', 'stadium_bg.webp');

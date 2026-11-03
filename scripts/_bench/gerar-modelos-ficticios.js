@@ -189,7 +189,7 @@ async function rodarJovens(lista = MODELOS_JOVENS, teto = TETO_JOVENS) {
   const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
   const { lerKit, achatamento: medirCoroa, montarFigurinha } = require('./comum');
   const saida = path.join(__dirname, 'saida-modelos-jovens');
-  const REDES = path.join(__dirname, '..', '..', '..', '..', 'REDES', 'modelos');
+  const REDES = path.join(__dirname, '..', '..', '..', '..', '..', 'REDES', 'modelos');
   fs.mkdirSync(saida, { recursive: true });
   fs.mkdirSync(REDES, { recursive: true });
   const kit = lerKit('dark-gold');
@@ -304,7 +304,7 @@ async function rodarLoja() {
   const { gerarFigurinha, V6_ENDPOINT, BIREFNET_ENDPOINT } = require('../../utils/geracaoFigurinha');
   const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
   const { lerKit, achatamento: medirCoroa, montarFigurinha, baixar } = require('./comum');
-  const saida = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-avatares');
+  const saida = path.join(__dirname, '..', '..', '..', '..', '..', 'EMPRESA', 'LOJA', 'demo-avatares');
   fs.mkdirSync(saida, { recursive: true });
 
   const finalDono = flag('dono-final', '');

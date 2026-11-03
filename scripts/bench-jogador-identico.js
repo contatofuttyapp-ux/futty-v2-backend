@@ -2,7 +2,7 @@
 // BYTE A BYTE o mesmo corpo de antes. A versão ANTIGA sai do git, a de AGORA sai do disco, as duas
 // sobem no MESMO Express (em prefixos diferentes) e recebem o MESMO pedido, contra o banco de verdade.
 //
-//   cd C:\Users\phfer\Desktop\FUT\FUTTY-V2\backend
+//   cd C:\Users\phfer\Desktop\FUT\APP\codigo\backend
 //   node scripts/bench-jogador-identico.js
 //   node scripts/bench-jogador-identico.js --ref=HEAD~1        (depois de commitar)
 //   node scripts/bench-jogador-identico.js --slug=... --viewer=email@x.com

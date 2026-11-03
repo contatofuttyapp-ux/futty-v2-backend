@@ -35,7 +35,7 @@ const { sha256Hex } = require('../../utils/antiAbusoIA');
 const EMAIL = 'demo-loja@futtymock.com';
 const KIT = 'dark-gold';
 const FOTO = path.join(__dirname, 'estado-demo', 'foto-silhueta-original.jpg');
-const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-senha.txt');
+const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', '..', 'EMPRESA', 'LOJA', 'demo-senha.txt');
 const arg = (n, o) => { const i = process.argv.indexOf(`--${n}`); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : o; };
 const tem = (n) => process.argv.includes(`--${n}`);
 

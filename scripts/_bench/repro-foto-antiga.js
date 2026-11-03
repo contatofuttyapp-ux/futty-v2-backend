@@ -28,7 +28,7 @@ const { supabase } = require('../../utils/db');
 
 const FOTOS = path.join(__dirname, '..', '..', '..', '..', 'BANCADA-FOTOS');
 const EMAIL = 'demo-loja@futtymock.com';
-const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', 'LOJA', 'demo-senha.txt');
+const ARQUIVO_SENHA = path.join(__dirname, '..', '..', '..', '..', '..', 'EMPRESA', 'LOJA', 'demo-senha.txt');
 const arg = (n, o) => { const i = process.argv.indexOf(`--${n}`); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : o; };
 const tem = (n) => process.argv.includes(`--${n}`);
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');

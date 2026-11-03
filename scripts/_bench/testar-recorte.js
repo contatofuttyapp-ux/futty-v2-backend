@@ -39,7 +39,7 @@
 // braços levantados ou cabelo volumoso. Os dois são medidos e registrados; o do
 // rosto manda quando existe.
 //
-// CORRER (a partir de FUTTY-V2/backend):
+// CORRER (a partir de APP/codigo/backend):
 //   node scripts/_bench/testar-recorte.js --so-um             só o Gui
 //   node scripts/_bench/testar-recorte.js --resto             as outras 6
 //   --foto a,b         só as fotos cujo nome começa por um destes prefixos

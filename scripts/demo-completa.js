@@ -39,7 +39,7 @@ const DOMINIO = '@futtymock.com';
 const SLUG = 'vila-olimpica-fc-demo-vila';
 const EMAILS_DONO = ['contatofuttyapp@gmail.com', 'phferreiraborgesbackup@gmail.com'];
 
-const LOJA = path.resolve(__dirname, '..', '..', '..', 'LOJA');
+const LOJA = path.resolve(__dirname, '..', '..', '..', '..', 'EMPRESA', 'LOJA');
 const ARQ_ESTADO = path.join(LOJA, 'demo-completa-estado.json');
 const FOTO_CAMPO = path.resolve(__dirname, '..', '..', 'frontend', 'public', 'stadium_bg.webp');
 const BASE_KITS = `${process.env.SUPABASE_URL}/storage/v1/object/public/kits`;
@@ -952,7 +952,7 @@ function resumo(time, futuro, guardados, convite, camps, donos) {
   l('  · RANKING com 3 abas: hoje é lista única (as abas por período foram removidas).');
   l('');
   l('PARA APAGAR TUDO ISTO');
-  l('  cd /c/Users/phfer/Desktop/FUT/FUTTY-V2/backend && node scripts/demo-completa.js --limpar');
+  l('  cd /c/Users/phfer/Desktop/FUT/APP/codigo/backend && node scripts/demo-completa.js --limpar');
   l('  (só toca no que este script criou; a conta demo-loja e o Domingueira FC ficam intactos)');
   l('════════════════════════════════════════════════════════════════');
 }

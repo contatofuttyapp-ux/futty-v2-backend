@@ -3,7 +3,7 @@
 // (comum.js fundoSVG, SEM a moldura dourada — a moldura é a .fr do CSS, como no sorteio real),
 // janela 3:4 pelo topo (cabeça + ombros + peito), exportado em WebP 112×150 (2× os 56×75 de exibição)
 // com ≤ 6 KB cada (lei do app leve): a qualidade desce de 5 em 5 até caber.
-// Saída: FUTTY-V2/frontend/public/onboarding/<nome>.webp (servida do site, fora do pacote nativo).
+// Saída: APP/codigo/frontend/public/onboarding/<nome>.webp (servida do site, fora do pacote nativo).
 //
 // Uso: node scripts/_bench/exportar-bustos-onboarding.js
 const fs = require('fs');

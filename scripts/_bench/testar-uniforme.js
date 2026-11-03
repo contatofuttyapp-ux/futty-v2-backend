@@ -32,7 +32,7 @@
 // teto. Teto por geração US$0,112 (o custo da V6, CLAUDE.md): a variação que
 // passar dele numa geração é desqualificada e não gera mais.
 //
-// Uso (a partir de FUTTY-V2/backend):
+// Uso (a partir de APP/codigo/backend):
 //   node scripts/_bench/testar-uniforme.js --var v1-prompt --kit dark-gold [--fotos dono,careca]
 //   node scripts/_bench/testar-uniforme.js --remedir      mede de novo tudo o que está no disco (grátis)
 //   node scripts/_bench/testar-uniforme.js --folha        monta folha.png
@@ -51,9 +51,9 @@ const { preprocessarQuadrado } = require('../../utils/entradaFigurinha');
 const { lerKit, baixar } = require('./comum');
 const { medirUniforme, lerReferenciaKit, mascaraKit, imagemDebug, REGRAS, num, pct } = require('./medidor-uniforme');
 
-const FUT = path.join(__dirname, '..', '..', '..', '..');
-const DEMO = path.join(FUT, 'LOJA', 'demo-avatares');
-const SAIDA = path.join(FUT, 'LOJA', 'uniforme-bancada');
+const FUT = path.join(__dirname, '..', '..', '..', '..', '..');
+const DEMO = path.join(FUT, 'EMPRESA', 'LOJA', 'demo-avatares');
+const SAIDA = path.join(FUT, 'EMPRESA', 'LOJA', 'uniforme-bancada');
 const KITS_DIR = path.join(SAIDA, 'kits');
 const GERACOES = path.join(SAIDA, 'geracoes');
 const ARQ_CUSTOS = path.join(SAIDA, 'custos.json');
